@@ -1,0 +1,4094 @@
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  BarChart3,
+  Banknote,
+  Building,
+  Calculator,
+  CheckCircle,
+  MapPin,
+  ChefHat,
+  Clock,
+  ClipboardList,
+  CreditCard,
+  FileText,
+  Image as ImageIcon,
+  LayoutDashboard,
+  Lock,
+  Maximize2,
+  Monitor,
+  Edit2,
+  Package,
+  Pause,
+  Percent,
+  Plus,
+  ReceiptText,
+  RotateCcw,
+  RefreshCw,
+  Save,
+  Search,
+  Settings,
+  ShoppingCart,
+  Store,
+  Trash2,
+  Truck,
+  Users,
+  TrendingUp,
+  Utensils,
+  Warehouse,
+  XCircle,
+  Globe,
+  Palette,
+  Shield,
+  Download,
+  ArrowRightLeft
+} from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  AreaChart, Area
+} from 'recharts';
+import './styles.css';
+
+type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
+type EnabledModule = 'POS' | 'RESTAURANT';
+type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients' | 'Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
+type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'MULTI';
+
+type CashMovement = {
+  id: number;
+  type: 'IN' | 'OUT';
+  amount: number;
+  note: string;
+  time: string;
+  locationId?: number;
+};
+
+type DenominationCounts = {
+  200: number;
+  100: number;
+  50: number;
+  20: number;
+  10: number;
+  5: number;
+  2: number;
+  1: number;
+  0.5: number;
+};
+
+type Expense = {
+  id: number;
+  reference: string;
+  category: string;
+  amount: number;
+  date: string;
+  note: string;
+  paymentMethod: string;
+  locationId?: number;
+};
+
+type ExpenseForm = {
+  reference: string;
+  category: string;
+  amount: number | '';
+  date: string;
+  note: string;
+  paymentMethod: string;
+};
+
+
+type ProductVariation = {
+  id: number;
+  name: string;
+  sku: string;
+  barcode?: string | null;
+  salePrice: number;
+  purchasePrice: number;
+  stock: number;
+  lowStockAlert: number;
+};
+
+type Product = {
+  id: number;
+  name: string;
+  sku: string;
+  barcode?: string | null;
+  type: ProductType;
+  category: string;
+  brand?: string | null;
+  unit?: string;
+  imageUrl?: string | null;
+  salePrice: number;
+  purchasePrice: number;
+  tvaRate: number;
+  trackStock: boolean;
+  lowStockAlert: number;
+  stock: number;
+  isKitchenItem: boolean;
+  isVariable: boolean;
+  variations?: ProductVariation[];
+  isActive: boolean;
+};
+
+type Contact = {
+  id: number;
+  name: string;
+  type: string;
+  phone: string;
+  balance: number;
+  creditLimit: number;
+  lastActivity: string;
+  address?: string;
+  rewardPoints?: number;
+};
+
+type ProductForm = {
+  name: string;
+  salePrice: string;
+  categoryName: string;
+  barcode: string;
+  sku: string;
+  initialStock: string;
+  type: ProductType;
+  purchasePrice: string;
+  brandName: string;
+  unitName: string;
+  imageUrl: string;
+  tvaRate: string;
+  trackStock: boolean;
+  lowStockAlert: string;
+  isKitchenItem: boolean;
+  isVariable: boolean;
+  variations: { name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; }[];
+};
+
+type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
+type SaleLine = { productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; note?: string; };
+type SaleRecord = {
+  invoiceId?: number;
+  customerId?: number;
+  id: number;
+  ticket: string;
+  customer: string;
+  total: number;
+  subtotal?: number;
+  taxTotal?: number;
+  discountTotal?: number;
+  items: number;
+  method: PaymentMethod;
+  status: 'Payee' | 'Credit' | 'Brouillon' | 'Suspendue' | 'Devis' | 'Retour';
+  createdAt: string;
+  lines?: SaleLine[];
+  splitPayments?: { method: PaymentMethod; amount: number }[];
+  referenceNote?: string;
+  kitchenStatus?: 'PENDING' | 'READY';
+  locationId?: number;
+  pointsEarned?: number;
+  pointsUsed?: number;
+};
+
+type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'WAITER';
+
+type RolePermissions = Record<UserRole, string[]>;
+
+const allModuleLabels = ['Tableau de bord', 'POS', 'Produits', 'Clients', 'Fournisseurs', 'Stock', 'Achats', 'Depenses', 'Ventes', 'Paiements', 'Rapports', 'Caisses', 'Tables', 'Cuisine', 'Parametres'];
+
+const defaultRolePermissions: RolePermissions = {
+  ADMIN: [...allModuleLabels],
+  MANAGER: allModuleLabels.filter(m => m !== 'Parametres'),
+  CASHIER: ['POS', 'Clients'],
+  WAITER: ['Tables', 'Cuisine'],
+};
+
+type User = {
+  id: number;
+  name: string;
+  fullName?: string;
+  username?: string;
+  email: string;
+  role: UserRole;
+  avatarUrl?: string;
+};
+
+type RegisterHistory = {
+  id: number;
+  openedAt: string;
+  closedAt: string;
+  cashierName: string;
+  initialCash: number;
+  expectedCash: number;
+  actualCash: number;
+  difference: number;
+  status: 'Juste' | 'Ecart positif' | 'Ecart négatif';
+  locationId?: number;
+};
+
+type StockAdjustment = {
+  id: number;
+  productId: number;
+  productName: string;
+  date: string;
+  type: 'Perte' | 'Casse' | 'Inventaire' | 'Vol';
+  quantity: number;
+  reason: string;
+  user: string;
+};
+
+type PurchaseRecord = {
+  id: number;
+  reference: string;
+  supplier: string;
+  total: number;
+  status: 'Recu' | 'Partiel' | 'Brouillon' | 'Retour';
+  createdAt: string;
+  lines?: SaleLine[]; // Reuse SaleLine for simplicity
+  locationId?: number;
+};
+
+type Location = {
+  id: number;
+  name: string;
+  address: string;
+  phone: string;
+};
+
+
+
+const apiBase = 'http://127.0.0.1:4500';
+
+const apiFetch = async (url: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('taysrPOS_token');
+  const headers: Record<string, string> = { ...((options.headers as any) || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${apiBase}${url}`, { ...options, headers });
+  if (res.status === 401 || res.status === 403) {
+    window.dispatchEvent(new Event('auth-error'));
+  }
+  return res;
+};
+
+const productImage = (label: string, bg = '#dbeafe') => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs><rect width="320" height="220" rx="28" fill="url(#g)"/><rect x="94" y="38" width="132" height="148" rx="24" fill="#fff" stroke="#cbd5e1"/><circle cx="160" cy="88" r="28" fill="${bg}"/><rect x="118" y="130" width="84" height="12" rx="6" fill="#cbd5e1"/><rect x="130" y="150" width="60" height="10" rx="5" fill="#e2e8f0"/><text x="160" y="206" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#0f172a">${label}</text></svg>`)}`;
+
+const baseModules = [
+  ['Tableau de bord', LayoutDashboard, 'POS'],
+  ['POS', ReceiptText, 'POS'],
+  ['Produits', Package, 'POS'],
+  ['Clients', Users, 'POS'],
+  ['Fournisseurs', Truck, 'POS'],
+  ['Stock', Warehouse, 'POS'],
+  ['Achats', Store, 'POS'],
+  ['Depenses', Banknote, 'POS'],
+  ['Ventes', ClipboardList, 'POS'],
+    ['Factures', FileText, 'POS'],
+  ['Paiements', CreditCard, 'POS'],
+  ['Rapports', BarChart3, 'POS'],
+  ['Caisses', Lock, 'POS'],
+  ['Tables', Utensils, 'RESTAURANT'],
+  ['Cuisine', ChefHat, 'RESTAURANT'],
+  ['Parametres', Settings, 'POS'],
+] as const;
+
+
+
+
+const seedRegisterLogs: RegisterHistory[] = [
+  { id: 1, openedAt: 'Hier 08:30', closedAt: 'Hier 18:45', cashierName: 'Caisse 1', initialCash: 1000, expectedCash: 3500, actualCash: 3500, difference: 0, status: 'Juste' },
+  { id: 2, openedAt: 'Lun 08:15', closedAt: 'Lun 19:00', cashierName: 'Gérant Magasin', initialCash: 1500, expectedCash: 4200, actualCash: 4180, difference: -20, status: 'Ecart négatif' },
+];
+
+const seedUsers: User[] = [
+  { id: 1, name: 'Admin Principal', email: 'admin@taysr.com', role: 'ADMIN', avatarUrl: 'https://ui-avatars.com/api/?name=Admin+Principal&background=6366f1&color=fff' },
+  { id: 2, name: 'Gérant Magasin', email: 'gerant@taysr.com', role: 'MANAGER', avatarUrl: 'https://ui-avatars.com/api/?name=Gerant+Magasin&background=10b981&color=fff' },
+  { id: 3, name: 'Caisse 1', email: 'caisse1@taysr.com', role: 'CASHIER', avatarUrl: 'https://ui-avatars.com/api/?name=Caisse+1&background=f59e0b&color=fff' },
+];
+
+const emptyForm: ProductForm = {
+  name: '',
+  salePrice: '',
+  categoryName: 'General',
+  barcode: '',
+  sku: '',
+  initialStock: '0',
+  type: 'RETAIL',
+  purchasePrice: '0',
+  brandName: '',
+  unitName: 'pcs',
+  imageUrl: '',
+  tvaRate: '20',
+  trackStock: true,
+  lowStockAlert: '0',
+  isKitchenItem: false,
+  isVariable: false,
+  variations: [],
+};
+
+const formatMoney = (value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
+
+const typeLabel: Record<ProductType, string> = {
+  RETAIL: 'Article retail',
+  MENU_ITEM: 'Menu restaurant',
+  INGREDIENT: 'Ingredient cuisine',
+  SERVICE: 'Service',
+  BUNDLE: 'Pack',
+};
+
+const methodLabel: Record<PaymentMethod, string> = {
+  CASH: 'Especes',
+  CARD: 'Carte',
+  CREDIT: 'Credit client',
+  MULTI: 'Paiement multiple',
+};
+
+const pageIcon = (page: PageKey) => {
+  const found = baseModules.find(([label]) => label === page);
+  return found?.[1] || LayoutDashboard;
+};
+
+const PageHeader = ({ title, subtitle, action, icon: Icon }: { title: string; subtitle?: string; action?: React.ReactNode; icon?: any }) => (
+  <div className="modern-page-header">
+    <div className="header-content">
+      {Icon && <div className="header-icon-container"><Icon size={24} strokeWidth={2.5} /></div>}
+      <div>
+        <h1 className="modern-page-title">{title}</h1>
+        {subtitle && <p className="modern-page-subtitle">{subtitle}</p>}
+      </div>
+    </div>
+    {action && <div className="modern-page-actions">{action}</div>}
+  </div>
+);
+
+const App = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  
+  const [page, setPage] = useState<PageKey>('Tableau de bord');
+
+  const [isLocked, setIsLocked] = useState(false);
+  const [pinEntry, setPinEntry] = useState('');
+  
+  useEffect(() => {
+    const handleAuthError = () => {
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setIsLocked(false);
+      localStorage.removeItem('taysrPOS_token');
+    };
+    window.addEventListener('auth-error', handleAuthError);
+    return () => window.removeEventListener('auth-error', handleAuthError);
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${apiBase}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginEmail, password: loginPassword })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('taysrPOS_token', data.token);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        setIsLocked(false);
+      } else {
+        alert('Identifiant ou mot de passe incorrect');
+      }
+    } catch (err) {
+      alert('Erreur de connexion');
+    }
+  };
+
+  const handlePinUnlock = async () => {
+    if (!currentUser || pinEntry.length !== 4) return;
+    try {
+      const res = await fetch(`${apiBase}/api/auth/pin-unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, pin: pinEntry })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('taysrPOS_token', data.token);
+        setCurrentUser(data.user);
+        setIsAuthenticated(true);
+        setIsLocked(false);
+      } else {
+        alert('Code PIN incorrect');
+      }
+    } catch (err) {
+      alert('Erreur de connexion');
+    }
+    setPinEntry('');
+  };
+
+  const handleLock = () => {
+    setIsLocked(true);
+    setIsAuthenticated(false);
+  };
+
+
+
+
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [currentLocationId, setCurrentLocationId] = useState<number>(0);
+  const [zReportModalOpen, setZReportModalOpen] = useState(false);
+  const [actualCash, setActualCash] = useState('');
+  const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
+  const [cashMovementModalOpen, setCashMovementModalOpen] = useState(false);
+  const [cashMovementForm, setCashMovementForm] = useState<{type: 'IN' | 'OUT', amount: string, note: string}>({type: 'IN', amount: '', note: ''});
+  const [showDenominations, setShowDenominations] = useState(false);
+  const [denominations, setDenominations] = useState<DenominationCounts>({
+    200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 2: 0, 1: 0, 0.5: 0
+  });
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [expenseForm, setExpenseForm] = useState<ExpenseForm>({ reference: '', category: 'Autre', amount: '', date: new Date().toISOString().split('T')[0], note: '', paymentMethod: 'Espèces' });
+  const [products, setProducts] = useState<Product[]>([]);
+  const [filter, setFilter] = useState<ProductType | 'ALL'>('ALL');
+  const [dashboardLocationFilter, setDashboardLocationFilter] = useState<'ALL' | number>('ALL');
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [status, setStatus] = useState('Mode demo local pret');
+  const [loading, setLoading] = useState(false);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [customer, setCustomer] = useState<Contact>({ id: 0, name: 'Client comptoir', type: 'Client', phone: '-', balance: 0, creditLimit: 0, lastActivity: 'Aujourd hui' });
+  const [selectedVariableProduct, setSelectedVariableProduct] = useState<Product | null>(null);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
+    const [invoices, setInvoices] = useState<any[]>([]);
+    const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [draftSales, setDraftSales] = useState<SaleRecord[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
+  const [discountRate, setDiscountRate] = useState(0);
+  const [loyaltyPointsUsed, setLoyaltyPointsUsed] = useState(0);
+  const [showRecent, setShowRecent] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState('Tous');
+  const [contactSearch, setContactSearch] = useState('');
+  const [purchaseSearch, setPurchaseSearch] = useState('');
+  const [saleSearch, setSaleSearch] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState<'ALL' | 'Payee' | 'Credit'>('ALL');
+  const [receiptSale, setReceiptSale] = useState<SaleRecord | null>(null);
+  const [invoiceSale, setInvoiceSale] = useState<SaleRecord | null>(null);
+  const [productModalOpen, setProductModalOpen] = useState(false);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [settlingContact, setSettlingContact] = useState<Contact | null>(null);
+  const [settlementAmount, setSettlementAmount] = useState('');
+  const [suspendModalOpen, setSuspendModalOpen] = useState(false);
+  const [suspendType, setSuspendType] = useState<SaleRecord['status']>('Brouillon');
+  const [suspendNote, setSuspendNote] = useState('');
+  const [transactionsModalOpen, setTransactionsModalOpen] = useState(false);
+  const [transactionsTab, setTransactionsTab] = useState<'Finalisees' | 'Suspendues' | 'Brouillons' | 'Devis'>('Finalisees');
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [editLineForm, setEditLineForm] = useState({ price: '', discount: '', note: '' });
+  const [contactForm, setContactForm] = useState({ name: '', phone: '', creditLimit: '0', address: '' });
+  const [paymentForm, setPaymentForm] = useState({ cash: '0', card: '0', credit: '0' });
+  const [registerStatus, setRegisterStatus] = useState<'OPEN' | 'CLOSED'>('CLOSED');
+  const [registerLogs, setRegisterLogs] = useState<RegisterHistory[]>([]);
+  const [stockAdjustments, setStockAdjustments] = useState<StockAdjustment[]>([]);
+  const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+  const [adjustmentForm, setAdjustmentForm] = useState<{ productId: number | null, type: 'Perte' | 'Casse' | 'Inventaire' | 'Vol', quantity: string, reason: string }>({ productId: null, type: 'Casse', quantity: '', reason: '' });
+  const [stockView, setStockView] = useState<'STOCK' | 'HISTORY'>('STOCK');
+  const [registerDetails, setRegisterDetails] = useState({ openedAt: '', initialCash: 0, openedId: 0 });
+  const [openRegisterForm, setOpenRegisterForm] = useState({ initialCash: '' });
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [selectedTable, setSelectedTable] = useState('');
+  const [calcOpen, setCalcOpen] = useState(false);
+
+
+  const [calcDisplay, setCalcDisplay] = useState('0');
+  const [calcPrev, setCalcPrev] = useState<number | null>(null);
+  const [calcOp, setCalcOp] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations'>('general');
+  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => {
+    try {
+      const saved = localStorage.getItem('taysrPOS_rolePermissions');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return defaultRolePermissions;
+  });
+  const saveRolePermissions = (perms: RolePermissions) => {
+    setRolePermissions(perms);
+    localStorage.setItem('taysrPOS_rolePermissions', JSON.stringify(perms));
+  };
+  const [reportsTab, setReportsTab] = useState<'synthese' | 'ventes' | 'produits' | 'paiements'>('synthese');
+  const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('all');
+  const [tableFilter, setTableFilter] = useState<'all' | 'free' | 'occupied'>('all');
+  const [viewSelectedTable, setViewSelectedTable] = useState<string | null>(null);
+  const [kitchenFilter, setKitchenFilter] = useState<'all' | 'drinks' | 'food'>('all');
+  const [tableGroups, setTableGroups] = useState<any[]>([]);
+  const [companySettings, setCompanySettings] = useState({
+    companyName: 'TaysrERP Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
+    rc: '239', ice: '001454366000046', patente: '54509281', if: '4967057', inpe: '165002114',
+    defaultTva: '20', pricesIncludeTva: true,
+    invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance',
+    ticketHeader: 'TICKET DE CAISSE', ticketFooter: 'Merci de votre visite', ticketPaperWidth: 80,
+    primaryColor: '#3b82f6', showLogo: true, logoUrl: null as string | null,
+    autoLockMinutes: 5,
+    // New Template Toggles
+    showIceOnTicket: true, showCashierName: true, showCustomerInfo: true,
+    customTicketCss: '', customInvoiceCss: '',
+    loyaltyEnabled: true, pointsPerAmount: 10, amountPerPoint: 0.5,
+    // Scale Barcode Parsing
+    scaleEnabled: false, scalePrefix: '20', scaleType: 'WEIGHT' as 'WEIGHT' | 'PRICE', scaleSkuLength: 4
+  });
+  // Later this will come from Super Admin provisioning / tenant feature flags.
+  const enabledModules = useMemo<EnabledModule[]>(() => ['POS', 'RESTAURANT'], []);
+
+  const restaurantEnabled = enabledModules.includes('RESTAURANT');
+  const visibleTypes = useMemo<ProductType[]>(() => restaurantEnabled
+    ? ['RETAIL', 'MENU_ITEM', 'INGREDIENT', 'SERVICE']
+    : ['RETAIL', 'SERVICE', 'BUNDLE'], [restaurantEnabled]);
+  const visibleModules = useMemo(() => {
+    let modules = baseModules.filter(([, , module]) => module === 'POS' || enabledModules.includes(module));
+    if (currentUser) {
+      const allowed = rolePermissions[currentUser.role] || [];
+      modules = modules.filter(([label]) => allowed.includes(label as string));
+    }
+    return modules;
+  }, [enabledModules, currentUser, rolePermissions]);
+  const ActiveIcon = pageIcon(page);
+
+  const [dataLoading, setDataLoading] = useState(false);
+
+  const loadInvoices = async () => {
+    try {
+      const response = await apiFetch(`/api/invoices`);
+      if (response.ok) {
+        const data = await response.json();
+        setInvoices(data.invoices || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadSales = async () => {
+    try {
+      const response = await apiFetch(`/api/sales`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.sales)) setSales(data.sales);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadContacts = async () => {
+    try {
+      const response = await apiFetch(`/api/contacts`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.contacts)) {
+         setContacts(data.contacts);
+         if (customer.id === 0 && data.contacts.length > 0) {
+            setCustomer(data.contacts[0]);
+         }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadLocations = async () => {
+    try {
+      const response = await apiFetch(`/api/locations`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.locations) && data.locations.length > 0) {
+         setLocations(data.locations);
+         if (currentLocationId === 0) setCurrentLocationId(data.locations[0].id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadExpenses = async () => {
+    try {
+      const response = await apiFetch(`/api/expenses`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.expenses)) setExpenses(data.expenses);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadPurchases = async () => {
+    try {
+      const response = await apiFetch(`/api/purchases`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.purchases)) setPurchases(data.purchases);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadTables = async () => {
+    try {
+      const response = await apiFetch(`/api/restaurant/tables`);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.areas)) setTableGroups(data.areas);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadSessions = async () => {
+    try {
+      const [sessRes, movRes] = await Promise.all([
+         apiFetch(`/api/register/sessions`),
+         apiFetch(`/api/register/movements`)
+      ]);
+      const [sessData, movData] = await Promise.all([sessRes.json(), movRes.json()]);
+      if (Array.isArray(sessData.sessions)) setRegisterLogs(sessData.sessions);
+      if (Array.isArray(movData.movements)) setCashMovements(movData.movements);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+
+  const submitContact = async (e: React.FormEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (!contactForm.name.trim()) return;
+    
+    try {
+      const response = await apiFetch(`/api/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: contactForm.name,
+          type: 'Client',
+          phone: contactForm.phone,
+          creditLimit: Number(contactForm.creditLimit) || 0,
+          balance: 0,
+          address: contactForm.address,
+        }),
+      });
+      if (!response.ok) throw new Error('API unavailable');
+      const created = await response.json();
+      setContacts(current => [...current, created]);
+      setCustomer(created);
+      setCustomerModalOpen(false);
+      setContactForm({ name: '', phone: '', creditLimit: '0', address: '' });
+      setStatus('Client ajoute et selectionne');
+    } catch (err: any) {
+      setStatus('Erreur: Impossible d\'ajouter le client');
+    }
+  };
+
+  const markKitchenReady = async (saleId: number) => {
+        const stockUpdate = (p: Product) => {
+          if (!p.trackStock) return p;
+          const cartItem = cart.find(c => c.product.id === p.id);
+          if (!cartItem) return p;
+
+          if (p.isVariable && cartItem.variation) {
+             return {
+                ...p,
+                variations: p.variations?.map(v => v.id === cartItem.variation!.id ? { ...v, stock: v.stock - cartItem.quantity } : v)
+             };
+          }
+          return { ...p, stock: p.stock - cartItem.quantity };
+        };
+        setProducts(current => current.map(stockUpdate));
+    setSales(current => current.map(s => s.id === saleId ? { ...s, kitchenStatus: 'READY' } : s));
+    setDraftSales(current => current.map(s => s.id === saleId ? { ...s, kitchenStatus: 'READY' } : s));
+    try {
+      await apiFetch(`/api/sales/${saleId}/kitchen`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kitchenStatus: 'READY' }),
+      });
+    } catch {
+      // Local fallback already applied
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      const url = new URL('/api/products', apiBase);
+      if (filter !== 'ALL') url.searchParams.set('type', filter);
+      if (search.trim()) url.searchParams.set('search', search.trim());
+      if (currentLocationId) url.searchParams.set('locationId', currentLocationId.toString());
+      const response = await apiFetch(url.pathname + url.search);
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      const remoteProducts: Product[] = data.products || [];
+      setProducts(current => {
+        const remoteKeys = new Set(remoteProducts.map(product => product.sku || String(product.id)));
+        const q = search.trim().toLowerCase();
+        const localOnly = current.filter(product => {
+          const key = product.sku || String(product.id);
+          if (remoteKeys.has(key)) return false;
+          if (filter !== 'ALL' && product.type !== filter) return false;
+          if (!q) return true;
+          return [product.name, product.sku, product.barcode || '', product.category].some(value => value.toLowerCase().includes(q));
+        });
+        return [...localOnly, ...remoteProducts];
+      });
+      setStatus('Synchronise avec Postgres');
+    } catch {
+      setStatus('Mode hors ligne - API non disponible');
+      // No fallback!
+    }
+  };
+
+  useEffect(() => {
+    const initData = async () => {
+      setDataLoading(true);
+      await Promise.all([
+        loadInvoices(),
+          loadSales(),
+        loadContacts(),
+        loadLocations(),
+        loadExpenses(),
+        loadPurchases(),
+        loadSessions()
+      ]);
+      setDataLoading(false);
+    };
+    initData();
+  }, []);
+
+  useEffect(() => {
+    setDashboardLocationFilter(currentLocationId);
+  }, [currentLocationId]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(loadProducts, 180);
+    return () => window.clearTimeout(timeout);
+  }, [filter, search, restaurantEnabled, currentLocationId]);
+
+  const visibleProducts = useMemo(() => products.filter(product => restaurantEnabled || product.type !== 'MENU_ITEM'), [products, restaurantEnabled]);
+  const lowStockProducts = useMemo(() => visibleProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert), [visibleProducts]);
+  const cartSubtotal = useMemo(() => cart.reduce((sum, line) => {
+    const unitPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+    return sum + unitPrice * line.quantity;
+  }, 0), [cart]);
+  const cartLineDiscount = useMemo(() => cart.reduce((sum, line) => sum + line.discount * line.quantity, 0), [cart]);
+  const orderDiscount = useMemo(() => cartSubtotal * (discountRate / 100) + (loyaltyPointsUsed * companySettings.amountPerPoint), [cartSubtotal, discountRate, loyaltyPointsUsed, companySettings.amountPerPoint]);
+  const cartTax = useMemo(() => cart.reduce((sum, line) => {
+    const unitPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+    const lineNet = Math.max(0, (unitPrice - line.discount) * line.quantity);
+    return sum + (lineNet * line.product.tvaRate) / 100;
+  }, 0), [cart]);
+  const cartTotal = useMemo(() => Math.max(0, cartSubtotal - cartLineDiscount - orderDiscount + cartTax), [cartSubtotal, cartLineDiscount, orderDiscount, cartTax]);
+
+  useEffect(() => {
+    const channel = new BroadcastChannel('taysr-pos-channel');
+    channel.postMessage({
+      type: 'SYNC_CART',
+      cart,
+      cartTotal,
+      cartTax,
+      cartSubtotal,
+      cartLineDiscount,
+      orderDiscount,
+      customerName: customer.name
+    });
+    return () => channel.close();
+  }, [cart, cartTotal, cartTax, cartSubtotal, cartLineDiscount, orderDiscount, customer.name]);
+
+  const categories = useMemo(() => ['Tous', ...Array.from(new Set(visibleProducts.map(product => product.category)))], [visibleProducts]);
+  const paidSales = sales.filter(sale => sale.status === 'Payee');
+  const creditSales = sales.filter(sale => sale.status === 'Credit');
+  const todayRevenue = paidSales.reduce((sum, sale) => sum + sale.total, 0);
+  const grossMargin = visibleProducts.reduce((sum, product) => sum + Math.max(0, product.salePrice - product.purchasePrice) * Math.max(1, product.stock), 0);
+  const stats = useMemo(() => ({
+    total: visibleProducts.length,
+    lowStock: lowStockProducts.length,
+    services: visibleProducts.filter(product => product.type === 'SERVICE').length,
+    retail: visibleProducts.filter(product => product.type === 'RETAIL').length,
+  }), [visibleProducts, lowStockProducts]);
+
+  const updateForm = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => {
+    setForm(current => ({ ...current, [key]: value }));
+  };
+
+  const handleProductPhoto = (file?: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => updateForm('imageUrl', String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
+  
+  const addToCart = (product: Product, variation?: ProductVariation, qty: number = 1) => {
+    if (!product.isActive) return;
+    
+    if (product.isVariable && !variation) {
+      setSelectedVariableProduct(product);
+      return;
+    }
+
+    const lineId = variation ? `${product.id}-${variation.id}` : `${product.id}`;
+    
+    setCart(current => {
+      const existing = current.find(line => line.uniqueId === lineId);
+      if (existing) return current.map(line => line.uniqueId === lineId ? { ...line, quantity: line.quantity + qty } : line);
+      return [...current, { product, variation, quantity: qty, discount: 0, uniqueId: lineId }];
+    });
+    setPage('POS');
+    setSelectedVariableProduct(null);
+  };
+
+  const updateCartQty = (uniqueId: string, delta: number) => {
+    setCart(current => current
+      .map(line => line.uniqueId === uniqueId ? { ...line, quantity: Math.max(0, line.quantity + delta) } : line)
+      .filter(line => line.quantity > 0));
+  };
+
+  const updateLineDiscount = (uniqueId: string, value: string) => {
+    const discount = Math.max(0, Number(value || 0));
+    setCart(current => current.map(line => line.uniqueId === uniqueId ? { ...line, discount: Math.min(discount, line.variation ? line.variation.salePrice : line.product.salePrice) } : line));
+  };
+  // Barcode Scanner Integration
+  const barcodeBufferRef = useRef('');
+  const lastKeyTimeRef = useRef(0);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      const currentTime = Date.now();
+      if (currentTime - lastKeyTimeRef.current > 50) {
+        barcodeBufferRef.current = '';
+      }
+      lastKeyTimeRef.current = currentTime;
+
+      if (e.key === 'Enter') {
+        if (barcodeBufferRef.current.length > 2) {
+          const scannedCode = barcodeBufferRef.current;
+          barcodeBufferRef.current = '';
+          
+          let parsedProduct = products.find(p => p.barcode === scannedCode || p.sku === scannedCode);
+          let parsedQty = 1;
+
+          // Scale Barcode Parsing Logic
+          if (!parsedProduct && companySettings.scaleEnabled && scannedCode.startsWith(companySettings.scalePrefix) && scannedCode.length === 13) {
+            // Expected format: prefix(2) + SKU(scaleSkuLength) + data(...) + checksum(1)
+            const skuLength = companySettings.scaleSkuLength;
+            const skuCode = scannedCode.substring(2, 2 + skuLength);
+            const dataStr = scannedCode.substring(2 + skuLength, 12); // Up to 12th char (before checksum)
+
+            const scaleProduct = products.find(p => p.sku === skuCode);
+            if (scaleProduct) {
+              parsedProduct = scaleProduct;
+              const numericData = Number(dataStr);
+              if (companySettings.scaleType === 'WEIGHT') {
+                // Weight in grams, convert to KG
+                parsedQty = numericData / 1000;
+              } else {
+                // Price in centimes, convert to currency, then divide by unitPrice to get quantity
+                const priceValue = numericData / 100;
+                parsedQty = priceValue / scaleProduct.salePrice;
+              }
+            }
+          }
+
+          if (parsedProduct) {
+            if (parsedProduct.isVariable) {
+              setSelectedVariableProduct(parsedProduct);
+            } else {
+              addToCart(parsedProduct, undefined, parsedQty);
+              setStatus(`Scanné : ${parsedProduct.name} (Qté: ${parsedQty.toFixed(3)})`);
+            }
+          } else {
+            setStatus(`Code inconnu : ${scannedCode}`);
+          }
+        }
+      } else if (e.key.length === 1) {
+        barcodeBufferRef.current += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [products, addToCart]);
+
+
+  const clearCart = () => {
+    setCart([]);
+    setDiscountRate(0);
+    setStatus('Ticket annule');
+  };
+
+  const submitSale = async () => {
+    if (cart.length === 0) return;
+    setLoading(true);
+    
+    const lines: SaleLine[] = cart.map(line => {
+      const price = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+      return {
+        productId: line.product.id,
+        variationId: line.variation?.id,
+        name: line.variation ? `${line.product.name} (${line.variation.name})` : line.product.name,
+        sku: line.variation ? line.variation.sku : line.product.sku,
+        quantity: line.quantity,
+        unitPrice: price,
+        discount: line.discount,
+        tvaRate: line.product.tvaRate,
+        lineTotal: Math.max(0, (price - line.discount) * line.quantity),
+        note: line.note,
+      };
+    });
+  };
+
+  const salePayload = (method: PaymentMethod, statusName: 'FINAL' | 'DRAFT' | 'SUSPENDED' | 'QUOTE' = 'FINAL') => {
+    const payload: any = {
+      customerName: customer.name,
+      method,
+      status: statusName,
+      discountRate,
+      locationId: currentLocationId,
+      pointsEarned: companySettings.loyaltyEnabled ? Math.floor(cartTotal / companySettings.pointsPerAmount) : 0,
+      pointsUsed: loyaltyPointsUsed,
+      items: cart.map(line => ({ productId: line.product.id, quantity: line.quantity, discount: line.discount })),
+    };
+    if (method === 'MULTI') {
+      payload.splitPayments = [
+        ...(Number(paymentForm.cash) > 0 ? [{ method: 'CASH', amount: Number(paymentForm.cash) }] : []),
+        ...(Number(paymentForm.card) > 0 ? [{ method: 'CARD', amount: Number(paymentForm.card) }] : []),
+        ...(Number(paymentForm.credit) > 0 ? [{ method: 'CREDIT', amount: Number(paymentForm.credit) }] : []),
+      ];
+    }
+    return payload;
+  };
+
+  const localSaleFromCart = (method: PaymentMethod, statusName: SaleRecord['status']): SaleRecord => {
+    const sale: SaleRecord = {
+      id: Date.now(),
+      ticket: (statusName === 'Devis' ? 'DEV' : statusName === 'Suspendue' ? 'SUS' : statusName === 'Brouillon' ? 'BR' : 'TCK') + '-' + String(1030 + sales.length + draftSales.length).padStart(4, '0'),
+      customer: customer.name,
+      total: cartTotal,
+      subtotal: cartSubtotal,
+      taxTotal: cartTax,
+      discountTotal: cartLineDiscount + orderDiscount,
+      items: cart.reduce((sum, line) => sum + line.quantity, 0),
+      method,
+      status: statusName,
+      createdAt: 'Maintenant',
+      locationId: currentLocationId,
+      lines: cart.map(line => {
+        const price = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+        return {
+          productId: line.product.id,
+          variationId: line.variation?.id,
+          name: line.variation ? `${line.product.name} (${line.variation.name})` : line.product.name,
+          sku: line.variation ? line.variation.sku : line.product.sku,
+          quantity: line.quantity,
+          unitPrice: price,
+          discount: line.discount,
+          tvaRate: line.product.tvaRate,
+          lineTotal: Math.max(0, (price - line.discount) * line.quantity),
+          note: line.note,
+        };
+      }),
+      referenceNote: suspendNote || (selectedTable ? `Table ${selectedTable}` : undefined),
+      pointsEarned: companySettings.loyaltyEnabled ? Math.floor(cartTotal / companySettings.pointsPerAmount) : 0,
+      pointsUsed: loyaltyPointsUsed,
+    };
+    if (method === 'MULTI') {
+      sale.splitPayments = [
+        ...(Number(paymentForm.cash) > 0 ? [{ method: 'CASH' as PaymentMethod, amount: Number(paymentForm.cash) }] : []),
+        ...(Number(paymentForm.card) > 0 ? [{ method: 'CARD' as PaymentMethod, amount: Number(paymentForm.card) }] : []),
+        ...(Number(paymentForm.credit) > 0 ? [{ method: 'CREDIT' as PaymentMethod, amount: Number(paymentForm.credit) }] : []),
+      ];
+    }
+    return sale;
+  };
+
+  const recordDraft = async (statusName: SaleRecord['status']) => {
+    if (!cart.length) return;
+    const apiStatus = statusName === 'Suspendue' ? 'SUSPENDED' : statusName === 'Devis' ? 'QUOTE' : 'DRAFT';
+    try {
+      const response = await apiFetch(`/api/sales`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(salePayload('MULTI', apiStatus)),
+      });
+      if (!response.ok) throw new Error((await response.json()).message || 'Erreur ticket');
+      const saved = await response.json();
+      setDraftSales(current => [saved, ...current]);
+      setSales(current => [saved, ...current]);
+      setReceiptSale(saved);
+      setCart([]);
+      setDiscountRate(0);
+      setStatus(`${statusName} ${saved.ticket} enregistre`);
+    } catch (error: any) {
+      setStatus(error?.message || `Erreur lors de l'enregistrement du ${statusName}`);
+    }
+    setSuspendModalOpen(false);
+    setSuspendNote('');
+  };
+
+  const resumeSale = (sale: SaleRecord) => {
+    setCart((sale.lines || []).map(line => {
+      const product = products.find(p => p.id === line.productId) || {
+        id: line.productId,
+        name: line.name,
+        sku: line.sku,
+        salePrice: line.unitPrice,
+        tvaRate: line.tvaRate,
+        barcode: '', type: 'RETAIL' as ProductType, category: 'General', brand: null, imageUrl: '', purchasePrice: 0, trackStock: false, lowStockAlert: 0, stock: 0, isKitchenItem: false, isActive: true, isVariable: false
+      };
+      let variation = undefined;
+      if (line.variationId && product.isVariable) {
+         variation = product.variations?.find(v => v.id === line.variationId);
+      }
+      const uniqueId = variation ? `${product.id}-${variation.id}` : `${product.id}`;
+      const defaultPrice = variation ? variation.salePrice : product.salePrice;
+      return { product, variation, uniqueId, quantity: line.quantity, discount: line.discount, customPrice: line.unitPrice !== defaultPrice ? line.unitPrice : undefined, note: line.note };
+    }));
+    const foundContact = contacts.find(c => c.name === sale.customer);
+    if (foundContact) setCustomer(foundContact);
+    if (sale.referenceNote?.startsWith('Table ')) {
+      setSelectedTable(sale.referenceNote.replace('Table ', ''));
+    }
+    
+    // Remove from draft state so we don't duplicate it if they save again
+    setDraftSales(current => current.filter(s => s.id !== sale.id));
+    setSales(current => current.filter(s => s.id !== sale.id));
+    
+    setTransactionsModalOpen(false);
+    setPage('POS');
+    setStatus(`Ticket ${sale.ticket} repris`);
+  };
+
+  const handleLoadToCart = (sale: SaleRecord) => {
+    if (cart.length > 0 && !confirm("Le panier actuel n'est pas vide. Voulez-vous le remplacer ?")) {
+      return;
+    }
+    const newCart: CartLine[] = sale.lines ? 
+      sale.lines.map(line => {
+        const product = products.find(p => p.id === line.productId);
+        if (!product) return null;
+        let variation = undefined;
+        if (product.isVariable && product.variations && line.sku !== product.sku) {
+          variation = product.variations.find(v => v.sku === line.sku);
+        }
+        return { product, quantity: line.quantity, discount: 0, variation, customPrice: line.unitPrice } as CartLine;
+      }).filter(Boolean) as CartLine[]
+    : [];
+    
+    setCart(newCart);
+    const savedCustomer = contacts.find(c => c.name === sale.customer);
+    if (savedCustomer) setCustomer(savedCustomer);
+    
+    setDiscountRate(sale.discountTotal ? Math.round((sale.discountTotal / (sale.total + sale.discountTotal)) * 100) : 0);
+    setLoyaltyPointsUsed(sale.pointsUsed || 0);
+    
+    setReceiptSale(null);
+    setPage('POS');
+  };
+
+  const handleReturnSale = (saleId: number) => {
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale || sale.status !== 'Payee') return;
+
+    // 1. Update sale status
+    setSales(current => current.map(s => s.id === saleId ? { ...s, status: 'Retour' } : s));
+
+    // 2. Restore product stock
+    if (sale.lines) {
+      setProducts(current => current.map(p => {
+        const line = sale.lines?.find(l => l.productId === p.id);
+        if (line && p.trackStock) {
+          return { ...p, stock: p.stock + line.quantity };
+        }
+        return p;
+      }));
+    }
+
+    // 3. Revert customer balance / loyalty points
+    if (sale.customer !== 'Client comptoir') {
+      setContacts(current => current.map(c => {
+        if (c.name === sale.customer) {
+          return {
+            ...c,
+            rewardPoints: Math.max(0, (c.rewardPoints || 0) - (sale.pointsEarned || 0) + (sale.pointsUsed || 0)),
+            // Revert balance if sale had credit
+            balance: sale.method === 'CREDIT' ? Math.max(0, c.balance - sale.total) : 
+                     (sale.splitPayments?.find(p => p.method === 'CREDIT')?.amount ? 
+                       Math.max(0, c.balance - (sale.splitPayments.find(p => p.method === 'CREDIT')?.amount || 0)) : c.balance)
+          };
+        }
+        return c;
+      }));
+    }
+
+    // 4. Revert register cash if it was CASH payment
+    if (sale.method === 'CASH') {
+      const currentCash = parseFloat(actualCash || '0');
+      setActualCash((currentCash - sale.total).toString());
+    }
+
+    setStatus(`Vente ${sale.ticket} retournée.`);
+    setReceiptSale(null);
+  };
+
+  const handleReturnPurchase = (purchaseId: number) => {
+    const purchase = purchases.find(p => p.id === purchaseId);
+    if (!purchase || purchase.status === 'Retour') return;
+
+    // 1. Update purchase status
+    setPurchases(current => current.map(p => p.id === purchaseId ? { ...p, status: 'Retour' } : p));
+
+    // 2. Deduct product stock
+    if (purchase.lines) {
+      setProducts(current => current.map(prod => {
+        const line = purchase.lines?.find(l => l.productId === prod.id);
+        if (line && prod.trackStock) {
+          return { ...prod, stock: prod.stock - line.quantity };
+        }
+        return prod;
+      }));
+    }
+
+    setStatus(`Achat ${purchase.reference} retourné.`);
+  };
+
+  const completeSale = async (method: PaymentMethod) => {
+    if (!cart.length) return;
+    
+    // Calculate points to earn
+    const pointsEarned = companySettings.loyaltyEnabled ? Math.floor(cartTotal / companySettings.pointsPerAmount) : 0;
+    
+    // Update local contact points
+    if (customer.name !== 'Client comptoir' && (pointsEarned > 0 || loyaltyPointsUsed > 0)) {
+      setContacts(current => current.map(c => 
+        c.name === customer.name 
+          ? { ...c, rewardPoints: Math.max(0, (c.rewardPoints || 0) + pointsEarned - loyaltyPointsUsed) } 
+          : c
+      ));
+      if (customer.name !== 'Client comptoir') {
+         setCustomer(c => ({...c, rewardPoints: Math.max(0, (c.rewardPoints || 0) + pointsEarned - loyaltyPointsUsed)}));
+      }
+    }
+
+    try {
+      const response = await apiFetch(`/api/sales`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(salePayload(method, 'FINAL')),
+      });
+      if (!response.ok) throw new Error((await response.json()).message || 'Erreur validation vente');
+      const saved = await response.json();
+      // Ensure backend returns points or we patch them in for receipt
+      saved.pointsEarned = pointsEarned;
+      saved.pointsUsed = loyaltyPointsUsed;
+      
+      setSales(current => [saved, ...current]);
+      setReceiptSale(saved);
+      setCart([]);
+      setDiscountRate(0);
+      setLoyaltyPointsUsed(0);
+      setStatus(`Vente ${saved.ticket} enregistree`);
+      await loadProducts();
+      setPage('Ventes');
+    } catch (error: any) {
+      setStatus(error?.message || `Erreur: Impossible d'enregistrer la vente`);
+    }
+  };
+
+  const submitProduct = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.name.trim() || !form.salePrice.trim()) {
+      setStatus('Nom et prix de vente obligatoires');
+      return;
+    }
+    setLoading(true);
+    const payload: ProductForm = {
+      ...form,
+      type: restaurantEnabled ? form.type : (form.type === 'MENU_ITEM' || form.type === 'INGREDIENT' ? 'RETAIL' : form.type),
+      isKitchenItem: restaurantEnabled && form.type === 'MENU_ITEM' && form.isKitchenItem,
+    };
+    try {
+      const response = await apiFetch(`/api/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error((await response.json()).message || 'Erreur creation produit');
+      const created = await response.json();
+      setProducts(current => [created, ...current]);
+      setForm(emptyForm);
+      setStatus('Produit ajoute');
+      setProductModalOpen(false);
+    } catch (error: any) {
+      setStatus(error?.message || 'Erreur de connexion a l\'API');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderDashboard = () => {
+    const dashboardFilteredSales = dashboardLocationFilter === 'ALL' 
+      ? sales 
+      : sales.filter(s => s.locationId === dashboardLocationFilter);
+      
+    const dashPaidSales = dashboardFilteredSales.filter(s => s.status === 'Payee');
+    const dashCreditSales = dashboardFilteredSales.filter(s => s.status === 'Credit');
+    const dashTodayRevenue = dashPaidSales.reduce((sum, sale) => sum + sale.total, 0);
+
+    const totalPurchases = visibleProducts.reduce((sum, p) => sum + (p.purchasePrice * (p.trackStock ? p.stock : 1)), 0);
+    const stockValue = visibleProducts.reduce((sum, p) => sum + (p.salePrice * (p.trackStock ? p.stock : 0)), 0);
+    const totalCreditDue = dashCreditSales.reduce((sum, s) => sum + s.total, 0);
+    const totalSellReturn = 0; // placeholder
+    const dashboardFilteredExpenses = dashboardLocationFilter === 'ALL' 
+      ? expenses 
+      : expenses.filter(e => e.locationId === dashboardLocationFilter);
+    const totalExpenses = dashboardFilteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+    const salesByDate = dashboardFilteredSales.reduce((acc, sale) => {
+      if (sale.status !== 'Payee') return acc;
+      const dateKey = sale.createdAt.split(' ')[0] || 'Aujourd';
+      acc[dateKey] = (acc[dateKey] || 0) + sale.total;
+      return acc;
+    }, {} as Record<string, number>);
+    const chartData = Object.keys(salesByDate).map(date => ({
+      name: date,
+      ventes: salesByDate[date]
+    }));
+    if (chartData.length === 0) {
+      chartData.push({ name: 'Lun', ventes: 120 }, { name: 'Mar', ventes: 350 }, { name: 'Mer', ventes: 280 }, { name: 'Jeu', ventes: 450 }, { name: 'Ven', ventes: 390 }, { name: 'Sam', ventes: 600 });
+    }
+
+    return (
+    <>
+      {/* Welcome header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', padding: '1.5rem 2rem', borderRadius: '18px', background: 'linear-gradient(135deg, #050b16, #0d1b2a)', color: '#fff' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>Bienvenue, Administrateur</h1>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px', fontWeight: 600 }}>Voici un aperçu de votre activité commerciale.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="primary-action" onClick={() => setPage('POS')}><ReceiptText size={16} /> Ouvrir POS</button>
+        </div>
+      </div>
+
+      {/* Row 1 - 4 KPI cards (like UltimatePOS top row) */}
+      <section className="metric-grid">
+        <Metric title="Total des ventes" value={formatMoney(dashTodayRevenue)} detail={`${dashPaidSales.length} ventes payées`} tone="blue" icon={ShoppingCart} />
+        <Metric title="Revenu net" value={formatMoney(dashTodayRevenue - totalSellReturn)} detail="Ventes - Retours" tone="green" icon={Banknote} />
+        <Metric title="Factures en attente" value={formatMoney(totalCreditDue)} detail={`${dashCreditSales.length} factures crédit`} tone="orange" icon={FileText} />
+        <Metric title="Retours de vente" value={formatMoney(totalSellReturn)} detail="Total retours" tone="violet" icon={RotateCcw} />
+      </section>
+
+      {/* Row 2 - 4 more KPI cards (like UltimatePOS second row) */}
+      <section className="metric-grid" style={{ marginBottom: '1rem' }}>
+        <Metric title="Total achats" value={formatMoney(totalPurchases)} detail={`${visibleProducts.length} articles`} tone="blue" icon={TrendingUp} />
+        <Metric title="Achats en attente" value={formatMoney(0)} detail="Aucun fournisseur en retard" tone="orange" icon={AlertTriangle} />
+        <Metric title="Valeur du stock" value={formatMoney(stockValue)} detail={`${lowStockProducts.length} alertes`} tone="green" icon={Warehouse} />
+        <Metric title="Dépenses" value={formatMoney(totalExpenses)} detail="Pas encore de données" tone="violet" icon={Banknote} />
+      </section>
+
+      {/* Full-width chart - Sells last 30 days (like UltimatePOS) */}
+      <section style={{ marginBottom: '1rem' }}>
+        <div className="panel wide-panel" style={{ width: '100%', padding: '1.5rem' }}>
+          <div className="panel-title compact" style={{ marginBottom: '1.5rem' }}><div><p>Ventes</p><h2>Ventes des derniers jours</h2></div><span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>{formatMoney(paidSales.reduce((s, sale) => s + sale.total, 0))} Total</span></div>
+          <div style={{ height: '280px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorVentes" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                <Area type="monotone" dataKey="ventes" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorVentes)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </section>
+
+      {/* Sales & Purchase payment dues tables (like UltimatePOS side-by-side) */}
+      <section className="workspace-grid" style={{ marginBottom: '1rem' }}>
+        <div className="panel wide-panel">
+          <div className="panel-title compact"><div><p>Paiements</p><h2>Factures client en attente</h2></div><button onClick={() => setPage('Paiements')}>Tout voir</button></div>
+          {creditSales.length > 0 ? (
+            <div className="cart-table" style={{ maxHeight: '260px', overflow: 'auto' }}>
+              <div className="data-head" style={{ gridTemplateColumns: '1fr 1fr .7fr' }}><span>Client</span><span>Ticket</span><span>Montant dû</span></div>
+              {creditSales.slice(0, 6).map(sale => (
+                <div className="data-row" key={sale.id} style={{ gridTemplateColumns: '1fr 1fr .7fr', cursor: 'pointer' }} onClick={() => setReceiptSale(sale)}>
+                  <span><strong>{sale.customer}</strong></span>
+                  <span>{sale.ticket}</span>
+                  <span style={{ color: '#ef4444', fontWeight: 700 }}>{formatMoney(sale.total)}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>Aucune facture en attente.</div>}
+        </div>
+        <div className="panel">
+          <div className="panel-title compact"><div><p>Priorite</p><h2>Actions rapides</h2></div></div>
+          <div className="action-list">
+            <button onClick={() => setPage('POS')}><ReceiptText size={17} /> Ouvrir le POS</button>
+            <button onClick={() => { setForm(emptyForm); setProductModalOpen(true); }}><Plus size={17} /> Ajouter un produit</button>
+            <button onClick={() => setPage('Clients')}><Users size={17} /> Gérer les clients</button>
+            <button onClick={() => setPage('Stock')}><Warehouse size={17} /> Alertes de stock</button>
+            <button onClick={() => setPage('Rapports')}><TrendingUp size={17} /> Voir les rapports</button>
+          </div>
+        </div>
+      </section>
+
+      {/* Stock Alerts table (like UltimatePOS) */}
+      <section style={{ marginBottom: '1rem' }}>
+        <div className="panel" style={{ width: '100%' }}>
+          <div className="panel-title compact"><div><p>Stock</p><h2>Alertes de stock ({lowStockProducts.length})</h2></div><button onClick={() => setPage('Stock')}>Tout voir</button></div>
+          {lowStockProducts.length > 0 ? (
+            <div className="cart-table" style={{ maxHeight: '240px', overflow: 'auto' }}>
+              <div className="data-head" style={{ gridTemplateColumns: '1.5fr 1fr .7fr' }}><span>Produit</span><span>Catégorie</span><span>Stock</span></div>
+              {lowStockProducts.slice(0, 8).map(p => (
+                <div className="data-row" key={p.id} style={{ gridTemplateColumns: '1.5fr 1fr .7fr' }}>
+                  <span><strong>{p.name}</strong><small>{p.sku}</small></span>
+                  <span>{p.category}</span>
+                  <span className="stock-warn">{p.stock}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>Aucune alerte de stock.</div>}
+        </div>
+      </section>
+
+      {/* Recent Sales (like UltimatePOS recent transactions) */}
+      <section>
+        <div className="panel" style={{ width: '100%' }}>
+          <div className="panel-title compact"><div><p>Activite</p><h2>Ventes recentes</h2></div><button onClick={() => setPage('Ventes')}>Tout voir</button></div>
+          <RecordTable sales={sales.slice(0, 5)} onOpenReceipt={setReceiptSale} />
+        </div>
+      </section>
+    </>
+    );
+  };
+
+  const registerProducts = visibleProducts.filter(product => {
+    const matchCategory = selectedCategory === 'Tous' || product.category === selectedCategory;
+    const q = search.trim().toLowerCase();
+    const matchSearch = !q || [product.name, product.sku, product.barcode || '', product.category].some(value => value.toLowerCase().includes(q));
+    return matchCategory && matchSearch;
+  });
+
+  const renderRegister = () => {
+    return (
+    <section className="pos-workspace">
+      {selectedVariableProduct && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setSelectedVariableProduct(null); }}>
+          <section className="receipt-panel" style={{ maxWidth: '500px', width: '95%' }}>
+            <div className="receipt-header"><div><p>Déclinaisons</p><h2>{selectedVariableProduct.name}</h2></div><button onClick={() => setSelectedVariableProduct(null)}><XCircle size={18} /></button></div>
+            <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem' }}>
+              <p style={{ color: '#64748b', margin: 0 }}>Sélectionnez la variation à ajouter au panier :</p>
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                {selectedVariableProduct.variations?.map(variation => (
+                  <button key={variation.id} className="ghost-action" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#f8fafc', textAlign: 'left', width: '100%' }} onClick={() => addToCart(selectedVariableProduct, variation)}>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '1rem', color: '#0f172a' }}>{variation.name}</strong>
+                      <small style={{ color: '#64748b' }}>Stock: {selectedVariableProduct.trackStock ? variation.stock : '-'}</small>
+                    </div>
+                    <span style={{ fontWeight: 700, color: '#3b82f6' }}>{formatMoney(variation.salePrice)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {registerStatus === 'CLOSED' ? (
+        <section className="pos-workspace" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' }}>
+          <div className="receipt-panel" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ background: '#e0e7ff', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: '#4f46e5' }}>
+              <Lock size={32} />
+            </div>
+            <h2>Caisse fermée</h2>
+            <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>Vous devez ouvrir la caisse pour commencer à encaisser.</p>
+            <div className="form-grid" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'left' }}>
+              <label><span>Fond de caisse initial (MAD)</span><input value={openRegisterForm.initialCash} onChange={e => setOpenRegisterForm({ initialCash: e.target.value })} inputMode="decimal" autoFocus /></label>
+              <button className="primary-action" style={{ marginTop: '0.5rem' }} onClick={async () => {
+                const amount = Number(openRegisterForm.initialCash || 0);
+                try {
+                  const response = await apiFetch(`/api/register/open`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ initialCash: amount, locationId: currentLocationId }),
+                  });
+                  if (!response.ok) throw new Error('API unavailable');
+                  const session = (await response.json()).session;
+                  setRegisterDetails({ openedAt: new Date().toLocaleString('fr-FR'), initialCash: amount, openedId: session.id });
+                  setRegisterStatus('OPEN');
+                  setStatus('Caisse ouverte avec succès');
+                } catch {
+                  setStatus('Erreur: Impossible d\'ouvrir la caisse');
+                }
+              }}>Ouvrir la caisse</button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+      <div className="pos-command-bar">
+        <div className="pos-location">
+          <strong>Lieu</strong>
+          <select value={currentLocationId} onChange={e => setCurrentLocationId(Number(e.target.value))} style={{ border: 'none', background: 'transparent', fontWeight: 600, color: '#334155', cursor: 'pointer', outline: 'none', padding: 0 }}>
+            {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+          </select>
+        </div>
+        {restaurantEnabled && (
+          <div className="pos-location" style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: '8px' }}>
+            <strong>Table</strong>
+            <select value={selectedTable} onChange={e => setSelectedTable(e.target.value)}>
+              <option value="">À emporter</option>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>Table {n}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="pos-clock"><Clock size={13} /> {new Date().toLocaleDateString('fr-FR')} {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+        <div className="pos-tools" aria-label="Actions POS">
+          <button title="Caisse" onClick={() => setZReportModalOpen(true)}><Lock size={15} /></button>
+          <button title="Mouvements de Caisse" onClick={() => setCashMovementModalOpen(true)}><ArrowRightLeft size={15} /></button>
+          <button title="Retour" onClick={() => setPage('Tableau de bord')}><ArrowLeft size={15} /></button>
+          <button title="Retour vente" onClick={() => { setTransactionsTab('Finalisees'); setTransactionsModalOpen(true); }}><RotateCcw size={15} /></button>
+          <button title="Tickets suspendus" onClick={() => { setTransactionsTab('Suspendues'); setTransactionsModalOpen(true); }}><Pause size={15} /></button>
+          <button title="Details POS" onClick={() => setZReportModalOpen(true)}><Store size={15} /></button>
+          <button title="Annuler" onClick={clearCart}><XCircle size={15} /></button>
+          <button title="Calculatrice" onClick={() => { setCalcDisplay('0'); setCalcPrev(null); setCalcOp(null); setCalcOpen(true); }}><Calculator size={15} /></button>
+          <button title="Écran Client" onClick={() => window.open('?mode=customer', '_blank', 'width=1024,height=768')}><Monitor size={15} /></button>
+          <button title={isFullscreen ? 'Quitter plein ecran' : 'Plein ecran'} onClick={() => {
+            if (!document.fullscreenElement) { document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {}); }
+            else { document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {}); }
+          }}><Maximize2 size={15} /></button>
+        </div>
+      </div>
+
+      <div className="pos-search-row">
+        <div className="customer-picker">
+          <Users size={16} />
+          <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
+            {contacts.filter(c => c.type.includes('Client')).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
+          </select>
+          <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
+        </div>
+        <label className="product-search"><Search size={16} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
+      </div>
+
+      <div className="pos-grid">
+        <div className="pos-sale-panel">
+          <div className="cart-table">
+            <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
+            {cart.length === 0 ? <div className="pos-empty"><ShoppingCart size={34} /><strong>Votre panier est vide</strong><span>Scannez un code-barres ou cliquez sur un produit.</span></div> : cart.map(line => {
+              const currentPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+              const lineNet = Math.max(0, (currentPrice - line.discount) * line.quantity);
+              return <div className="cart-row" key={line.uniqueId}>
+                <span>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>{line.product.name} {line.variation && <span style={{ color: '#3b82f6' }}>({line.variation.name})</span>} <button className="ghost-action" onClick={() => { setEditingLineId(line.uniqueId); setEditLineForm({ price: String(currentPrice), discount: String(line.discount), note: line.note || '' }); }} style={{ padding: '2px' }}><Edit2 size={13} /></button></strong>
+                  <small>{line.variation ? line.variation.sku : line.product.sku}</small>
+                  {line.note && <em style={{ fontSize: '0.75rem', color: '#64748b', display: 'block' }}>Note: {line.note}</em>}
+                </span>
+                <span className="qty-stepper"><button onClick={() => updateCartQty(line.uniqueId, -1)}>-</button><b>{line.quantity}</b><button onClick={() => updateCartQty(line.uniqueId, 1)}>+</button></span>
+                <span>{formatMoney(currentPrice)}</span>
+                <span style={{ fontSize: '0.9rem', color: line.discount > 0 ? '#ef4444' : 'inherit' }}>{line.discount > 0 ? formatMoney(line.discount) : '-'}</span>
+                <span>{formatMoney(lineNet)}</span>
+                <button className="icon-danger" onClick={() => updateCartQty(line.uniqueId, -line.quantity)}><Trash2 size={15} /></button>
+              </div>;
+            })}
+          </div>
+
+          <div className="pos-totals-strip">
+            <div><span>Sous-total</span><strong>{formatMoney(cartSubtotal)}</strong></div>
+            <div><span>Remise lignes</span><strong>{formatMoney(cartLineDiscount)}</strong></div>
+            <label><Percent size={15} /><span>Remise</span><input value={discountRate} onChange={event => setDiscountRate(Math.max(0, Math.min(100, Number(event.target.value || 0))))} inputMode="decimal" /></label>
+            <div><span>TVA</span><strong>{formatMoney(cartTax)}</strong></div>
+            <div className="grand-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div>
+          </div>
+        </div>
+
+        <aside className="pos-products-panel">
+          <div className="pos-tabs">{categories.map(category => <button key={category} className={selectedCategory === category ? 'selected' : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}</div>
+          <div className="pos-product-grid">
+            {registerProducts.map(product => <button className="pos-product-card" key={product.id} onClick={() => addToCart(product)}>
+              <span className="pos-product-photo">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={24} />}</span>
+              <strong>{product.name}</strong><span>{product.category}</span><em>{formatMoney(product.salePrice)}</em><small>{product.trackStock ? `${product.stock} stock` : 'Service'}</small>
+            </button>)}
+          </div>
+          {showRecent && <div className="recent-box"><div className="recent-title"><Clock size={15} /> Transactions recentes</div>{sales.filter(s => !s.locationId || s.locationId === currentLocationId).slice(0, 4).map(sale => <button key={sale.id}><span>{sale.ticket}</span><strong>{formatMoney(sale.total)}</strong><small>{sale.status}</small></button>)}</div>}
+        </aside>
+      </div>
+
+      <div className="pos-footer-actions">
+        <button className="danger" onClick={clearCart}><XCircle size={16} /> Annuler</button>
+        <button disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={16} /> Brouillon</button>
+        <button disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={16} /> Devis</button>
+        <button disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}><Pause size={16} /> Suspendre</button>
+        {restaurantEnabled && <button disabled={!cart.length || !cart.some(line => line.product.isKitchenItem)} onClick={() => {
+          setSuspendType('Suspendue');
+          setSuspendNote(selectedTable ? `Table ${selectedTable} - Cuisine` : 'Commande Cuisine');
+          // Automatically save as suspended
+          setTimeout(() => {
+            const btn = document.getElementById('btn-cuisine-auto-suspend');
+            if(btn) btn.click();
+          }, 0);
+        }} style={{ background: '#f59e0b', color: '#fff', border: 'none' }}><ChefHat size={16} /> Cuisine</button>}
+        {restaurantEnabled && <button id="btn-cuisine-auto-suspend" style={{display: 'none'}} onClick={() => recordDraft('Suspendue')}></button>}
+        <button disabled={!cart.length} className="primary-action" onClick={() => {
+          setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0' });
+          setPaymentModalOpen(true);
+        }} style={{ flex: 2, fontSize: '1.1rem' }}>Payer {formatMoney(cartTotal)}</button>
+        <button className="recent" onClick={() => setTransactionsModalOpen(true)}><Clock size={16} /> Transactions</button>
+      </div>
+
+      {customerModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setCustomerModalOpen(false); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={submitContact} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Client</p><h2>Nouveau client</h2></div><button type="button" onClick={() => setCustomerModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
+                <label><span>Nom complet *</span><input value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} placeholder="Ex: Jean Dupont" autoFocus /></label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <label><span>Téléphone</span><input value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} placeholder="+212 6..." /></label>
+                  <label><span>Plafond de crédit (MAD)</span><input value={contactForm.creditLimit} onChange={e => setContactForm({...contactForm, creditLimit: e.target.value})} inputMode="decimal" placeholder="0.00" /></label>
+                </div>
+                <label><span>Adresse</span><input value={contactForm.address} onChange={e => setContactForm({...contactForm, address: e.target.value})} placeholder="Adresse complète" /></label>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={() => setCustomerModalOpen(false)} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Enregistrer</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {paymentModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setPaymentModalOpen(false); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '700px', margin: 'auto' }}>
+            <div className="product-form-panel" style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Paiement</p><h2>Finaliser la vente</h2></div><button type="button" onClick={() => setPaymentModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: '2rem', marginTop: '1.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  <label>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem', display: 'block' }}>Espèces (MAD)</span>
+                    <input value={paymentForm.cash} onChange={e => setPaymentForm({...paymentForm, cash: e.target.value})} inputMode="decimal" style={{ fontSize: '1.5rem', padding: '1rem', height: 'auto', fontWeight: 'bold', color: '#16a34a', border: '2px solid #bbf7d0', backgroundColor: '#f0fdf4' }} autoFocus />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+                    {[20, 50, 100, 200].map(amt => (
+                      <button key={amt} className="ghost-action" style={{ padding: '0.5rem', fontSize: '1rem', fontWeight: 'bold' }} onClick={() => setPaymentForm({...paymentForm, cash: String((Number(paymentForm.cash) || 0) + amt)})}>+{amt}</button>
+                    ))}
+                    <button className="ghost-action" style={{ gridColumn: 'span 2', padding: '0.5rem', fontSize: '1rem', fontWeight: 'bold', background: '#e2e8f0', color: '#0f172a' }} onClick={() => setPaymentForm({...paymentForm, cash: String(cartTotal)})}>Montant Exact</button>
+                    <button className="ghost-action" style={{ gridColumn: 'span 2', padding: '0.5rem', fontSize: '1rem', fontWeight: 'bold', color: '#ef4444' }} onClick={() => setPaymentForm({...paymentForm, cash: '0'})}>Effacer</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <label>
+                      <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem', display: 'block' }}>Carte Bancaire</span>
+                      <input value={paymentForm.card} onChange={e => setPaymentForm({...paymentForm, card: e.target.value})} inputMode="decimal" style={{ fontSize: '1.2rem', padding: '0.75rem', height: 'auto' }} />
+                    </label>
+                    <label>
+                      <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem', display: 'block' }}>Crédit Client</span>
+                      <input value={paymentForm.credit} onChange={e => setPaymentForm({...paymentForm, credit: e.target.value})} inputMode="decimal" style={{ fontSize: '1.2rem', padding: '0.75rem', height: 'auto' }} />
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '1rem', border: '1px solid #e2e8f0' }}>
+                  
+                  {companySettings.loyaltyEnabled && customer.name !== 'Client comptoir' && ((customer.rewardPoints || 0) > 0 || loyaltyPointsUsed > 0) && (
+                    <div style={{ backgroundColor: '#eff6ff', padding: '1rem', borderRadius: '12px', border: '1px solid #bfdbfe', marginBottom: '0.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontWeight: 'bold', color: '#1e3a8a', display: 'block' }}>Points de Fidélité: {(customer.rewardPoints || 0) - loyaltyPointsUsed}</span>
+                          <span style={{ fontSize: '0.85rem', color: '#3b82f6' }}>Valeur max: {formatMoney((customer.rewardPoints || 0) * companySettings.amountPerPoint)}</span>
+                        </div>
+                        {loyaltyPointsUsed === 0 ? (
+                          <button type="button" className="ghost-action" style={{ color: '#2563eb', fontWeight: 'bold', background: '#dbeafe', padding: '0.5rem 1rem' }} onClick={() => {
+                            const subAfterDiscount = cartSubtotal * (1 - discountRate/100);
+                            const maxPointsForTotal = Math.ceil(subAfterDiscount / companySettings.amountPerPoint);
+                            const pointsToUse = Math.min(customer.rewardPoints || 0, maxPointsForTotal);
+                            setLoyaltyPointsUsed(pointsToUse);
+                          }}>
+                            Appliquer
+                          </button>
+                        ) : (
+                          <button type="button" className="ghost-action" style={{ color: '#ef4444', fontWeight: 'bold', background: '#fee2e2', padding: '0.5rem 1rem' }} onClick={() => setLoyaltyPointsUsed(0)}>
+                            Annuler (-{formatMoney(loyaltyPointsUsed * companySettings.amountPerPoint)})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                    <span style={{ fontSize: '1rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total à payer</span>
+                    <strong style={{ display: 'block', fontSize: '2.5rem', color: '#0f172a', fontWeight: 900, lineHeight: 1 }}>{formatMoney(cartTotal)}</strong>
+                  </div>
+                  
+                  {(() => {
+                    const cash = Number(paymentForm.cash || 0);
+                    const card = Number(paymentForm.card || 0);
+                    const credit = Number(paymentForm.credit || 0);
+                    const paid = cash + card + credit;
+                    const diff = paid - cartTotal;
+                    
+                    return (
+                      <>
+                        <div style={{ borderTop: '2px dashed #cbd5e1', paddingTop: '1.5rem', textAlign: 'center' }}>
+                          <span style={{ fontSize: '1rem', color: diff >= 0 ? '#16a34a' : '#ef4444', fontWeight: 700 }}>{diff >= 0 ? 'Monnaie à rendre' : 'Reste à payer'}</span>
+                          <strong style={{ display: 'block', fontSize: '2.5rem', color: diff >= 0 ? '#16a34a' : '#ef4444', fontWeight: 900, lineHeight: 1, marginTop: '0.5rem' }}>{formatMoney(Math.abs(diff))}</strong>
+                        </div>
+                        
+                        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          {diff < 0 && customer.name !== 'Client comptoir' && (
+                            <button className="ghost-action" style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', fontWeight: 600, color: '#0284c7', background: '#e0f2fe', borderRadius: '8px' }} onClick={() => setPaymentForm({...paymentForm, credit: String(Math.abs(diff))})}>
+                              Transférer le reste en crédit ({formatMoney(Math.abs(diff))})
+                            </button>
+                          )}
+                          <button className="primary-action" style={{ width: '100%', padding: '1.25rem', fontSize: '1.2rem', borderRadius: '12px', justifyContent: 'center' }} disabled={diff < 0 || (credit > 0 && customer.name === 'Client comptoir')} onClick={async () => {
+                            const newBalance = customer.balance + credit;
+                            if (credit > 0 && customer.creditLimit > 0 && newBalance > customer.creditLimit) {
+                              alert(`Plafond de crédit dépassé!\nSolde: ${formatMoney(customer.balance)}\nPlafond: ${formatMoney(customer.creditLimit)}\nLe nouveau solde serait de ${formatMoney(newBalance)}.`);
+                              return;
+                            }
+                            if (credit > 0 && customer.name === 'Client comptoir') {
+                              alert("Le Client comptoir ne peut pas avoir de crédit. Veuillez sélectionner un client enregistré.");
+                              return;
+                            }
+                            
+                            let method: PaymentMethod = 'CASH';
+                            if (card > 0 && cash === 0 && credit === 0) method = 'CARD';
+                            else if (credit > 0 && cash === 0 && card === 0) method = 'CREDIT';
+                            else if (cash > 0 || card > 0 || credit > 0) method = 'MULTI';
+
+                            if (credit > 0) {
+                              setContacts(contacts.map(c => c.id === customer.id ? { ...c, balance: newBalance } : c));
+                              setCustomer({ ...customer, balance: newBalance });
+                            }
+                            
+                            setPaymentModalOpen(false);
+                            await completeSale(method);
+                          }}>
+                            {diff < 0 ? 'Paiement incomplet' : 'Valider paiement'}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {suspendModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setSuspendModalOpen(false); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '400px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={(e) => { e.preventDefault(); recordDraft(suspendType); }} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Enregistrer</p><h2>{suspendType}</h2></div><button type="button" onClick={() => setSuspendModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
+                <label><span>Note de référence (Optionnel)</span><input value={suspendNote} onChange={e => setSuspendNote(e.target.value)} placeholder="Ex: Table 4, Attente..." autoFocus /></label>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={() => setSuspendModalOpen(false)} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Sauvegarder</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {editingLineId && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setEditingLineId(null); }}>
+          <section className="receipt-panel" style={{ maxWidth: '400px' }}>
+            <div className="receipt-header"><div><p>Ligne</p><h2>Modifier l'article</h2></div><button onClick={() => setEditingLineId(null)}><XCircle size={18} /></button></div>
+            <div className="form-grid" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <label><span>Prix Unitaire (MAD)</span><input value={editLineForm.price} onChange={e => setEditLineForm({...editLineForm, price: e.target.value})} inputMode="decimal" autoFocus /></label>
+              <label><span>Remise par unité (MAD)</span><input value={editLineForm.discount} onChange={e => setEditLineForm({...editLineForm, discount: e.target.value})} inputMode="decimal" /></label>
+              <label><span>Note (Optionnel)</span><input value={editLineForm.note} onChange={e => setEditLineForm({...editLineForm, note: e.target.value})} placeholder="Sans oignon, etc." /></label>
+              <button className="primary-action" onClick={() => {
+                setCart(current => current.map(line => {
+                  if (line.uniqueId === editingLineId) {
+                    const basePrice = line.variation ? line.variation.salePrice : line.product.salePrice;
+                    const priceNum = Number(editLineForm.price || basePrice);
+                    return { ...line, customPrice: priceNum !== basePrice ? priceNum : undefined, discount: Number(editLineForm.discount || 0), note: editLineForm.note || undefined };
+                  }
+                  return line;
+                }));
+                setEditingLineId(null);
+              }}>Appliquer</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Cash Movement Modal */}
+      {cashMovementModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setCashMovementModalOpen(false); }}>
+          <section className="receipt-panel" style={{ maxWidth: '400px' }}>
+            <div className="receipt-header"><div><p>Caisse</p><h2>Mouvement de Caisse</h2></div><button onClick={() => setCashMovementModalOpen(false)}><XCircle size={18} /></button></div>
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="form-grid">
+                <label>
+                  <span>Type de mouvement</span>
+                  <select value={cashMovementForm.type} onChange={e => setCashMovementForm(prev => ({ ...prev, type: e.target.value as 'IN'|'OUT' }))} style={{ fontSize: '1.1rem', padding: '0.75rem' }}>
+                    <option value="IN">Entrée (Ex: Ajout de monnaie)</option>
+                    <option value="OUT">Sortie (Ex: Retrait vers coffre)</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Montant (MAD)</span>
+                  <input type="number" placeholder="Montant..." value={cashMovementForm.amount} onChange={e => setCashMovementForm(prev => ({ ...prev, amount: e.target.value }))} style={{ fontSize: '1.1rem', padding: '0.75rem' }} />
+                </label>
+                <label>
+                  <span>Note (Optionnel)</span>
+                  <input type="text" placeholder="Raison..." value={cashMovementForm.note} onChange={e => setCashMovementForm(prev => ({ ...prev, note: e.target.value }))} style={{ fontSize: '1.1rem', padding: '0.75rem' }} />
+                </label>
+              </div>
+              <button className="primary-action" style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', background: cashMovementForm.type === 'IN' ? '#10b981' : '#ef4444' }} onClick={async () => {
+                const amount = Number(cashMovementForm.amount);
+                if (amount > 0) {
+                  try {
+                    const response = await apiFetch(`/api/register/movements`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ type: cashMovementForm.type, amount, note: cashMovementForm.note, locationId: currentLocationId, sessionId: registerDetails.openedId })
+                    });
+                    if (!response.ok) throw new Error();
+                    const movement = (await response.json()).movement;
+                    setCashMovements(prev => [...prev, {
+                      id: movement.id, type: movement.type, amount: Number(movement.amount), note: movement.note || '', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), locationId: movement.locationId
+                    }]);
+                    setCashMovementModalOpen(false);
+                    setCashMovementForm({ type: 'IN', amount: '', note: '' });
+                    setStatus(`Mouvement enregistré : ${cashMovementForm.type === 'IN' ? '+' : '-'}${formatMoney(amount)}`);
+                  } catch {
+                    setStatus('Erreur: Impossible d\'enregistrer le mouvement');
+                  }
+                }
+              }}><ArrowRightLeft size={18} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} /> Enregistrer le mouvement</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {transactionsModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setTransactionsModalOpen(false); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '900px', margin: 'auto', height: '85vh' }}>
+            <div className="product-form-panel" style={{ padding: '2rem', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div className="panel-title"><div><p>Historique</p><h2>Transactions récentes</h2></div><button type="button" onClick={() => setTransactionsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div style={{ display: 'flex', gap: '1rem', borderBottom: '2px solid #f1f5f9', paddingBottom: '0.5rem', marginTop: '1rem' }}>
+                {(['Finalisees', 'Suspendues', 'Brouillons', 'Devis'] as const).map(tab => (
+                  <button key={tab} style={{ padding: '0.5rem 1rem', background: transactionsTab === tab ? '#eff6ff' : 'none', border: 'none', borderRadius: '8px', color: transactionsTab === tab ? '#2563eb' : '#64748b', fontWeight: transactionsTab === tab ? '700' : '600', cursor: 'pointer' }} onClick={() => setTransactionsTab(tab)}>{tab}</button>
+                ))}
+              </div>
+            <div style={{ padding: '1rem', flex: 1, overflowY: 'auto' }}>
+              <div className="cart-table">
+                <div className="cart-head"><span>Ticket</span><span>Client</span><span>Note</span><span>Total</span><span>Statut</span><span /></div>
+                {sales.filter(s => {
+                  if (transactionsTab === 'Finalisees') return s.status === 'Payee' || s.status === 'Credit';
+                  if (transactionsTab === 'Suspendues') return s.status === 'Suspendue';
+                  if (transactionsTab === 'Brouillons') return s.status === 'Brouillon';
+                  return s.status === 'Devis';
+                }).map(sale => (
+                  <div className="cart-row" key={sale.id}>
+                    <span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span>
+                    <span>{sale.customer}</span>
+                    <span>{sale.referenceNote || '-'}</span>
+                    <span>{formatMoney(sale.total)}</span>
+                    <span style={{ color: sale.status === 'Payee' ? '#10b981' : sale.status === 'Credit' ? '#f59e0b' : '#64748b' }}>{sale.status}</span>
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      {transactionsTab === 'Finalisees' ? (
+                        <>
+                          <button className="ghost-action" onClick={() => { setReceiptSale(sale); setTransactionsModalOpen(false); }}><ReceiptText size={15} /> Recu</button>
+                          <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Facture (A4)</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => resumeSale(sale)}><RotateCcw size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Reprendre</button>
+                          <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Devis (A4)</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      )}
+
+      {zReportModalOpen && (() => {
+        const shiftSales = sales.filter(s => s.status === 'Payee' && s.id >= registerDetails.openedId);
+        const cashSalesToday = shiftSales.filter(s => s.method === 'CASH' || s.method === 'MULTI').reduce((sum, s) => {
+          if (s.method === 'CASH') return sum + s.total;
+          return sum; 
+        }, 0);
+        const cashExpensesToday = expenses.reduce((sum, e) => sum + e.amount, 0);
+        const cashInToday = cashMovements.filter(m => m.type === 'IN').reduce((sum, m) => sum + m.amount, 0);
+        const cashOutToday = cashMovements.filter(m => m.type === 'OUT').reduce((sum, m) => sum + m.amount, 0);
+        const expectedCash = registerDetails.initialCash + cashSalesToday - cashExpensesToday + cashInToday - cashOutToday;
+        const actualAmount = Number(actualCash) || 0;
+        const difference = actualAmount - expectedCash;
+
+        return (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setZReportModalOpen(false); }}>
+          <section className="receipt-panel" style={{ maxWidth: '500px' }}>
+            <div className="receipt-header"><div><p>Z-Report</p><h2>Clôture de Caisse</h2></div><button onClick={() => setZReportModalOpen(false)}><XCircle size={18} /></button></div>
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
+                <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Fond initial</span><strong style={{ display: 'block' }}>{formatMoney(registerDetails.initialCash)}</strong></div>
+                <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Ventes espèces</span><strong style={{ display: 'block', color: '#10b981' }}>+ {formatMoney(cashSalesToday)}</strong></div>
+                {cashInToday > 0 && <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Entrées manuelles</span><strong style={{ display: 'block', color: '#10b981' }}>+ {formatMoney(cashInToday)}</strong></div>}
+                <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Dépenses caisse</span><strong style={{ display: 'block', color: '#ef4444' }}>- {formatMoney(cashExpensesToday)}</strong></div>
+                {cashOutToday > 0 && <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Sorties manuelles</span><strong style={{ display: 'block', color: '#ef4444' }}>- {formatMoney(cashOutToday)}</strong></div>}
+                <div><span style={{ fontSize: '0.85rem', color: '#64748b' }}>Ventes globales</span><strong style={{ display: 'block' }}>{formatMoney(shiftSales.reduce((sum,s)=>sum+s.total,0))}</strong></div>
+                
+                <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '1rem', color: '#64748b', fontWeight: 500 }}>Espèces attendues en tiroir</span>
+                  <strong style={{ fontSize: '1.5rem', color: '#0f172a' }}>{formatMoney(expectedCash)}</strong>
+                </div>
+              </div>
+
+              <div className="form-grid" style={{ background: difference < 0 ? '#fef2f2' : difference > 0 ? '#f0fdf4' : '#fff', padding: '1rem', borderRadius: '8px', border: difference < 0 ? '1px solid #fecaca' : difference > 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 600 }}>Espèces comptées physiquement (MAD)</span>
+                  <button className="ghost-action" style={{ fontSize: '0.85rem', padding: '0.25rem 0.5rem' }} onClick={() => setShowDenominations(!showDenominations)}>
+                    <Calculator size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                    {showDenominations ? 'Masquer' : 'Calculatrice de billets'}
+                  </button>
+                </div>
+                {showDenominations && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    {[200, 100, 50, 20, 10, 5, 2, 1, 0.5].map((val) => (
+                      <label key={val} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ width: '40px', fontWeight: 500, fontSize: '0.85rem' }}>{val}</span>
+                        <input type="number" min="0" value={denominations[val as keyof DenominationCounts] || ''} onChange={(e) => {
+                          const valCount = Number(e.target.value) || 0;
+                          const newDenoms = { ...denominations, [val]: valCount };
+                          setDenominations(newDenoms);
+                          const newTotal = Object.entries(newDenoms).reduce((sum, [k, v]) => sum + (Number(k) * v), 0);
+                          setActualCash(newTotal.toString());
+                        }} style={{ width: '100%', padding: '0.5rem' }} />
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <input type="number" placeholder="Entrez le montant en tiroir..." value={actualCash} onChange={e => {
+                  if(!showDenominations) setActualCash(e.target.value)
+                }} readOnly={showDenominations} style={{ fontSize: '1.1rem', padding: '0.75rem', background: showDenominations ? '#f1f5f9' : '#fff' }} />
+                {actualCash && (
+                  <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 600 }}>
+                    <span>Différence :</span>
+                    <span style={{ color: difference < 0 ? '#ef4444' : difference > 0 ? '#16a34a' : '#64748b', fontSize: '1.2rem' }}>
+                      {difference > 0 ? '+' : ''}{formatMoney(difference)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <button className="primary-action" style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', background: '#ef4444' }} onClick={async () => {
+                if (window.confirm('Êtes-vous sûr de vouloir clôturer la caisse définitivement ?')) {
+                  try {
+                    const response = await apiFetch(`/api/register/close`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ sessionId: registerDetails.openedId, expectedCash, countedCash: actualAmount })
+                    });
+                    if (!response.ok) throw new Error();
+                    setRegisterStatus('CLOSED');
+                    setZReportModalOpen(false);
+                    setActualCash('');
+                    setDenominations({ 200: 0, 100: 0, 50: 0, 20: 0, 10: 0, 5: 0, 2: 0, 1: 0, 0.5: 0 });
+                    setShowDenominations(false);
+                    setCashMovements([]);
+                    setOpenRegisterForm({ initialCash: '' });
+                    setStatus(`Caisse clôturée. ${difference !== 0 ? 'Ecart de ' + formatMoney(difference) : 'Caisse juste'}`);
+                    setPage('Tableau de bord');
+                    await loadSessions();
+                  } catch {
+                    setStatus('Erreur: Impossible de clôturer la caisse');
+                  }
+                }
+              }}><Lock size={18} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} /> Clôturer la caisse</button>
+            </div>
+          </section>
+        </div>
+      )})()}
+
+      {calcOpen && (
+        <div className="calc-modal" onClick={e => { if (e.target === e.currentTarget) setCalcOpen(false); }}>
+          <div className="calc-panel">
+            <div className="calc-display">
+              <span>{calcPrev !== null && calcOp ? `${calcPrev} ${calcOp}` : '\u00a0'}</span>
+              <strong>{calcDisplay}</strong>
+            </div>
+            <div className="calc-grid">
+              {['C', '±', '%', '÷', '7', '8', '9', '×', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '', '='].map((key, i) => key ? (
+                <button key={i} className={['÷','×','-','+'].includes(key) ? 'calc-op' : key === '=' ? 'calc-eq' : key === 'C' ? 'calc-clear' : ''} onClick={() => calcPress(key)}>{key}</button>
+              ) : <span key={i} />)}
+            </div>
+          </div>
+        </div>
+      )}
+      </>
+      )}
+    </section>
+  );
+  };
+
+  const calcPress = (key: string) => {
+    if (key === 'C') { setCalcDisplay('0'); setCalcPrev(null); setCalcOp(null); return; }
+    if (key === '±') { setCalcDisplay(d => String(-Number(d))); return; }
+    if (key === '%') { setCalcDisplay(d => String(Number(d) / 100)); return; }
+    if (['+', '-', '×', '÷'].includes(key)) { setCalcPrev(Number(calcDisplay)); setCalcOp(key); setCalcDisplay('0'); return; }
+    if (key === '=') {
+      if (calcPrev === null || !calcOp) return;
+      const b = Number(calcDisplay);
+      let result = 0;
+      if (calcOp === '+') result = calcPrev + b;
+      else if (calcOp === '-') result = calcPrev - b;
+      else if (calcOp === '×') result = calcPrev * b;
+      else if (calcOp === '÷') result = b !== 0 ? calcPrev / b : 0;
+      setCalcDisplay(String(parseFloat(result.toFixed(8))));
+      setCalcPrev(null); setCalcOp(null);
+      return;
+    }
+    setCalcDisplay(d => d === '0' && key !== '.' ? key : d + key);
+  };
+
+
+  const salePreview = Number(form.salePrice || 0);
+  const purchasePreview = Number(form.purchasePrice || 0);
+  const tvaPreview = Number(form.tvaRate || 0);
+  const marginPreview = salePreview - purchasePreview;
+  const priceWithTaxPreview = salePreview * (1 + tvaPreview / 100);
+
+  const renderProducts = () => (
+    <>
+      <PageHeader 
+        title="Produits & Services" 
+        subtitle="Catalogue, codes-barres et stock" 
+        action={<button type="button" className="primary-action" onClick={() => { setForm(emptyForm); setProductModalOpen(true); }}><Plus size={16} /> Nouveau Produit</button>}
+      />
+
+      {productModalOpen && (
+        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setProductModalOpen(false); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '1000px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <section className="product-workspace" style={{ margin: 0 }}>
+              <form className="product-form-panel" onSubmit={submitProduct}>
+                <div className="panel-title"><div><p>Produit</p><h2>Fiche courte, champs utiles d'abord</h2></div><button type="button" onClick={() => setProductModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+
+          <div className="field-cluster primary-product-fields">
+            <label><span>Nom du produit</span><input value={form.name} onChange={event => updateForm('name', event.target.value)} placeholder="Ex: Bouteille eau 50cl" /></label>
+            <label><span>Code-barres</span><input value={form.barcode} onChange={event => updateForm('barcode', event.target.value)} placeholder="Scanner ou saisir" /></label>
+            <label><span>SKU</span><input value={form.sku} onChange={event => updateForm('sku', event.target.value)} placeholder="Auto si vide" /></label>
+          </div>
+
+          <div className="field-cluster product-taxonomy-fields">
+            <label><span>Categorie</span><input value={form.categoryName} onChange={event => updateForm('categoryName', event.target.value)} placeholder="Boissons" /></label>
+            <label><span>Marque</span><input value={form.brandName} onChange={event => updateForm('brandName', event.target.value)} placeholder="Optionnel" /></label>
+            <label><span>Unite</span><input value={form.unitName} onChange={event => updateForm('unitName', event.target.value)} placeholder="pcs, kg, L" /></label>
+          </div>
+
+          <div className="field-cluster product-price-fields">
+            <label><span>Prix de vente HT</span><input value={form.salePrice} onChange={event => updateForm('salePrice', event.target.value)} inputMode="decimal" placeholder="12.00" /></label>
+            <label><span>Prix achat</span><input value={form.purchasePrice} onChange={event => updateForm('purchasePrice', event.target.value)} inputMode="decimal" /></label>
+            <label><span>TVA %</span><input value={form.tvaRate} onChange={event => updateForm('tvaRate', event.target.value)} inputMode="decimal" /></label>
+            <label><span>Stock initial</span><input value={form.initialStock} onChange={event => updateForm('initialStock', event.target.value)} inputMode="decimal" /></label>
+            <label><span>Alerte stock</span><input value={form.lowStockAlert} onChange={event => updateForm('lowStockAlert', event.target.value)} inputMode="decimal" /></label>
+          </div>
+
+          <div className="product-photo-row">
+            <label className="product-photo-picker">
+              <span>Photo produit</span>
+              <input type="file" accept="image/*" onChange={event => handleProductPhoto(event.target.files?.[0])} />
+              <b><ImageIcon size={16} /> Ajouter une photo</b>
+            </label>
+            <label><span>URL image</span><input value={form.imageUrl} onChange={event => updateForm('imageUrl', event.target.value)} placeholder="Coller une URL ou charger une image" /></label>
+          </div>
+
+          <div className="mode-row product-type-row">{visibleTypes.map(type => <button type="button" className={form.type === type ? 'selected' : ''} onClick={() => updateForm('type', type)} key={type}>{typeLabel[type]}</button>)}</div>
+          <div className="checks-row product-checks">
+            <label><input type="checkbox" checked={form.isVariable} onChange={event => updateForm('isVariable', event.target.checked)} /> Produit avec déclinaisons</label>
+            <label><input type="checkbox" checked={form.trackStock} onChange={event => updateForm('trackStock', event.target.checked)} /> Suivre le stock</label>
+            {restaurantEnabled && <label><input type="checkbox" checked={form.isKitchenItem} onChange={event => updateForm('isKitchenItem', event.target.checked)} disabled={form.type !== 'MENU_ITEM'} /> Envoyer en cuisine</label>}
+          </div>
+
+          {form.isVariable && (
+            <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '1.1rem', margin: 0, color: '#0f172a' }}>Déclinaisons (Tailles, Couleurs...)</h3>
+                <button type="button" className="secondary-action" style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }} onClick={() => updateForm('variations', [...form.variations, { name: '', sku: '', salePrice: form.salePrice, purchasePrice: form.purchasePrice, stock: '0', lowStockAlert: '0', barcode: '' }])}>
+                  <Plus size={14} style={{ marginRight: '4px' }} /> Ajouter
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {form.variations.map((v, i) => (
+                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr 40px', gap: '0.5rem', alignItems: 'center' }}>
+                    <input value={v.name} onChange={e => { const nv = [...form.variations]; nv[i].name = e.target.value; updateForm('variations', nv); }} placeholder="Nom (ex: Rouge L)" style={{ padding: '0.5rem' }} />
+                    <input value={v.sku} onChange={e => { const nv = [...form.variations]; nv[i].sku = e.target.value; updateForm('variations', nv); }} placeholder="SKU" style={{ padding: '0.5rem' }} />
+                    <input value={v.salePrice} onChange={e => { const nv = [...form.variations]; nv[i].salePrice = e.target.value; updateForm('variations', nv); }} placeholder="Prix vente" style={{ padding: '0.5rem' }} inputMode="decimal" />
+                    <input value={v.purchasePrice} onChange={e => { const nv = [...form.variations]; nv[i].purchasePrice = e.target.value; updateForm('variations', nv); }} placeholder="Prix achat" style={{ padding: '0.5rem' }} inputMode="decimal" />
+                    <input value={v.stock} onChange={e => { const nv = [...form.variations]; nv[i].stock = e.target.value; updateForm('variations', nv); }} placeholder="Stock" style={{ padding: '0.5rem' }} inputMode="decimal" />
+                    <button type="button" className="icon-danger" onClick={() => { const nv = form.variations.filter((_, idx) => idx !== i); updateForm('variations', nv); }}><XCircle size={16} /></button>
+                  </div>
+                ))}
+                {form.variations.length === 0 && <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.9rem', padding: '1rem' }}>Aucune déclinaison. Cliquez sur Ajouter.</div>}
+              </div>
+            </div>
+          )}
+
+          <div className="product-form-footer">
+            <button className="save-product" type="submit" disabled={loading}><Plus size={18} /> {loading ? 'Ajout...' : 'Ajouter le produit'}</button>
+            <button className="secondary-action" type="button" disabled={!form.name && !form.barcode} onClick={async () => { await submitProduct({ preventDefault: () => undefined } as React.FormEvent); setPage('POS'); }}>Ajouter puis vendre</button>
+          </div>
+        </form>
+
+        <aside className="product-side-panel">
+          <div className="product-photo-preview">
+            {form.imageUrl ? <img src={form.imageUrl} alt="Apercu produit" /> : <ImageIcon size={34} />}
+            <strong>{form.name || 'Photo du produit'}</strong>
+          </div>
+          <div className="product-preview-card">
+            <span>Apercu prix</span>
+            <strong>{salePreview ? formatMoney(salePreview) : '0.00 MAD'}</strong>
+            <div><small>Prix TTC</small><b>{formatMoney(priceWithTaxPreview || 0)}</b></div>
+            <div><small>Marge brute</small><b className={marginPreview >= 0 ? 'positive' : 'negative'}>{formatMoney(marginPreview || 0)}</b></div>
+          </div>
+        </aside>
+            </section>
+          </div>
+        </div>
+      )}
+
+      <div className="table-toolbar product-list-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 2rem 1.5rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <div className="search-box"><Search size={17} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher produit, SKU, code-barres..." /></div>
+          <div className="filter-row">{(['ALL', ...visibleTypes] as const).map(type => <button className={filter === type ? 'selected' : ''} onClick={() => setFilter(type)} key={type}>{type === 'ALL' ? 'Tous' : typeLabel[type]}</button>)}</div>
+        </div>
+      </div>
+      <ProductsTable products={visibleProducts} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} visibleTypes={visibleTypes} addToCart={addToCart} />
+    </>
+  );
+
+  const renderContacts = (kind: 'Client' | 'Fournisseur') => {
+    const rows = contacts.filter(contact => {
+      const matchesKind = kind === 'Client' ? contact.type.includes('Client') : contact.type === 'Fournisseur';
+      const q = contactSearch.trim().toLowerCase();
+      return matchesKind && (!q || [contact.name, contact.phone, contact.type].some(value => value.toLowerCase().includes(q)));
+    });
+    return <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={Users}
+          title={kind === 'Client' ? 'Portefeuille Clients' : 'Carnet Fournisseurs'} 
+          subtitle={`Gérez vos ${kind === 'Client' ? 'clients et leur fidélité' : 'fournisseurs et vos approvisionnements'}`} 
+          action={<button className="primary-action"><Plus size={16} style={{ marginRight: '8px' }} /> Nouveau</button>} 
+        />
+      </div>
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
+        <div className="search-box" style={{ flex: 1, maxWidth: '400px' }}><Search size={17} /><input value={contactSearch} onChange={event => setContactSearch(event.target.value)} placeholder={kind === 'Client' ? 'Rechercher client...' : 'Rechercher fournisseur...'} /></div>
+        <div className="table-toolbar-stats">
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{rows.length}</span>
+            <span className="toolbar-stat-label">Total Contacts</span>
+          </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{formatMoney(rows.reduce((sum, c) => sum + c.balance, 0))}</span>
+            <span className="toolbar-stat-label">Solde Cumulé</span>
+          </div>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-head" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }}>
+          <span>Nom</span><span>Type</span><span>Telephone</span><span>Solde</span>{kind === 'Client' ? <span>Fidélité</span> : <span>Activite</span>}<span>Actions</span>
+        </div>
+        {rows.map(contact => (
+          <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }} key={contact.id}>
+            <span><strong>{contact.name}</strong><small>#{String(contact.id).padStart(4, '0')}</small></span>
+            <span>{contact.type}</span>
+            <span>{contact.phone}</span>
+            <span style={{ color: contact.balance > 0 ? '#ef4444' : 'inherit', fontWeight: contact.balance > 0 ? 700 : 400 }}>{formatMoney(contact.balance)}</span>
+            {kind === 'Client' ? <span><strong style={{ color: '#3b82f6' }}>{contact.rewardPoints || 0} pts</strong><small>{formatMoney((contact.rewardPoints || 0) * companySettings.amountPerPoint)}</small></span> : <span>{contact.lastActivity}</span>}
+            <span>
+              {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Régler</button>}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {settlingContact && (
+        <div className="receipt-backdrop" style={{ zIndex: 60 }} role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) { setSettlingContact(null); setSettlementAmount(''); } }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '400px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={(e) => { 
+              e.preventDefault(); 
+              const amount = Number(settlementAmount);
+              if (amount > 0) {
+                // Update Contact Balance
+                setContacts(current => current.map(c => c.id === settlingContact.id ? { ...c, balance: Math.max(0, c.balance - amount) } : c));
+                if (customer.id === settlingContact.id) {
+                  setCustomer({ ...customer, balance: Math.max(0, customer.balance - amount) });
+                }
+                // Record Cash Movement
+                const currentCash = parseFloat(actualCash || '0');
+                setActualCash((currentCash + amount).toString());
+                
+                setStatus(`Règlement de ${formatMoney(amount)} enregistré pour ${settlingContact.name}`);
+                setSettlingContact(null);
+                setSettlementAmount('');
+              }
+            }} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Client</p><h2>Règlement de Crédit</h2></div><button type="button" onClick={() => { setSettlingContact(null); setSettlementAmount(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.5rem', textAlign: 'center' }}>
+                <strong style={{ display: 'block', color: '#0f172a' }}>{settlingContact.name}</strong>
+                <span style={{ fontSize: '0.9rem', color: '#64748b' }}>Solde actuel: <strong style={{ color: '#ef4444' }}>{formatMoney(settlingContact.balance)}</strong></span>
+              </div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem' }}>
+                <label><span>Montant à régler (MAD)</span><input value={settlementAmount} onChange={e => setSettlementAmount(e.target.value)} inputMode="decimal" autoFocus style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981', textAlign: 'center' }} /></label>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={() => { setSettlingContact(null); setSettlementAmount(''); }} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Encaisser</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </section>;
+  };
+
+  const renderPurchases = () => {
+    const rows = purchases.filter(purchase => {
+      if (purchase.locationId && purchase.locationId !== currentLocationId) return false;
+      const q = purchaseSearch.trim().toLowerCase();
+      return !q || [purchase.reference, purchase.supplier, purchase.status].some(value => value.toLowerCase().includes(q));
+    });
+    return <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={ShoppingCart}
+          title="Achats" 
+          subtitle="Réceptions et commandes fournisseurs" 
+          action={<button className="primary-action" onClick={async () => {
+            try {
+              const response = await apiFetch(`/api/purchases`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  locationId: currentLocationId,
+                  total: 1500,
+                  items: [{
+                    productId: products[0]?.id || 1,
+                    quantity: 10,
+                    unitCost: 150
+                  }]
+                })
+              });
+              if (!response.ok) throw new Error();
+              setStatus('Achat rapide créé avec succès');
+              loadPurchases(); // reload purchases
+            } catch {
+              setStatus("Erreur lors de la création de l'achat");
+            }
+          }}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvel achat (Rapide)</button>} 
+        />
+      </div>
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
+        <div className="search-box" style={{ flex: 1, maxWidth: '400px' }}><Search size={17} /><input value={purchaseSearch} onChange={event => setPurchaseSearch(event.target.value)} placeholder="Rechercher achat ou fournisseur..." /></div>
+        <div className="table-toolbar-stats">
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{rows.length}</span>
+            <span className="toolbar-stat-label">Commandes</span>
+          </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{formatMoney(rows.reduce((sum, p) => sum + p.total, 0))}</span>
+            <span className="toolbar-stat-label">Total Achats</span>
+          </div>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-head" style={{ gridTemplateColumns: '2fr 2fr 1fr 1fr 1fr 1fr' }}>
+          <span>Reference</span><span>Fournisseur</span><span>Total</span><span>Statut</span><span>Date</span><span>Actions</span>
+        </div>
+        {rows.map(purchase => 
+          <div className="data-row" style={{ gridTemplateColumns: '2fr 2fr 1fr 1fr 1fr 1fr' }} key={purchase.id}>
+            <span><strong>{purchase.reference}</strong><small>Bon d'achat</small></span>
+            <span>{purchase.supplier}</span>
+            <span>{formatMoney(purchase.total)}</span>
+            <span className={purchase.status === 'Recu' ? 'badge ok' : purchase.status === 'Retour' ? 'badge warn' : 'badge'}>{purchase.status}</span>
+            <span>{purchase.createdAt}</span>
+            <span className="list-actions">
+              {purchase.status === 'Recu' && currentUser?.role !== 'CASHIER' && (
+                <button className="ghost-action" onClick={() => handleReturnPurchase(purchase.id)} style={{ color: '#ef4444' }}>
+                  <RotateCcw size={14} style={{ marginRight: '4px' }} /> Retourner
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+    </section>;
+  };
+
+  const handleStockAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const product = products.find(p => p.id === adjustmentForm.productId);
+    if (!product || !adjustmentForm.quantity) return;
+
+    const qty = Number(adjustmentForm.quantity);
+    let targetQuantity = 0;
+
+    if (adjustmentForm.type === 'Inventaire') {
+      targetQuantity = qty;
+    } else {
+      targetQuantity = product.stock - qty;
+    }
+
+    try {
+      const response = await apiFetch(`/api/inventory/adjustment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locationId: currentLocationId,
+          adjustments: [{
+            productId: product.id,
+            quantity: targetQuantity,
+            reason: `${adjustmentForm.type} - ${adjustmentForm.reason}`
+          }]
+        })
+      });
+
+      if (!response.ok) throw new Error('Erreur API');
+
+      setProducts(current => current.map(p => p.id === product.id ? { ...p, stock: targetQuantity } : p));
+      setIsAdjustmentModalOpen(false);
+      setAdjustmentForm({ productId: null, type: 'Casse', quantity: '', reason: '' });
+      setStatus(`Ajustement enregistré sur ${product.name}`);
+    } catch {
+      setStatus(`Erreur lors de l'ajustement du stock`);
+    }
+  };
+
+  const renderStock = () => (
+    <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={Package}
+          title="État des Stocks" 
+          subtitle="Gérez vos quantités et alertes" 
+          action={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <span style={{ color: '#ef4444', fontWeight: 600 }}>{lowStockProducts.length} alertes</span>
+              <button className="primary-action" onClick={() => setIsAdjustmentModalOpen(true)}>
+                <RefreshCw size={14} style={{ marginRight: '8px' }} />
+                Ajustement
+              </button>
+            </div>
+          } 
+        />
+      </div>
+
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', padding: '0 1.5rem 1.5rem', borderBottom: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+        <div className="filter-row">
+          <button className={stockView === 'STOCK' ? 'selected' : ''} onClick={() => setStockView('STOCK')}>Produits</button>
+          <button className={stockView === 'HISTORY' ? 'selected' : ''} onClick={() => setStockView('HISTORY')}>Historique Ajustements</button>
+        </div>
+      </div>
+
+      {stockView === 'STOCK' ? (
+        <div className="stock-grid" style={{ padding: '0 1.5rem 1.5rem' }}>
+          {visibleProducts.map(product => (
+            <div className="stock-card" key={product.id}>
+              <div><strong>{product.name}</strong><small>{product.sku}</small></div>
+              <span className={product.trackStock && product.stock <= product.lowStockAlert ? 'badge warn' : 'badge ok'}>{product.trackStock ? `${product.stock} en stock` : 'Non suivi'}</span>
+              <div className="stock-bar"><i style={{ width: `${Math.min(100, product.trackStock ? (product.stock / Math.max(product.lowStockAlert * 3, 1)) * 100 : 100)}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="data-table">
+          <div className="data-head" style={{ gridTemplateColumns: '1fr 1fr 2fr 1fr 1fr 1.5fr' }}>
+            <span>Date</span><span>Type</span><span>Produit</span><span>Quantité</span><span>Utilisateur</span><span>Motif</span>
+          </div>
+          {stockAdjustments.map(adj => (
+            <div className="data-row" style={{ gridTemplateColumns: '1fr 1fr 2fr 1fr 1fr 1.5fr' }} key={adj.id}>
+              <span>{adj.date}</span>
+              <span className="badge normal">{adj.type}</span>
+              <span><strong>{adj.productName}</strong></span>
+              <span className={adj.quantity < 0 ? 'badge warn' : 'badge ok'}>{adj.quantity > 0 ? `+${adj.quantity}` : adj.quantity}</span>
+              <span>{adj.user}</span>
+              <span style={{ color: '#64748b' }}>{adj.reason || '-'}</span>
+            </div>
+          ))}
+          {stockAdjustments.length === 0 && (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucun ajustement enregistré.</div>
+          )}
+        </div>
+      )}
+
+      {isAdjustmentModalOpen && (
+        <div className="receipt-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setIsAdjustmentModalOpen(false); }}>
+          <form className="receipt-panel" style={{ maxWidth: '400px' }} onSubmit={handleStockAdjustment}>
+            <div className="receipt-header"><div><h2>Ajustement de stock</h2></div><button type="button" onClick={() => setIsAdjustmentModalOpen(false)}><XCircle size={18} /></button></div>
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <label>
+                <span>Produit</span>
+                <select required value={adjustmentForm.productId || ''} onChange={e => setAdjustmentForm(f => ({ ...f, productId: Number(e.target.value) }))}>
+                  <option value="" disabled>Sélectionner un produit</option>
+                  {products.filter(p => p.trackStock).map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.stock} en stock)</option>
+                  ))}
+                </select>
+              </label>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <label>
+                  <span>Type</span>
+                  <select required value={adjustmentForm.type} onChange={e => setAdjustmentForm(f => ({ ...f, type: e.target.value as any }))}>
+                    <option value="Casse">Casse</option>
+                    <option value="Perte">Perte</option>
+                    <option value="Vol">Vol</option>
+                    <option value="Inventaire">Inventaire (Nouveau total)</option>
+                  </select>
+                </label>
+                <label>
+                  <span>{adjustmentForm.type === 'Inventaire' ? 'Nouveau total' : 'Quantité perdue'}</span>
+                  <input type="number" required min="1" step="1" value={adjustmentForm.quantity} onChange={e => setAdjustmentForm(f => ({ ...f, quantity: e.target.value }))} />
+                </label>
+              </div>
+
+              <label>
+                <span>Motif / Note</span>
+                <input value={adjustmentForm.reason} onChange={e => setAdjustmentForm(f => ({ ...f, reason: e.target.value }))} placeholder="Ex: Endommagé lors du transport..." />
+              </label>
+
+              <button className="primary-action" type="submit" style={{ marginTop: '0.5rem', width: '100%', padding: '0.75rem' }}>Confirmer</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+
+  const renderExpenses = () => {
+    return (
+      <section className="panel table-section flush-top">
+        {expenseModalOpen && (
+          <div className="receipt-backdrop" style={{ zIndex: 60 }} role="dialog" onClick={(e) => { if (e.target === e.currentTarget) setExpenseModalOpen(false); }}>
+            <div className="receipt-panel" style={{ maxWidth: '480px', width: '95%' }}>
+              <div className="receipt-header">
+                <div><p>Gestion des dépenses</p><h2>Nouvelle Dépense</h2></div>
+                <button onClick={() => setExpenseModalOpen(false)}><XCircle size={18} /></button>
+              </div>
+              <form style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }} onSubmit={async e => {
+                e.preventDefault();
+                const newExp = {
+                  reference: expenseForm.reference || ('EXP-' + Math.floor(Math.random() * 10000)),
+                  category: expenseForm.category,
+                  amount: Number(expenseForm.amount),
+                  date: expenseForm.date,
+                  note: expenseForm.note,
+                  paymentMethod: expenseForm.paymentMethod,
+                  locationId: currentLocationId
+                };
+                
+                try {
+                  const response = await apiFetch(`/api/expenses`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newExp),
+                  });
+                  if (!response.ok) throw new Error('API unavailable');
+                  const created = await response.json();
+                  setExpenses([created, ...expenses]);
+                  setExpenseModalOpen(false);
+                  setExpenseForm({ reference: '', category: 'Autre', amount: '', date: new Date().toISOString().split('T')[0], note: '', paymentMethod: 'Espèces' });
+                } catch (err: any) {
+                  setStatus('Erreur: Impossible d\'ajouter la dépense');
+                }
+              }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <label><span>Montant (MAD)</span><input type="number" required min="0" step="0.01" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value ? Number(e.target.value) : '' }))} /></label>
+                  <label><span>Date</span><input type="date" required value={expenseForm.date} onChange={e => setExpenseForm(f => ({ ...f, date: e.target.value }))} /></label>
+                </div>
+                <label>
+                  <span>Catégorie</span>
+                  <select required value={expenseForm.category} onChange={e => setExpenseForm(f => ({ ...f, category: e.target.value }))}>
+                    <option value="Loyer">Loyer</option>
+                    <option value="Salaire">Salaire</option>
+                    <option value="Électricité / Eau">Électricité / Eau</option>
+                    <option value="Fournitures bureau">Fournitures bureau</option>
+                    <option value="Marketing & Pub">Marketing & Pub</option>
+                    <option value="Transport">Transport</option>
+                    <option value="Achat marchandises">Achat marchandises</option>
+                    <option value="Entretien & Rép.">Entretien & Rép.</option>
+                    <option value="Autre">Autre</option>
+                  </select>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <label>
+                    <span>Méthode de paiement</span>
+                    <select required value={expenseForm.paymentMethod} onChange={e => setExpenseForm(f => ({ ...f, paymentMethod: e.target.value }))}>
+                      <option value="Espèces">Espèces (Caisse)</option>
+                      <option value="Carte Bancaire">Carte Bancaire</option>
+                      <option value="Virement">Virement</option>
+                      <option value="Chèque">Chèque</option>
+                    </select>
+                  </label>
+                  <label><span>Référence / Pièce (Optionnel)</span><input value={expenseForm.reference} onChange={e => setExpenseForm(f => ({ ...f, reference: e.target.value }))} placeholder="Ex: FACT-422..." /></label>
+                </div>
+                <label><span>Note / Description</span><input value={expenseForm.note} onChange={e => setExpenseForm(f => ({ ...f, note: e.target.value }))} placeholder="Détails de la dépense..." /></label>
+                <button type="submit" className="primary-action" style={{ width: '100%', height: '42px', marginTop: '0.5rem' }}>Enregistrer la dépense</button>
+              </form>
+            </div>
+          </div>
+        )}
+        <div style={{ padding: '1.5rem 1.5rem 0' }}>
+          <PageHeader 
+            title="Dépenses" 
+            subtitle="Suivi des dépenses opérationnelles" 
+            action={<button className="primary-action" onClick={() => setExpenseModalOpen(true)}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvelle dépense</button>} 
+          />
+        </div>
+        <div className="data-table">
+          <div className="data-head" style={{ gridTemplateColumns: 'minmax(120px, 1fr) minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(80px, auto)' }}>
+            <span>Référence</span><span>Catégorie</span><span>Montant</span><span>Paiement</span><span>Date</span><span></span>
+          </div>
+          {expenses.length === 0 ? <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Aucune dépense enregistrée.</div> : 
+            expenses.filter(e => !e.locationId || e.locationId === currentLocationId).map(exp => <div className="data-row" style={{ gridTemplateColumns: 'minmax(120px, 1fr) minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(80px, auto)' }} key={exp.id}>
+              <span><strong>{exp.reference}</strong></span>
+              <span>{exp.category}</span>
+              <span style={{ color: '#ef4444', fontWeight: 800 }}>- {formatMoney(exp.amount)}</span>
+              <span><span style={{ display: 'inline-block', padding: '3px 8px', background: '#f1f5f9', color: '#475569', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>{exp.paymentMethod || 'Espèces'}</span></span>
+              <span>{exp.date}</span>
+              <span style={{ textAlign: 'right' }}>
+                <button title="Supprimer" className="icon-danger" style={{ background: '#fff', border: '1px solid #fee2e2' }} onClick={() => { if(confirm('Supprimer cette dépense ?')) setExpenses(expenses.filter(e => e.id !== exp.id)) }}><Trash2 size={14} /></button>
+              </span>
+            </div>)
+          }
+        </div>
+      </section>
+    );
+  };
+
+  
+    const [selectedTickets, setSelectedTickets] = useState<number[]>([]);
+    const [invoiceCustomer, setInvoiceCustomer] = useState<number | null>(null);
+
+    const handleCreateInvoice = async () => {
+      if (selectedTickets.length === 0 || !invoiceCustomer) return;
+      try {
+        const res = await apiFetch('/api/invoices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerId: invoiceCustomer, saleIds: selectedTickets })
+        });
+        if (res.ok) {
+          setStatus('Facture créee avec succès');
+          setSelectedTickets([]);
+          loadInvoices();
+          loadSales();
+        } else {
+          setStatus('Erreur création facture');
+        }
+      } catch(e) { setStatus('Erreur creation facture'); }
+    };
+
+    const renderFactures = () => {
+      const pendingSales = sales.filter(s => s.status === 'Payee' && !s.invoiceId && s.customerId);
+      // Group pending sales by customer
+      const customersWithPending = Array.from(new Set(pendingSales.map(s => s.customerId)));
+
+      return (
+        <section className="panel table-section flush-top">
+          <div style={{ padding: '1.5rem 1.5rem 0' }}>
+            <PageHeader icon={FileText} title="Facturation" subtitle="Générez et gérez vos factures à partir de tickets de caisse" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem', padding: '1.5rem', background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+            {/* Ticket Selection for Invoice */}
+            <div style={{ background: 'white', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <h3 style={{ marginTop: 0, fontSize: '1.1rem', color: '#0f172a' }}>Créer une facture</h3>
+              <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1rem' }}>Sélectionnez un client pour voir ses tickets non facturés.</p>
+              
+              <select value={invoiceCustomer || ''} onChange={e => { setInvoiceCustomer(Number(e.target.value)); setSelectedTickets([]); }} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '1rem' }}>
+                <option value="">-- Choisir un client --</option>
+                {customersWithPending.map(cid => {
+                  const contact = contacts.find(c => c.id === cid);
+                  return <option key={cid} value={cid}>{contact ? contact.name : 'Client #' + cid}</option>;
+                })}
+              </select>
+
+              {invoiceCustomer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
+                  {pendingSales.filter(s => s.customerId === invoiceCustomer).map(sale => (
+                    <label key={sale.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0.75rem', background: '#f8fafc', borderRadius: '8px', cursor: 'pointer', border: '1px solid #e2e8f0' }}>
+                      <input type="checkbox" checked={selectedTickets.includes(sale.id)} onChange={e => {
+                        if (e.target.checked) setSelectedTickets(prev => [...prev, sale.id]);
+                        else setSelectedTickets(prev => prev.filter(id => id !== sale.id));
+                      }} style={{ width: '18px', height: '18px' }} />
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ display: 'block' }}>Ticket {sale.ticket}</strong>
+                        <small style={{ color: '#64748b' }}>{formatMoney(sale.total)}</small>
+                      </div>
+                    </label>
+                  ))}
+                  {selectedTickets.length > 0 && (
+                    <button className="primary-action" style={{ width: '100%', marginTop: '1rem', padding: '0.75rem' }} onClick={handleCreateInvoice}>
+                      Générer Facture ({selectedTickets.length} tickets)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* List of Invoices */}
+            <div className="product-table modern-product-table" style={{ background: 'white' }}>
+              <div className="table-head">
+                <span>Facture</span><span>Client</span><span>Tickets</span><span>Total</span><span>Actions</span>
+              </div>
+              {invoices.map(inv => (
+                <div className="table-row" key={inv.id}>
+                  <span><strong>{inv.number}</strong><small>{new Date(inv.createdAt).toLocaleDateString('fr-FR')}</small></span>
+                  <span>{inv.customer?.name || 'Inconnu'}</span>
+                  <span>{inv.sales?.length || 0} tickets</span>
+                  <span><strong>{formatMoney(Number(inv.total))}</strong></span>
+                  <span className="list-actions">
+                    <button className="row-action" onClick={() => { /* TODO: Print Invoice */ }}>Imprimer</button>
+                  </span>
+                </div>
+              ))}
+              {invoices.length === 0 && <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucune facture générée.</div>}
+            </div>
+          </div>
+        </section>
+      );
+    };
+  
+
+  const renderSales = () => {
+    const filteredSales = sales.filter(s => (!s.locationId || s.locationId === currentLocationId) && (!saleSearch || s.ticket.toLowerCase().includes(saleSearch.toLowerCase()) || s.customer.toLowerCase().includes(saleSearch.toLowerCase())));
+    return <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={TrendingUp}
+          title="Historique des Ventes" 
+          subtitle="Tickets, factures et devis" 
+          action={<button className="primary-action" onClick={() => setPage('POS')}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvelle vente</button>} 
+        />
+      </div>
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
+        <div className="search-box" style={{ flex: 1, maxWidth: '400px' }}><Search size={17} /><input value={saleSearch} onChange={event => setSaleSearch(event.target.value)} placeholder="Rechercher ticket ou client..." /></div>
+        <div className="table-toolbar-stats">
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{filteredSales.length}</span>
+            <span className="toolbar-stat-label">Tickets</span>
+          </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{formatMoney(filteredSales.reduce((sum, s) => sum + s.total, 0))}</span>
+            <span className="toolbar-stat-label">Total Ventes</span>
+          </div>
+        </div>
+      </div>
+      <RecordTable sales={filteredSales} onOpenReceipt={setReceiptSale} />
+    </section>;
+  };
+
+  const renderPayments = () => {
+    const rows = sales.filter(sale => paymentFilter === 'ALL' || sale.status === paymentFilter);
+    return <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={Banknote}
+          title="Paiements" 
+          subtitle="Encaissements et crédits" 
+          action={<strong style={{ fontSize: '1.2rem', color: '#16a34a' }}>Total: {formatMoney(rows.reduce((sum, sale) => sum + sale.total, 0))}</strong>} 
+        />
+      </div>
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
+        <div className="filter-row inline">{(['ALL', 'Payee', 'Credit'] as const).map(value => <button key={value} className={paymentFilter === value ? 'selected' : ''} onClick={() => setPaymentFilter(value)}>{value === 'ALL' ? 'Tous' : value}</button>)}</div>
+        <div className="table-toolbar-stats">
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{rows.length}</span>
+            <span className="toolbar-stat-label">Transactions</span>
+          </div>
+        </div>
+      </div>
+      <RecordTable sales={rows} onOpenReceipt={setReceiptSale} />
+    </section>;
+  };
+
+  const renderReports = () => {
+    const filterByPeriod = (list: SaleRecord[]) => {
+      if (reportPeriod === 'all') return list;
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return list.filter(s => {
+        // Parse relative date strings from seed data
+        const ca = s.createdAt.toLowerCase();
+        if (reportPeriod === 'today') {
+          return ca.includes('aujourd') || ca.includes('maintenant');
+        }
+        if (reportPeriod === 'week') {
+          return ca.includes('aujourd') || ca.includes('maintenant') || ca.includes('hier') || ca.includes('lundi') || ca.includes('mardi') || ca.includes('mercredi') || ca.includes('jeudi') || ca.includes('vendredi') || ca.includes('samedi') || ca.includes('dimanche');
+        }
+        // For month/year, try parsing as real date, otherwise include all
+        const parsed = new Date(s.createdAt);
+        if (!isNaN(parsed.getTime())) {
+          if (reportPeriod === 'month') return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
+          if (reportPeriod === 'year') return parsed.getFullYear() === now.getFullYear();
+        }
+        // If we can't parse, include it for broader periods
+        return true;
+      });
+    };
+
+    const exportCSV = (data: SaleRecord[]) => {
+      const header = 'Ticket,Date,Client,Methode,Statut,Total\n';
+      const rows = data.map(s => `${s.ticket},"${s.createdAt}","${s.customer}",${methodLabel[s.method]},${s.status},${s.total.toFixed(2)}`).join('\n');
+      const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rapport-ventes-${reportPeriod}-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    const paidSales = filterByPeriod(sales.filter(s => s.status === 'Payee'));
+    
+    // Aggregation calculations
+    const salesByDate = paidSales.reduce((acc, sale) => {
+      const day = sale.createdAt.split(' ')[0] || sale.createdAt;
+      acc[day] = (acc[day] || 0) + sale.total;
+      return acc;
+    }, {} as Record<string, number>);
+    const activeDays = Object.keys(salesByDate).sort();
+    const maxSales = Math.max(...Object.values(salesByDate), 1);
+
+    const salesByMethod = paidSales.reduce((acc, sale) => {
+      acc[sale.method] = (acc[sale.method] || 0) + sale.total;
+      return acc;
+    }, {} as Partial<Record<PaymentMethod, number>>);
+
+    const productCounts = paidSales.reduce((acc, sale) => {
+      sale.lines?.forEach(line => {
+        acc[line.name] = (acc[line.name] || 0) + line.quantity;
+      });
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const topProducts = Object.entries(productCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    // Deep KPIs
+    const totalGross = paidSales.reduce((s, sale) => s + sale.total, 0);
+    // Approximate margin: total - (total/1.2) as a dummy if we don't have exact line purchase prices in draft
+    // In real app, we sum (salePrice - purchasePrice) * qty
+    let totalMargin = 0;
+    let totalNet = 0;
+    let totalTax = 0;
+    
+    paidSales.forEach(sale => {
+      let saleCost = 0;
+      let saleTax = 0;
+      let saleNet = 0;
+      if (sale.lines) {
+        sale.lines.forEach(line => {
+          const product = products.find(p => p.id === line.productId);
+          const currentPrice = line.unitPrice ?? (product?.salePrice || 0);
+          const cost = product?.purchasePrice || 0;
+          const taxRate = product?.tvaRate || 0;
+          const netPrice = currentPrice / (1 + taxRate / 100);
+          
+          saleCost += cost * line.quantity;
+          saleNet += netPrice * line.quantity;
+          saleTax += (currentPrice - netPrice) * line.quantity;
+        });
+      } else {
+        // Fallback for mock data without lines
+        saleNet = sale.total / 1.2;
+        saleCost = saleNet * 0.7; // assume 30% margin
+        saleTax = sale.total - saleNet;
+      }
+      totalMargin += (saleNet - saleCost);
+      totalNet += saleNet;
+      totalTax += saleTax;
+    });
+
+    const renderTabNav = () => (
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
+        <button 
+          onClick={() => setReportsTab('synthese')}
+          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'synthese' ? '#0f172a' : 'transparent', color: reportsTab === 'synthese' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+          <BarChart3 size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Synthèse
+        </button>
+        <button 
+          onClick={() => setReportsTab('ventes')}
+          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'ventes' ? '#0f172a' : 'transparent', color: reportsTab === 'ventes' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+          <TrendingUp size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Ventes
+        </button>
+        <button 
+          onClick={() => setReportsTab('produits')}
+          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'produits' ? '#0f172a' : 'transparent', color: reportsTab === 'produits' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+          <Package size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Produits
+        </button>
+        <button 
+          onClick={() => setReportsTab('paiements')}
+          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'paiements' ? '#0f172a' : 'transparent', color: reportsTab === 'paiements' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+          <Banknote size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Paiements
+        </button>
+      </div>
+    );
+
+    return (
+      <section style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
+        <PageHeader 
+          icon={BarChart3}
+          title="Tableau de bord" 
+          subtitle="Tableau de bord financier" 
+          action={
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <select 
+                value={dashboardLocationFilter} 
+                onChange={e => setDashboardLocationFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 500, color: '#334155' }}
+              >
+                <option value="ALL">Tous les magasins</option>
+                {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+              </select>
+              <select 
+                value={reportPeriod}
+                onChange={e => setReportPeriod(e.target.value as any)}
+                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 500, color: '#334155' }}
+              >
+                <option value="all">Toutes les périodes</option>
+                <option value="today">Aujourd'hui</option>
+                <option value="week">Cette Semaine</option>
+                <option value="month">Ce Mois</option>
+                <option value="year">Cette Année</option>
+              </select>
+              <button 
+                className="ghost-action" 
+                onClick={() => exportCSV(paidSales)}
+                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+              >
+                <Download size={16} /> Exporter CSV
+              </button>
+            </div>
+          } 
+        />
+
+        {renderTabNav()}
+
+        {reportsTab === 'synthese' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
+              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #3b82f6', padding: '1.5rem' }}>
+                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Chiffre d'Affaire (TTC)</p>
+                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#0f172a' }}>{formatMoney(totalGross)}</h3>
+              </div>
+              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #10b981', padding: '1.5rem' }}>
+                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Marge Brute Estimée</p>
+                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#10b981' }}>{formatMoney(totalMargin)}</h3>
+              </div>
+              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #f59e0b', padding: '1.5rem' }}>
+                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>TVA Collectée</p>
+                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#f59e0b' }}>{formatMoney(totalTax)}</h3>
+              </div>
+              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #8b5cf6', padding: '1.5rem' }}>
+                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Tickets Encaissés</p>
+                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#0f172a' }}>{paidSales.length}</h3>
+              </div>
+            </div>
+
+            <div className="workspace-grid" style={{ padding: 0 }}>
+              <div className="panel wide-panel">
+                <div className="panel-title compact"><div><p>Performance</p><h2>Ventes par Jour (TTC)</h2></div></div>
+                <div style={{ minHeight: '300px', marginTop: '1rem', padding: '1rem 0' }}>
+                  {activeDays.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={activeDays.map(day => ({ name: day === 'Aujourd' ? "Aujourd'hui" : day, ventes: salesByDate[day] }))} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                        <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                        <Bar dataKey="ventes" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée de vente disponible.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reportsTab === 'ventes' && (
+          <div className="panel wide-panel">
+            <div className="panel-title compact"><div><p>Détails</p><h2>Journal des Ventes</h2></div></div>
+            <div className="cart-table" style={{ marginTop: '1rem' }}>
+              <div className="cart-head">
+                <span>Réf Ticket</span>
+                <span>Date</span>
+                <span>Client</span>
+                <span>Mode Paiement</span>
+                <span>Total</span>
+              </div>
+              {paidSales.map(sale => (
+                <div className="cart-row" key={sale.id}>
+                  <span><strong>{sale.ticket}</strong></span>
+                  <span>{sale.createdAt}</span>
+                  <span>{sale.customer}</span>
+                  <span><span style={{ background: '#f1f5f9', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem', fontWeight: 600 }}>{methodLabel[sale.method]}</span></span>
+                  <span style={{ fontWeight: 700, color: '#10b981' }}>{formatMoney(sale.total)}</span>
+                </div>
+              ))}
+              {paidSales.length === 0 && <div className="pos-empty">Aucune vente enregistrée.</div>}
+            </div>
+          </div>
+        )}
+
+        {reportsTab === 'produits' && (
+          <div className="workspace-grid" style={{ padding: 0 }}>
+            <div className="panel">
+              <div className="panel-title compact"><div><p>Palmarès</p><h2>Top Articles (Quantités)</h2></div></div>
+              <div className="cart-table" style={{ marginTop: '1rem' }}>
+                <div className="cart-head"><span>Produit</span><span>Qte Vendue</span></div>
+                {topProducts.map(([name, qty]) => (
+                  <div className="cart-row" key={name} style={{ gridTemplateColumns: '1fr auto' }}>
+                    <span style={{ fontWeight: 600 }}>{name}</span>
+                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.25rem 0.75rem', borderRadius: '999px', fontWeight: 700 }}>{qty}x</span>
+                  </div>
+                ))}
+                {topProducts.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun article vendu</span>}
+              </div>
+            </div>
+            
+            <div className="panel">
+              <div className="panel-title compact"><div><p>Indicateurs</p><h2>Qualité Stock</h2></div></div>
+              <div className="summary-list" style={{ marginTop: '1rem' }}>
+                <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
+                  <span style={{ color: '#64748b' }}>Articles au catalogue</span>
+                  <strong style={{ fontSize: '1.5rem', display: 'block', marginTop: '0.25rem' }}>{visibleProducts.length}</strong>
+                </div>
+                <div style={{ padding: '1rem', background: lowStockProducts.length > 0 ? '#fef2f2' : '#f0fdf4', borderRadius: '8px' }}>
+                  <span style={{ color: lowStockProducts.length > 0 ? '#ef4444' : '#16a34a' }}>Alertes stock bas</span>
+                  <strong style={{ fontSize: '1.5rem', display: 'block', marginTop: '0.25rem', color: lowStockProducts.length > 0 ? '#ef4444' : '#16a34a' }}>{lowStockProducts.length}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reportsTab === 'paiements' && (
+          <div className="panel" style={{ maxWidth: '600px' }}>
+            <div className="panel-title compact"><div><p>Flux Financier</p><h2>Répartition des paiements</h2></div></div>
+            <div className="cart-table" style={{ marginTop: '1rem' }}>
+              <div className="cart-head" style={{ gridTemplateColumns: '1fr auto' }}><span>Méthode</span><span>Montant Encaissé</span></div>
+              {(Object.entries(salesByMethod) as [PaymentMethod, number][]).map(([method, total]) => (
+                <div className="cart-row" key={method} style={{ gridTemplateColumns: '1fr auto' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+                    {method === 'CASH' && <Banknote size={16} color="#10b981" />}
+                    {method === 'CARD' && <CreditCard size={16} color="#3b82f6" />}
+                    {method === 'CREDIT' && <ClipboardList size={16} color="#f59e0b" />}
+                    {method === 'MULTI' && <ReceiptText size={16} color="#8b5cf6" />}
+                    {methodLabel[method]}
+                  </span>
+                  <strong style={{ color: '#0f172a' }}>{formatMoney(total)}</strong>
+                </div>
+              ))}
+              {Object.keys(salesByMethod).length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun encaissement</span>}
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderKitchen = () => {
+    const kitchenSales = [...draftSales, ...sales].filter(s => 
+      (!s.locationId || s.locationId === currentLocationId) &&
+      (s.status === 'Suspendue' || s.status === 'Payee') && 
+      s.kitchenStatus !== 'READY' &&
+      s.lines?.some(l => products.find(p => p.id === l.productId)?.isKitchenItem)
+    ).sort((a, b) => b.id - a.id); // Newest first
+
+    let filteredKitchenSales = kitchenSales;
+    if (kitchenFilter === 'drinks') {
+      filteredKitchenSales = kitchenSales.map(sale => ({
+        ...sale,
+        lines: sale.lines?.filter(l => {
+          const p = products.find(prod => prod.id === l.productId);
+          return p?.isKitchenItem && p.category === 'Boissons';
+        })
+      })).filter(sale => sale.lines && sale.lines.length > 0);
+    } else if (kitchenFilter === 'food') {
+      filteredKitchenSales = kitchenSales.map(sale => ({
+        ...sale,
+        lines: sale.lines?.filter(l => {
+          const p = products.find(prod => prod.id === l.productId);
+          return p?.isKitchenItem && p.category !== 'Boissons';
+        })
+      })).filter(sale => sale.lines && sale.lines.length > 0);
+    }
+
+    const readyCount = [...draftSales, ...sales].filter(s => s.kitchenStatus === 'READY').length;
+
+    return (
+      <section style={{ padding: '1.5rem', background: '#e2e8f0', minHeight: '100vh', display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
+        {/* Left Side: Orders Grid */}
+        <div className="panel wide-panel" style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: '16px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="panel-title compact" style={{ borderBottom: '1px solid #1e293b', paddingBottom: '1rem', marginBottom: '1.5rem', padding: '1.5rem 1.5rem 0' }}>
+            <div>
+              <p style={{ color: '#38bdf8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>KDS - Kitchen Display System</p>
+              <h2 style={{ color: '#f8fafc', fontSize: '1.75rem' }}>Bons de préparation</h2>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <span style={{ background: '#1e293b', padding: '0.5rem 1rem', borderRadius: '8px', color: '#94a3b8', fontSize: '0.9rem', fontWeight: 600 }}>
+                {filteredKitchenSales.length} {filteredKitchenSales.length > 1 ? 'Commandes affichées' : 'Commande affichée'}
+              </span>
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', padding: '0 1.5rem 1.5rem', overflowY: 'auto' }}>
+            {filteredKitchenSales.length === 0 ? (
+              <div style={{ width: '100%', padding: '4rem', textAlign: 'center', color: '#64748b' }}>
+                <Utensils size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 600, color: '#94a3b8' }}>Aucune commande à préparer</h3>
+                <p>En attente de nouveaux tickets ou changez les filtres...</p>
+              </div>
+            ) : (
+              filteredKitchenSales.map((sale, idx) => {
+                const isUrgent = idx > 5; // Simulate urgency for older tickets
+                const ticketItems = (sale.lines || []).filter(l => products.find(p => p.id === l.productId)?.isKitchenItem);
+                
+                return (
+                  <div key={sale.id} style={{ 
+                    flex: '1 1 300px',
+                    maxWidth: '400px',
+                    background: isUrgent ? '#450a0a' : '#1e293b', 
+                    borderRadius: '12px', 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    borderTop: `6px solid ${isUrgent ? '#ef4444' : '#3b82f6'}`,
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)'
+                  }}>
+                    <div style={{ padding: '1.25rem', borderBottom: `1px dashed ${isUrgent ? '#7f1d1d' : '#334155'}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <strong style={{ fontSize: '1.5rem', color: '#fff', letterSpacing: '0.05em' }}>{sale.ticket}</strong>
+                        <span style={{ background: isUrgent ? '#ef4444' : '#3b82f6', color: '#fff', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700 }}>
+                          {sale.status === 'Payee' ? 'PAYÉ' : 'EN COURS'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: isUrgent ? '#fca5a5' : '#94a3b8', fontSize: '0.9rem', fontWeight: 500 }}><Clock size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }}/> {sale.createdAt}</span>
+                        <span style={{ color: '#fbbf24', fontSize: '0.95rem', fontWeight: 600 }}>{sale.referenceNote || 'Table / Comptoir'}</span>
+                      </div>
+                    </div>
+                    
+                    <div style={{ padding: '1.25rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {ticketItems.map(line => (
+                        <div key={line.productId} style={{ 
+                          display: 'flex', 
+                          alignItems: 'flex-start', 
+                          gap: '0.75rem',
+                          background: isUrgent ? '#7f1d1d' : '#0f172a',
+                          padding: '0.75rem',
+                          borderRadius: '8px'
+                        }}>
+                          <strong style={{ 
+                            background: '#fff', 
+                            color: '#0f172a', 
+                            minWidth: '28px', 
+                            height: '28px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            borderRadius: '6px',
+                            fontSize: '1rem'
+                          }}>{line.quantity}</strong>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '1.1rem', color: '#f8fafc', fontWeight: 600, lineHeight: 1.2 }}>{line.name}</div>
+                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>⚠️ {line.note}</em>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div style={{ padding: '1.25rem', borderTop: `1px solid ${isUrgent ? '#7f1d1d' : '#334155'}` }}>
+                      <button className="primary-action" onClick={() => markKitchenReady(sale.id)} style={{ 
+                        width: '100%', 
+                        padding: '1rem', 
+                        background: '#10b981', 
+                        color: '#fff', 
+                        border: 'none', 
+                        fontSize: '1.1rem',
+                        fontWeight: 700,
+                        borderRadius: '8px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        cursor: 'pointer'
+                      }}>
+                        <CheckCircle size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '8px' }}/>
+                        Marquer Prêt
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Side: Supervision Cuisine */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="dashboard-sidebar-block" style={{ padding: '1.5rem', background: '#0f172a', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+            <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', color: '#e2e8f0', borderBottom: '1px solid #1e293b', paddingBottom: '0.5rem' }}>Service en cours</h3>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', background: '#1e293b', padding: '1rem', borderRadius: '12px' }}>
+              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.8rem', fontWeight: 800, color: '#f59e0b' }}>{kitchenSales.length}</span><span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>En attente</span></div>
+              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.8rem', fontWeight: 800, color: '#10b981' }}>{readyCount}</span><span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Terminées</span></div>
+            </div>
+
+            <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filtres de Catégories</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '1.5rem' }}>
+              <button onClick={() => setKitchenFilter('all')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'all' ? '#3b82f6' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Tout afficher</span></button>
+              <button onClick={() => setKitchenFilter('food')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'food' ? '#f59e0b' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Plats uniquement</span></button>
+              <button onClick={() => setKitchenFilter('drinks')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'drinks' ? '#0ea5e9' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Boissons uniquement</span></button>
+            </div>
+
+            {kitchenSales.length > 5 && (
+              <div style={{ background: '#450a0a', padding: '1rem', borderRadius: '12px', borderLeft: '4px solid #ef4444' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fca5a5', fontWeight: 700, marginBottom: '0.5rem' }}><AlertTriangle size={18} /> Alertes</div>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#fecaca' }}>{kitchenSales.length - 5} commandes en attente depuis longtemps !</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
+          const renderTables = () => {
+    let allTables: any[] = [];
+    tableGroups.forEach(g => {
+      g.tables?.forEach((t: any) => {
+        const tNum = t.name;
+        const occupiedSale = draftSales.find(s => s.status === 'Suspendue' && s.referenceNote?.includes(tNum));
+        allTables.push({ tNum, groupName: g.name, isOccupied: !!occupiedSale, sale: occupiedSale });
+      });
+    });
+    
+    const occupiedCount = allTables.filter(t => t.isOccupied).length;
+    const freeCount = allTables.length - occupiedCount;
+    
+    const selectedTableData = viewSelectedTable ? allTables.find(t => t.tNum === viewSelectedTable) : null;
+
+    return (
+      <section style={{ padding: '2rem', background: '#f8fafc', minHeight: '100vh', display: 'grid', gridTemplateColumns: '1fr 340px', gap: '32px' }}>
+        {/* Left Side: Table Grid */}
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="panel-title compact" style={{ marginBottom: '2rem' }}>
+            <div><p style={{ color: '#64748b' }}>Restaurant</p><h2 style={{ fontSize: '2rem', color: '#0f172a' }}>Plan de salle</h2></div>
+          </div>
+
+          {tableGroups.map((group, groupIdx) => {
+            const groupTables = allTables.filter(t => t.groupName === group.name);
+            const filteredGroupTables = groupTables.filter(t => {
+              if (tableFilter === 'free') return !t.isOccupied;
+              if (tableFilter === 'occupied') return t.isOccupied;
+              return true;
+            });
+            
+            if (filteredGroupTables.length === 0) return null;
+
+            return (
+              <div key={group.name} style={{ marginBottom: '3rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem', marginBottom: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#334155', margin: 0 }}>{group.name}</h3>
+                  <button className="ghost-action" onClick={() => {
+                    setStatus('Création de table via API non implémentée');
+                  }} style={{ fontSize: '0.85rem' }}><Plus size={14} /> Ajouter une table</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1.5rem' }}>
+                  {filteredGroupTables.map((t, i) => {
+                    const { tNum, isOccupied, sale: occupiedSale } = t;
+                    const isSelected = viewSelectedTable === tNum;
+                    
+                    return (
+                      <div key={tNum} style={{ 
+                        background: '#fff', 
+                        border: `2px solid ${isSelected ? '#3b82f6' : (isOccupied ? '#fca5a5' : '#e2e8f0')}`, 
+                        borderRadius: '16px', 
+                        overflow: 'hidden',
+                        boxShadow: isSelected ? '0 0 0 4px rgba(59, 130, 246, 0.2)' : (isOccupied ? '0 10px 15px -3px rgba(239, 68, 68, 0.1)' : '0 4px 6px -1px rgba(0, 0, 0, 0.05)'),
+                        transition: 'all 0.2s',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => setViewSelectedTable(tNum)}
+                      className="table-card-hover"
+                      >
+                        <div style={{ height: '6px', background: isOccupied ? '#ef4444' : '#22c55e', width: '100%' }}></div>
+                        <div style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1rem' }}>
+                          <div style={{ 
+                            width: '60px', 
+                            height: '60px', 
+                            borderRadius: '50%', 
+                            background: isOccupied ? '#fef2f2' : '#f0fdf4', 
+                            color: isOccupied ? '#ef4444' : '#16a34a', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            border: `1px solid ${isOccupied ? '#fecaca' : '#bbf7d0'}`
+                          }}>
+                            <Utensils size={28} />
+                          </div>
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a', fontWeight: 800 }}>{tNum.split(' ').slice(1).join(' ')}</h3>
+                            <span style={{ fontSize: '0.85rem', color: isOccupied ? '#ef4444' : '#16a34a', fontWeight: 600 }}>{isOccupied ? 'En cours' : 'Libre'}</span>
+                          </div>
+                          
+                          <div style={{ width: '100%', height: '1px', background: '#e2e8f0', margin: '0.2rem 0' }}></div>
+                          
+                          {isOccupied && occupiedSale ? (
+                            <div style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                <span>{occupiedSale.lines?.length || 0} art.</span>
+                                <span style={{ fontWeight: 700, color: '#0f172a' }}>{formatMoney(occupiedSale.total)}</span>
+                              </div>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: '#94a3b8', fontSize: '0.75rem' }}><Clock size={12}/> {occupiedSale.createdAt.split(' ')[1]}</span>
+                            </div>
+                          ) : (
+                            <div style={{ width: '100%', color: '#94a3b8', fontSize: '0.8rem' }}>
+                              Prête pour commande
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right Side: Contrôles de Salle */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div className="dashboard-sidebar-block" style={{ padding: '1.5rem' }}>
+            <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>Vue d'ensemble</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 800, color: '#3b82f6' }}>{allTables.length}</span><span style={{ fontSize: '0.8rem', color: '#64748b' }}>Total</span></div>
+              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 800, color: '#ef4444' }}>{occupiedCount}</span><span style={{ fontSize: '0.8rem', color: '#64748b' }}>Occupées</span></div>
+              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.5rem', fontWeight: 800, color: '#22c55e' }}>{freeCount}</span><span style={{ fontSize: '0.8rem', color: '#64748b' }}>Libres</span></div>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '1.5rem' }}>
+              <button onClick={() => setTableFilter('all')} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: tableFilter === 'all' ? '#f1f5f9' : '#fff', fontWeight: tableFilter === 'all' ? 700 : 500, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Toutes les tables</span></button>
+              <button onClick={() => setTableFilter('free')} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0', background: tableFilter === 'free' ? '#f0fdf4' : '#fff', fontWeight: tableFilter === 'free' ? 700 : 500, color: '#16a34a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Libres</span></button>
+              <button onClick={() => setTableFilter('occupied')} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #fecaca', background: tableFilter === 'occupied' ? '#fef2f2' : '#fff', fontWeight: tableFilter === 'occupied' ? 700 : 500, color: '#dc2626', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Occupées</span></button>
+            </div>
+
+            <button className="primary-action" style={{ width: '100%', justifyContent: 'center' }} onClick={() => {
+              const name = window.prompt("Nom de la zone (ex: Balcon)");
+              if (!name) return;
+              const countStr = window.prompt("Nombre de tables dans cette zone ?");
+              setStatus('Création de zone via API non implémentée');
+            }}><Plus size={16} /> Ajouter une zone</button>
+          </div>
+
+          {selectedTableData && (
+            <div className="dashboard-sidebar-block" style={{ padding: '1.5rem', border: `2px solid ${selectedTableData.isOccupied ? '#fca5a5' : '#bbf7d0'}` }}>
+              <h3 style={{ margin: '0 0 1rem', fontSize: '1.2rem', color: '#0f172a' }}>{selectedTableData.tNum}</h3>
+              <p style={{ margin: '0 0 1rem', color: '#64748b', fontSize: '0.9rem' }}>Zone : {selectedTableData.groupName}</p>
+              
+              {selectedTableData.isOccupied && selectedTableData.sale ? (
+                <>
+                  <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}><span>Montant:</span><strong style={{ fontSize: '1.2rem' }}>{formatMoney(selectedTableData.sale.total)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}><span>Articles:</span><strong>{selectedTableData.sale.lines?.length || 0}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}><span>Début:</span><strong>{selectedTableData.sale.createdAt.split(' ')[1]}</strong></div>
+                  </div>
+                  <button className="settings-gradient-btn" style={{ width: '100%', padding: '12px', borderRadius: '8px', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }} onClick={() => resumeSale(selectedTableData.sale!)}>
+                    Ouvrir la Commande <ArrowRight size={18} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ background: '#f0fdf4', color: '#16a34a', padding: '1rem', borderRadius: '8px', marginBottom: '1rem', textAlign: 'center', fontWeight: 600 }}>
+                    Table prête pour de nouveaux clients
+                  </div>
+                  <button className="primary-action" style={{ width: '100%', justifyContent: 'center', background: '#22c55e', color: 'white', border: 'none' }} onClick={() => {
+                    setSelectedTable(selectedTableData.tNum);
+                    setPage('POS');
+                  }}>
+                    Nouvelle Commande <ArrowRight size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
+
+  const renderSettings = () => (
+    <section className="settings-layout">
+      <div className="settings-header">
+        <div className="settings-header-title">
+          <div className="settings-icon-box"><Settings size={22} /></div>
+          Paramètres
+        </div>
+        <button className="settings-gradient-btn" style={{ padding: '0.75rem 1.5rem', borderRadius: '12px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setStatus('Paramètres sauvegardés avec succès !')}>
+          <Save size={18} /> Enregistrer
+        </button>
+      </div>
+
+      <div className="settings-sidebar">
+        {[
+          { id: 'general', label: 'Général', icon: Globe },
+          { id: 'company', label: 'Société', icon: Building },
+          { id: 'legal', label: 'Légal & Fiscal', icon: FileText },
+          { id: 'templates', label: 'Modèles & Impressions', icon: Palette },
+          { id: 'locations', label: 'Boutiques & Emplacements', icon: MapPin },
+          { id: 'hardware', label: 'Matériel & Périphériques', icon: Monitor },
+          { id: 'users', label: 'Utilisateurs', icon: Users },
+          { id: 'permissions', label: 'Rôles & Permissions', icon: Shield }
+        ].map(t => (
+          <button key={t.id} onClick={() => setSettingsTab(t.id as any)} className={`settings-nav-item ${settingsTab === t.id ? 'active' : ''}`}>
+            <t.icon size={18} /> <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="settings-content-area">
+        {settingsTab === 'general' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Configuration</p><h2>Paramètres Généraux</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Préférences globales de l'application.</span></div>
+            </div>
+            <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.5rem', maxWidth: '600px' }}>
+              <label><span>Devise par défaut</span><select value={companySettings.currency} onChange={e => setCompanySettings(s => ({...s, currency: e.target.value}))} style={{ height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px' }}><option value="MAD">MAD (Dirham)</option><option value="EUR">EUR (Euro)</option><option value="USD">USD (Dollar)</option></select></label>
+              <label><span>TVA par défaut (%)</span><input type="number" value={companySettings.defaultTva} onChange={e => setCompanySettings(s => ({...s, defaultTva: e.target.value}))} /></label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row', marginTop: '10px' }}><input type="checkbox" checked={companySettings.pricesIncludeTva} onChange={e => setCompanySettings(s => ({...s, pricesIncludeTva: e.target.checked}))} style={{ width: 'auto' }} /> <span>Les prix saisis incluent la TVA (TTC)</span></label>
+              <label style={{ marginTop: '10px' }}>
+                <span>Verrouillage automatique (minutes)</span>
+                <input type="number" min="0" value={companySettings.autoLockMinutes} onChange={e => setCompanySettings(s => ({...s, autoLockMinutes: Number(e.target.value)}))} style={{ marginTop: '4px' }} />
+                <small style={{display:'block',marginTop:'4px',color:'#64748b'}}>0 pour désactiver</small>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'company' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Identité</p><h2>Informations de la Société</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Coordonnées de l'entreprise et logo.</span></div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '2rem', alignItems: 'center' }}>
+              <div style={{ width: '80px', height: '80px', borderRadius: '16px', background: companySettings.logoUrl ? 'transparent' : '#f1f5f9', border: companySettings.logoUrl ? 'none' : '1px dashed #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', overflow: 'hidden' }}>
+                {companySettings.logoUrl ? <img src={companySettings.logoUrl} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <ImageIcon size={32} />}
+              </div>
+              <div>
+                <label style={{ display: 'inline-block', padding: '0.5rem 1rem', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', fontWeight: 600, color: '#334155', cursor: 'pointer', marginBottom: '0.5rem' }}>
+                  Télécharger le logo
+                  <input type="file" style={{ display: 'none' }} accept="image/*" onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      setCompanySettings(s => ({...s, logoUrl: URL.createObjectURL(e.target.files![0])}));
+                    }
+                  }} />
+                </label>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b' }}>Format recommandé: PNG (fond transparent), JPG.</p>
+              </div>
+            </div>
+
+            <div className="field-cluster" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <label><span>Nom de l'entreprise</span><input value={companySettings.companyName} onChange={e => setCompanySettings(s => ({...s, companyName: e.target.value}))} /></label>
+              <label><span>Téléphone</span><input value={companySettings.phone} onChange={e => setCompanySettings(s => ({...s, phone: e.target.value}))} /></label>
+              <label style={{ gridColumn: '1 / -1' }}><span>Adresse complète</span><input value={companySettings.address} onChange={e => setCompanySettings(s => ({...s, address: e.target.value}))} /></label>
+              <label><span>Email de contact</span><input value={companySettings.email} onChange={e => setCompanySettings(s => ({...s, email: e.target.value}))} /></label>
+              <label><span>Couleur de marque</span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input type="color" value={companySettings.primaryColor} onChange={e => setCompanySettings(s => ({...s, primaryColor: e.target.value}))} style={{ width: '44px', height: '44px', padding: 0, border: 'none', borderRadius: '8px', cursor: 'pointer', background: 'transparent' }} />
+                  <input value={companySettings.primaryColor} onChange={e => setCompanySettings(s => ({...s, primaryColor: e.target.value}))} style={{ flex: 1, height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px', fontFamily: 'monospace' }} />
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'legal' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Identification</p><h2>Légal & Fiscal</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Identifiants officiels utilisés sur vos documents.</span></div>
+            </div>
+            <div className="field-cluster" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <label><span>Registre du Commerce (RC)</span><input value={companySettings.rc} onChange={e => setCompanySettings(s => ({...s, rc: e.target.value}))} /></label>
+              <label><span>Identifiant Commun d'Entreprise (ICE)</span><input value={companySettings.ice} onChange={e => setCompanySettings(s => ({...s, ice: e.target.value}))} /></label>
+              <label><span>Identifiant Fiscal (IF)</span><input value={companySettings.if} onChange={e => setCompanySettings(s => ({...s, if: e.target.value}))} /></label>
+              <label><span>Taxe Professionnelle (Patente)</span><input value={companySettings.patente} onChange={e => setCompanySettings(s => ({...s, patente: e.target.value}))} /></label>
+              <label><span>INPE (Si domaine médical)</span><input value={companySettings.inpe} onChange={e => setCompanySettings(s => ({...s, inpe: e.target.value}))} /></label>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'templates' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+            {/* TICKET SETTINGS */}
+            <div className="settings-templates-grid">
+              <div className="product-form-panel" style={{ padding: '2rem' }}>
+                <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+                  <div><p>POS</p><h2>Modèle de Ticket (Thermique)</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Configuration du ticket de caisse.</span></div>
+                </div>
+                <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+                  <label><span>Titre du ticket</span><input value={companySettings.ticketHeader} onChange={e => setCompanySettings(s => ({...s, ticketHeader: e.target.value}))} /></label>
+                  <label><span>Message de remerciement (Pied)</span><textarea value={companySettings.ticketFooter} onChange={e => setCompanySettings(s => ({...s, ticketFooter: e.target.value}))} style={{ height: '60px', resize: 'none', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee', fontFamily: 'inherit' }} /></label>
+                  
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>Préférences d'affichage</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row' }}><input type="checkbox" checked={companySettings.showIceOnTicket} onChange={e => setCompanySettings(s => ({...s, showIceOnTicket: e.target.checked}))} style={{ width: 'auto' }} /> <span>Afficher l'ICE et le RC sur le ticket</span></label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row' }}><input type="checkbox" checked={companySettings.showCashierName} onChange={e => setCompanySettings(s => ({...s, showCashierName: e.target.checked}))} style={{ width: 'auto' }} /> <span>Afficher le nom du caissier</span></label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row' }}><input type="checkbox" checked={companySettings.showCustomerInfo} onChange={e => setCompanySettings(s => ({...s, showCustomerInfo: e.target.checked}))} style={{ width: 'auto' }} /> <span>Afficher le client si sélectionné</span></label>
+                  </div>
+                  <label><span>CSS Personnalisé (Avancé)</span><textarea value={companySettings.customTicketCss} onChange={e => setCompanySettings(s => ({...s, customTicketCss: e.target.value}))} style={{ height: '80px', fontFamily: 'monospace', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee' }} placeholder=".ticket { font-weight: bold; }" /></label>
+                </div>
+              </div>
+              <div className="live-receipt-preview">
+                <div style={{ background: '#fff', width: '100%', padding: '1rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.8rem', fontFamily: 'monospace', borderRadius: '8px' }}>
+                  <div style={{ textAlign: 'center', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px dashed #cbd5e1' }}>
+                    {companySettings.logoUrl && <img src={companySettings.logoUrl} style={{ maxWidth: '120px', maxHeight: '60px', objectFit: 'contain', margin: '0 auto 10px' }} />}
+                    <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.2rem', fontWeight: 800 }}>{companySettings.companyName || 'Boutique'}</h1>
+                    <div>{companySettings.address}</div>
+                    <div>Tél: {companySettings.phone}</div>
+                    {companySettings.showIceOnTicket && companySettings.ice && <div>ICE: {companySettings.ice}</div>}
+                    {companySettings.showIceOnTicket && companySettings.rc && <div>RC: {companySettings.rc}</div>}
+                  </div>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <div style={{ fontWeight: 'bold' }}>{companySettings.ticketHeader}</div>
+                    <div>Date: {new Date().toLocaleDateString('fr-FR')} 14:30</div>
+                    <div>Ticket: #0001</div>
+                    {companySettings.showCashierName && <div>Caissier: Admin</div>}
+                    {companySettings.showCustomerInfo && <div>Client: Client Passager</div>}
+                  </div>
+                  <div style={{ borderBottom: '1px dashed #cbd5e1', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, marginBottom: '0.25rem' }}><span>ARTICLE</span><span>PRIX</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>1x Produit A</span><span>150.00</span></div>
+                  </div>
+                  <div style={{ textAlign: 'right', fontWeight: 600, fontSize: '1rem', marginBottom: '1rem' }}>TOTAL: 150.00 {companySettings.currency}</div>
+                  <div style={{ textAlign: 'center', fontStyle: 'italic', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>{companySettings.ticketFooter}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* INVOICE SETTINGS */}
+            <div className="settings-templates-grid">
+              <div className="product-form-panel" style={{ padding: '2rem' }}>
+                <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+                  <div><p>A4</p><h2>Modèle de Facture</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Configuration des factures.</span></div>
+                </div>
+                <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+                  <label><span>Titre du document</span><input value={companySettings.invoiceHeader} onChange={e => setCompanySettings(s => ({...s, invoiceHeader: e.target.value}))} placeholder="Ex: FACTURE" /></label>
+                  <label><span>Conditions de vente / Pied de page</span><textarea value={companySettings.invoiceFooter} onChange={e => setCompanySettings(s => ({...s, invoiceFooter: e.target.value}))} style={{ height: '80px', resize: 'none', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee', fontFamily: 'inherit' }} /></label>
+                  <label><span>CSS Personnalisé (Avancé)</span><textarea value={companySettings.customInvoiceCss} onChange={e => setCompanySettings(s => ({...s, customInvoiceCss: e.target.value}))} style={{ height: '80px', fontFamily: 'monospace', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee' }} placeholder=".invoice-table { border: 1px solid black; }" /></label>
+                </div>
+              </div>
+              <div className="live-receipt-preview">
+                <div style={{ background: '#fff', width: '100%', padding: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.7rem', borderRadius: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: `2px solid ${companySettings.primaryColor}`, paddingBottom: '1rem', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {companySettings.logoUrl && <img src={companySettings.logoUrl} style={{ maxWidth: '100px', maxHeight: '40px', objectFit: 'contain' }} />}
+                      <div><h1 style={{ margin: 0, color: companySettings.primaryColor, fontSize: '1.2rem', textTransform: 'uppercase' }}>{companySettings.invoiceHeader || 'FACTURE'}</h1><span style={{ color: '#64748b' }}>N° FAC-2026-001</span></div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}><strong>{companySettings.companyName}</strong><br />{companySettings.address}<br />{companySettings.phone}</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderBottom: '1px solid #e2e8f0', paddingBottom: '0.25rem', marginBottom: '0.5rem' }}><span>Description</span><span>Total</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>1x Service</span><span>1500.00 {companySettings.currency}</span></div>
+                  </div>
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '2rem', textAlign: 'center', color: '#64748b' }}>
+                    <div style={{ marginBottom: '0.5rem' }}>RC: {companySettings.rc} | ICE: {companySettings.ice} | IF: {companySettings.if} | Patente: {companySettings.patente}</div>
+                    <div style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{companySettings.invoiceFooter}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'locations' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div><p>Emplacements</p><h2>Gestion des Boutiques</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Gérez vos succursales et magasins.</span></div>
+              <button className="primary-action" onClick={async () => {
+                try {
+                  const response = await apiFetch(`/api/locations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: `Nouvelle Boutique ${locations.length + 1}` }),
+                  });
+                  if (!response.ok) throw new Error();
+                  const loc = (await response.json()).location;
+                  setLocations([...locations, { id: loc.id, name: loc.name, address: loc.address || '', phone: '' }]);
+                  setStatus('Boutique ajoutée');
+                } catch {
+                  setStatus('Erreur: Impossible de créer la boutique');
+                }
+              }}><Plus size={16} /> Ajouter une boutique</button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {locations.map((loc, idx) => (
+                <div key={loc.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.5rem', position: 'relative' }}>
+                  <button onClick={() => {
+                    if (locations.length > 1) {
+                      setLocations(locations.filter(l => l.id !== loc.id));
+                      if (currentLocationId === loc.id) setCurrentLocationId(locations.find(l => l.id !== loc.id)!.id);
+                    } else {
+                      setStatus('Vous devez garder au moins une boutique.');
+                    }
+                  }} style={{ position: 'absolute', top: '1rem', right: '1rem', background: '#fee2e2', color: '#ef4444', border: 'none', width: '32px', height: '32px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={16} /></button>
+                  <div className="field-cluster" style={{ gridTemplateColumns: '1fr 1fr', gap: '1rem', paddingRight: '2.5rem' }}>
+                    <label><span>Nom de la boutique</span><input value={loc.name} onChange={e => {
+                      const updated = [...locations];
+                      updated[idx].name = e.target.value;
+                      setLocations(updated);
+                    }} /></label>
+                    <label><span>Téléphone</span><input value={loc.phone} onChange={e => {
+                      const updated = [...locations];
+                      updated[idx].phone = e.target.value;
+                      setLocations(updated);
+                    }} /></label>
+                    <label style={{ gridColumn: '1 / -1' }}><span>Adresse complète</span><input value={loc.address} onChange={e => {
+                      const updated = [...locations];
+                      updated[idx].address = e.target.value;
+                      setLocations(updated);
+                    }} /></label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'hardware' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Périphériques</p><h2>Balance & Code-barres</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Configuration des codes-barres issus de balances intelligentes.</span></div>
+            </div>
+            
+            <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input type="checkbox" id="scaleEnabled" checked={companySettings.scaleEnabled} onChange={e => setCompanySettings(s => ({...s, scaleEnabled: e.target.checked}))} style={{ width: '18px', height: '18px' }} />
+              <label htmlFor="scaleEnabled" style={{ fontWeight: 700, cursor: 'pointer', margin: 0 }}>Activer l'analyse des codes-barres de balance</label>
+            </div>
+
+            {companySettings.scaleEnabled && (
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                <label>
+                  <span>Préfixe de la balance</span>
+                  <input type="text" value={companySettings.scalePrefix} onChange={e => setCompanySettings(s => ({...s, scalePrefix: e.target.value}))} placeholder="ex: 20" />
+                </label>
+                <label>
+                  <span>Longueur du code (SKU)</span>
+                  <input type="number" min="4" max="6" value={companySettings.scaleSkuLength} onChange={e => setCompanySettings(s => ({...s, scaleSkuLength: Number(e.target.value)}))} />
+                </label>
+                <label style={{ gridColumn: '1 / -1' }}>
+                  <span>Donnée encodée à la fin du code-barres</span>
+                  <select value={companySettings.scaleType} onChange={e => setCompanySettings(s => ({...s, scaleType: e.target.value as any}))}>
+                    <option value="WEIGHT">Poids (en grammes)</option>
+                    <option value="PRICE">Prix total (en centimes)</option>
+                  </select>
+                </label>
+              </div>
+            )}
+            
+            <div style={{ marginTop: '2rem', padding: '1rem', background: '#eef2ff', borderRadius: '8px', border: '1px solid #c7d2fe' }}>
+              <strong style={{ color: '#3730a3', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Comment ça marche ?</strong>
+              <p style={{ color: '#4338ca', fontSize: '0.8rem', margin: 0 }}>Si votre balance imprime un code "20 0145 01250 X" et que vous avez choisi "Poids", le système lira l'article "0145" et ajoutera 1.250 Kg au panier.</p>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'users' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Accès</p><h2>Utilisateurs et Rôles</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Gérez les accès à l'application.</span></div>
+            </div>
+            <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', padding: '12px 16px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>
+                <span>Utilisateur</span><span>Rôle</span><span>Statut</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', padding: '16px', borderTop: '1px solid var(--line)', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), #9333ea)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>A</div>
+                  <div><strong>admin@taysr.com</strong><br/><span style={{ fontSize: '0.8rem', color: '#64748b' }}>Administrateur principal</span></div>
+                </div>
+                <div><span style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>SUPER ADMIN</span></div>
+                <div><span style={{ padding: '4px 10px', background: '#f0fdf4', color: '#16a34a', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>Actif</span></div>
+              </div>
+            </div>
+            <div style={{ marginTop: '1rem', textAlign: 'right' }}>
+              <button className="primary-action" disabled style={{ opacity: 0.5 }}>+ Ajouter un utilisateur</button>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'permissions' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Accès</p><h2>Rôles & Permissions</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Définissez les modules accessibles pour chaque rôle.</span></div>
+              <button className="ghost-action" style={{ color: '#ef4444', fontWeight: 700 }} onClick={() => saveRolePermissions({...defaultRolePermissions})}><RefreshCw size={14} style={{ marginRight: '6px' }} />Réinitialiser</button>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc' }}>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em', borderBottom: '2px solid #e2e8f0' }}>Module</th>
+                    {(['ADMIN', 'MANAGER', 'CASHIER'] as UserRole[]).map(role => (
+                      <th key={role} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, color: role === 'ADMIN' ? '#6366f1' : role === 'MANAGER' ? '#10b981' : '#f59e0b', textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em', borderBottom: '2px solid #e2e8f0' }}>{role}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allModuleLabels.filter(m => {
+                    const entry = baseModules.find(([label]) => label === m);
+                    return entry && (entry[2] === 'POS' || enabledModules.includes(entry[2] as any));
+                  }).map((mod, idx) => (
+                    <tr key={mod} style={{ background: idx % 2 === 0 ? '#fff' : '#fafbfc' }}>
+                      <td style={{ padding: '10px 16px', fontWeight: 600, color: '#1e293b', borderBottom: '1px solid #f1f5f9' }}>{mod}</td>
+                      {(['ADMIN', 'MANAGER', 'CASHIER'] as UserRole[]).map(role => {
+                        const checked = rolePermissions[role]?.includes(mod) ?? false;
+                        const isAdmin = role === 'ADMIN';
+                        return (
+                          <td key={role} style={{ textAlign: 'center', padding: '10px 16px', borderBottom: '1px solid #f1f5f9' }}>
+                            <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '8px', cursor: isAdmin ? 'not-allowed' : 'pointer', background: checked ? (isAdmin ? '#eef2ff' : '#f0fdf4') : '#f8fafc', border: `2px solid ${checked ? (isAdmin ? '#a5b4fc' : '#86efac') : '#e2e8f0'}`, transition: 'all 0.15s', opacity: isAdmin ? 0.7 : 1 }}>
+                              <input type="checkbox" checked={checked} disabled={isAdmin} onChange={() => {
+                                if (isAdmin) return;
+                                const current = rolePermissions[role] || [];
+                                const updated = checked ? current.filter(m => m !== mod) : [...current, mod];
+                                saveRolePermissions({ ...rolePermissions, [role]: updated });
+                              }} style={{ width: '16px', height: '16px', cursor: isAdmin ? 'not-allowed' : 'pointer', accentColor: isAdmin ? '#6366f1' : '#16a34a' }} />
+                            </label>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', fontSize: '0.85rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Shield size={18} />
+              <span>Les permissions <strong>Admin</strong> sont verrouillées pour la sécurité. Modifiez les accès <strong>Manager</strong> et <strong>Caissier</strong> selon vos besoins.</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  const renderRegisters = () => {
+    const localLogs = registerLogs.filter(log => !log.locationId || log.locationId === currentLocationId);
+    return (
+    <section className="panel table-section flush-top">
+      <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <PageHeader 
+          icon={Lock}
+          title="Historique des Caisses" 
+          subtitle="Suivi des ouvertures et clôtures de caisse" 
+        />
+      </div>
+      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 1.5rem 1.5rem' }}>
+        <div className="table-toolbar-stats">
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{localLogs.length}</span>
+            <span className="toolbar-stat-label">Sessions</span>
+          </div>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-head" style={{ gridTemplateColumns: '1fr 1.5fr 1.5fr 1fr 1fr 1fr 1fr' }}>
+          <span>ID</span><span>Ouverture</span><span>Clôture</span><span>Caissier</span><span>Attendu</span><span>Déclaré</span><span>Écart</span>
+        </div>
+        {localLogs.map(log => (
+          <div className="data-row" style={{ gridTemplateColumns: '1fr 1.5fr 1.5fr 1fr 1fr 1fr 1fr' }} key={log.id}>
+            <span>#{log.id}</span>
+            <span>{log.openedAt}</span>
+            <span>{log.closedAt}</span>
+            <span>{log.cashierName}</span>
+            <span>{formatMoney(log.expectedCash)}</span>
+            <span>{formatMoney(log.actualCash)}</span>
+            <span className={log.difference === 0 ? 'badge ok' : log.difference > 0 ? 'badge ok' : 'badge warn'}>
+              {formatMoney(log.difference)}
+            </span>
+          </div>
+        ))}
+        {localLogs.length === 0 && (
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucun historique disponible.</div>
+        )}
+      </div>
+    </section>
+  )};
+
+  const renderPage = () => {
+    if (page === 'Tableau de bord') return renderDashboard();
+    if (page === 'POS') return renderRegister();
+    if (page === 'Produits') return renderProducts();
+    if (page === 'Clients') return renderContacts('Client');
+    if (page === 'Fournisseurs') return renderContacts('Fournisseur');
+    if (page === 'Stock') return renderStock();
+    if (page === 'Achats') return renderPurchases();
+    if (page === 'Depenses') return renderExpenses();
+    if (page === 'Ventes') return renderSales();
+      if (page === 'Factures') return renderFactures();
+    if (page === 'Paiements') return renderPayments();
+    if (page === 'Rapports') return renderReports();
+    if (page === 'Tables') return renderTables();
+    if (page === 'Cuisine') return renderKitchen();
+    if (page === 'Parametres') return renderSettings();
+    if (page === 'Caisses') return renderRegisters();
+    return renderDashboard();
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="auth-layout">
+        <div className="auth-visual">
+          <div style={{ marginBottom: '1.5rem', zIndex: 1 }}>
+            <div style={{ fontSize: '4.5rem', fontWeight: 900, letterSpacing: '-0.04em', lineHeight: 1, color: '#ffffff' }}>
+              taysr<span style={{ color: '#9333ea' }}>.</span>
+            </div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#cbd5e1', letterSpacing: '0.05em', marginTop: '-4px' }}>
+              ERP
+            </div>
+          </div>
+          <p>Le système de gestion nouvelle génération. Connectez-vous pour accéder à votre espace de travail, gérer vos ventes, votre stock et analyser vos performances en temps réel.</p>
+        </div>
+        <div className="auth-form-container">
+          <div className="auth-form-box" style={{ maxWidth: '400px' }}>
+            {(!isLocked || !currentUser) ? (
+              <form onSubmit={handleLogin}>
+                <h2>Connexion</h2>
+                <p>Connectez-vous à l'aide de votre identifiant et mot de passe.</p>
+                <div className="form-group" style={{ marginTop: '1.5rem', textAlign: 'left' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Identifiant (ex: admin)</label>
+                  <input type="text" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} required style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                </div>
+                <div className="form-group" style={{ marginTop: '1rem', textAlign: 'left' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Mot de passe (ex: admin123)</label>
+                  <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                </div>
+                <button type="submit" className="primary-action" style={{ width: '100%', marginTop: '20px', padding: '12px' }}>
+                  Se connecter
+                </button>
+              </form>
+            ) : (
+              <>
+                <h2>Écran verrouillé</h2>
+                <p>Entrez le code PIN pour {currentUser.fullName}</p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '20px 0' }}>
+                  {[0,1,2,3].map(i => (
+                    <div key={i} style={{ width: '40px', height: '40px', borderBottom: '3px solid ' + (pinEntry.length > i ? '#6366f1' : '#cbd5e1'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 'bold' }}>
+                      {pinEntry.length > i ? '•' : ''}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', maxWidth: '250px', margin: '0 auto' }}>
+                  {[1,2,3,4,5,6,7,8,9].map(num => (
+                    <button key={num} onClick={() => setPinEntry(p => p.length < 4 ? p + num.toString() : p)} style={{ padding: '15px', fontSize: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}>{num}</button>
+                  ))}
+                  <button onClick={() => { setIsLocked(false); setCurrentUser(null); setLoginEmail(''); setLoginPassword(''); }} style={{ padding: '15px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}>Quitter</button>
+                  <button onClick={() => setPinEntry(p => p.length < 4 ? p + '0' : p)} style={{ padding: '15px', fontSize: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}>0</button>
+                  <button onClick={() => setPinEntry(p => p.slice(0, -1))} style={{ padding: '15px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}>Effacer</button>
+                </div>
+                <button className="primary-action" style={{ width: '100%', marginTop: '20px', padding: '12px' }} onClick={handlePinUnlock} disabled={pinEntry.length !== 4}>Déverrouiller</button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <div className="brand-wordmark">
+            <div className="brand-line">
+              <strong>taysr<span>.</span></strong>
+            </div>
+            <em>ERP</em>
+          </div>
+        </div>
+        <div style={{ padding: '0 1rem', marginBottom: '1rem' }}>
+          <select 
+            value={currentLocationId} 
+            onChange={(e) => setCurrentLocationId(Number(e.target.value))}
+            style={{ width: '100%', padding: '0.6rem', background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', borderRadius: '8px', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
+          >
+            {locations.map(loc => (
+              <option key={loc.id} value={loc.id}>📍 {loc.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="sidebar-search"><button><Search size={18} /><span>Recherche rapide</span><kbd>Ctrl K</kbd></button></div>
+        <nav>{visibleModules.map(([label, Icon]) => <button className={label === page ? 'active' : ''} key={label as string} onClick={() => setPage(label as any)}><Icon size={18} /><span>{label as string}</span></button>)}</nav>
+        <div className="sidebar-footer">
+          {currentUser ? (
+            <button className="user-chip" onClick={() => { setIsAuthenticated(false); setCurrentUser(null); }}>
+              {currentUser.avatarUrl && <img src={currentUser.avatarUrl} alt={currentUser.fullName || currentUser.username} style={{ width: '24px', height: '24px', borderRadius: '50%' }} />}
+              <strong>{((currentUser.fullName || currentUser.username || '').split(' ')[0])}</strong>
+              <small>{currentUser.role}</small>
+            </button>
+          ) : (
+            <button className="user-chip"><span>A</span><strong>admin</strong><small>ADMIN</small></button>
+          )}
+        </div>
+      </aside>
+      <main className={page === 'POS' ? 'pos-main' : undefined}>
+        {renderPage()}
+        {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {invoiceSale && <InvoicePanel sale={invoiceSale} settings={companySettings} onClose={() => setInvoiceSale(null)} />}
+      </main>
+    </div>
+  );
+};
+
+const Metric = ({ title, value, detail, tone, icon: Icon }: { title: string; value: string; detail: string; tone: string; icon: typeof BarChart3 }) => (
+  <div className={`metric-card ${tone}`}><div><span>{title}</span><strong>{value}</strong><small>{detail}</small></div><Icon size={38} /></div>
+);
+
+const RecordTable = ({ sales, onOpenReceipt }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void }) => (
+  <div className="data-table sales-table">
+    <div className="data-head"><span>Ticket</span><span>Client</span><span>Total</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
+    {sales.map(sale => <div className="data-row" key={sale.id}><span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span><span>{sale.customer}<small>{sale.items} article(s)</small></span><span>{formatMoney(sale.total)}</span><span>{methodLabel[sale.method]}</span><span className={sale.status === 'Credit' ? 'badge warn' : sale.status === 'Suspendue' || sale.status === 'Brouillon' || sale.status === 'Devis' ? 'badge neutral' : 'badge ok'}>{sale.status}</span><span><button className="row-action" onClick={() => onOpenReceipt?.(sale)}>Ticket</button></span></div>)}
+  </div>
+);
+
+const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings: any; onClose: () => void }) => {
+  const isQuotation = sale.status === 'Brouillon' || sale.status === 'Devis';
+  const subtotal = sale.lines ? sale.lines.reduce((sum, line) => sum + (line.unitPrice * line.quantity), 0) : sale.total;
+  // Approximated VAT for display purposes (assuming total includes VAT)
+  const vatAmount = sale.total - (sale.total / 1.20); // standard 20% back calculation
+  const htTotal = sale.total - vatAmount;
+
+  return (
+  <div className="receipt-backdrop print-a4" role="dialog" aria-modal="true">
+    <section className="invoice-panel">
+      <div className="invoice-container">
+        {/* Header */}
+        <div className="invoice-header-row">
+          <div className="invoice-brand">
+            {settings.showLogo && settings.logoUrl && <img src={settings.logoUrl} alt="Logo" />}
+            <h1>{settings.companyName}</h1>
+            <p>{settings.companyAddress}</p>
+            <p>{settings.companyPhone}</p>
+            <p>ICE: {settings.companyIce || '_________________'}</p>
+          </div>
+          <div className="invoice-title">
+            <h2>{isQuotation ? 'DEVIS' : 'FACTURE'}</h2>
+            <p>N° {sale.ticket}</p>
+          </div>
+        </div>
+
+        {/* Meta */}
+        <div className="invoice-meta-row">
+          <div className="invoice-meta-col">
+            <span>Date</span>
+            <strong>{sale.createdAt.split(' ')[0]}</strong>
+          </div>
+          <div className="invoice-meta-col">
+            <span>Client</span>
+            <strong>{sale.customer !== 'Client Divers' ? sale.customer : '______________________'}</strong>
+          </div>
+          <div className="invoice-meta-col">
+            <span>Méthode de paiement</span>
+            <strong>{sale.method} {sale.status !== 'Payee' && !isQuotation ? '(Non payé)' : ''}</strong>
+          </div>
+        </div>
+
+        {/* Table */}
+        <table className="invoice-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th className="right">Qté</th>
+              <th className="right">Prix Unitaire</th>
+              <th className="right">Total TTC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(sale.lines || []).map((line, idx) => (
+              <tr key={idx}>
+                <td>{line.name}</td>
+                <td className="right">{line.quantity}</td>
+                <td className="right">{formatMoney(line.unitPrice)}</td>
+                <td className="right">{formatMoney(line.unitPrice * line.quantity)}</td>
+              </tr>
+            ))}
+            {(!sale.lines || sale.lines.length === 0) && (
+              <tr>
+                <td colSpan={4} style={{ textAlign: 'center', fontStyle: 'italic', color: '#94a3b8' }}>
+                  Détail des articles non disponible pour cette transaction.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        {/* Summary */}
+        <div className="invoice-summary">
+          <div className="invoice-summary-box">
+            <div className="invoice-summary-row">
+              <span>Total HT</span>
+              <span>{formatMoney(htTotal)}</span>
+            </div>
+            <div className="invoice-summary-row">
+              <span>TVA (20%)</span>
+              <span>{formatMoney(vatAmount)}</span>
+            </div>
+            <div className="invoice-summary-row total">
+              <span>NET A PAYER</span>
+              <span>{formatMoney(sale.total)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="invoice-footer">
+          {settings.receiptFooter || "Merci de votre confiance. En cas de litige, seul le tribunal de commerce est compétent."}
+        </div>
+      </div>
+      
+      {/* Actions / Modal UI (Non-printable) */}
+      <div className="receipt-actions no-print" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '16px' }}>
+        <button onClick={onClose}><XCircle size={15} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Fermer</button>
+        <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/invoice`, '_blank')}>
+          <FileText size={15} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Imprimer (PDF)
+        </button>
+      </div>
+    </section>
+  </div>
+)};
+
+const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoice }: { sale: SaleRecord; settings: any; onClose: () => void, onReturn?: () => void, onLoadToCart?: () => void, onInvoice?: () => void }) => (
+  <div className="receipt-backdrop print-receipt" role="dialog" aria-modal="true">
+    <section className="receipt-panel" style={{ width: `${settings.ticketPaperWidth * 4}px`, margin: '0 auto' }}>
+      <div className="receipt-print-header" style={{ textAlign: 'center', marginBottom: '1rem' }}>
+        {settings.showLogo && settings.logoUrl ? (
+          <img src={settings.logoUrl} style={{ maxWidth: '120px', maxHeight: '60px', objectFit: 'contain', margin: '0 auto 10px', display: 'block' }} alt="Logo" />
+        ) : settings.showLogo ? (
+          <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '8px' }}>{settings.companyName}</div>
+        ) : null}
+        <div style={{ fontSize: '12px', color: '#334155' }}>{settings.address}</div>
+        <div style={{ fontSize: '12px', color: '#334155' }}>Tél: {settings.phone}</div>
+        <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '12px', borderBottom: '1px dashed #cbd5e1', paddingBottom: '8px' }}>{settings.ticketHeader}</div>
+      </div>
+      <div className="receipt-header" style={{ background: 'none', border: 'none', padding: 0 }}>
+        <div><h2>{sale.ticket}</h2><span style={{ color: '#64748b', fontSize: '12px' }}>{sale.createdAt}</span></div>
+        <button onClick={onClose} className="no-print"><XCircle size={18} /></button>
+      </div>
+      <div className="receipt-meta" style={{ background: 'none', padding: '12px 0', borderBottom: '1px dashed #cbd5e1', gap: '4px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}><span>Client:</span><strong>{sale.customer}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}><span>Paiement:</span><strong>{methodLabel[sale.method]}</strong></div>
+        {sale.splitPayments && sale.splitPayments.map((sp, idx) => (
+          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b', paddingLeft: '8px' }}><span>- {methodLabel[sp.method]}:</span><strong>{formatMoney(sp.amount)}</strong></div>
+        ))}
+      </div>
+      <div className="receipt-lines" style={{ padding: '12px 0', borderBottom: '1px dashed #cbd5e1' }}>
+        {(sale.lines || []).length ? sale.lines!.map(line => <div key={`${line.productId}-${line.sku}`} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}><span style={{ flex: 1 }}><strong>{line.name}</strong><br/><small style={{ color: '#64748b' }}>{line.quantity} x {formatMoney(line.unitPrice)}</small></span><b style={{ marginLeft: '12px' }}>{formatMoney(line.lineTotal)}</b></div>) : <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span><strong>{sale.items} article(s)</strong></span><b>{formatMoney(sale.total)}</b></div>}
+      </div>
+      <div className="receipt-totals" style={{ padding: '12px 0', background: 'none', gap: '4px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span>Sous-total</span><strong>{formatMoney(sale.subtotal ?? sale.total)}</strong></div>
+        {sale.discountTotal ? <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span>Remise</span><strong>-{formatMoney(sale.discountTotal)}</strong></div> : null}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span>TVA</span><strong>{formatMoney(sale.taxTotal ?? 0)}</strong></div>
+        <div className="grand" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold', marginTop: '8px' }}><span>Total</span><strong>{formatMoney(sale.total)}</strong></div>
+      </div>
+      {(sale.pointsEarned || sale.pointsUsed) ? (
+        <div style={{ padding: '12px 0', borderBottom: '1px dashed #cbd5e1', fontSize: '12px', textAlign: 'center' }}>
+          <strong>*** Programme de Fidélité ***</strong>
+          {sale.pointsEarned ? <div>Points gagnés: +{sale.pointsEarned}</div> : null}
+          {sale.pointsUsed ? <div>Points utilisés: -{sale.pointsUsed}</div> : null}
+        </div>
+      ) : null}
+      <div className="receipt-print-footer" style={{ textAlign: 'center', marginTop: '1rem', fontSize: '11px', color: '#64748b' }}>
+        <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#334155' }}>{settings.ticketFooter}</p>
+        <p style={{ margin: '2px 0' }}>ICE: {settings.ice} | RC: {settings.rc}</p>
+        <p style={{ margin: '2px 0' }}>IF: {settings.if} | Patente: {settings.patente}</p>
+      </div>
+      <div className="receipt-actions no-print" style={{ marginTop: '2rem' }}>
+        <button onClick={onClose}>Fermer</button>
+        {onLoadToCart && ['Devis', 'Brouillon', 'Suspendue'].includes(sale.status) && (
+          <button className="primary-action" onClick={onLoadToCart} style={{ flex: 1 }}>
+            <ShoppingCart size={16} style={{ marginRight: '8px' }} /> Charger dans la caisse
+          </button>
+        )}
+        {onReturn && sale.status === 'Payee' && (
+          <button className="secondary-action" onClick={onReturn} style={{ color: '#ef4444', borderColor: '#ef4444' }}>
+            <RotateCcw size={16} style={{ marginRight: '8px' }} /> Retourner
+          </button>
+        )}
+        {onInvoice && (
+          <button className="ghost-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/invoice`, '_blank')}>
+            <FileText size={16} style={{ marginRight: '8px' }} /> Facture (A4)
+          </button>
+        )}
+        <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/receipt`, '_blank')}>
+          <ReceiptText size={16} /> Imprimer
+        </button>
+      </div>
+    </section>
+  </div>
+);
+
+const ProductsTable = ({ products, filter, setFilter, search, setSearch, visibleTypes, addToCart }: { products: Product[]; filter: ProductType | 'ALL'; setFilter: (value: ProductType | 'ALL') => void; search: string; setSearch: (value: string) => void; visibleTypes: ProductType[]; addToCart: (product: Product) => void }) => (
+  <section className="table-section product-list-section">
+    <div className="table-toolbar product-list-toolbar">
+      <div className="search-box"><Search size={17} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher produit, SKU, code-barres..." /></div>
+      <div className="filter-row">{(['ALL', ...visibleTypes] as const).map(type => <button className={filter === type ? 'selected' : ''} onClick={() => setFilter(type)} key={type}>{type === 'ALL' ? 'Tous' : typeLabel[type]}</button>)}</div>
+    </div>
+    <div className="product-table modern-product-table">
+      <div className="table-head"><span>Produit</span><span>Catalogue</span><span>Prix</span><span>Stock</span><span>Actions</span></div>
+      {products.map(product => <div className="table-row" key={product.id}>
+        <span className="product-cell">
+          <span className="product-thumb">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={18} />}</span>
+          <span>
+            <strong>{product.name} {product.isVariable && <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#3b82f6', color: 'white', borderRadius: '4px', marginLeft: '6px', verticalAlign: 'middle' }}>Variable ({product.variations?.length || 0})</span>}</strong>
+            <small>{product.sku}{product.barcode ? ` / ${product.barcode}` : ''}</small>
+          </span>
+        </span>
+        <span>{product.category}<small>{product.brand || 'Sans marque'} / {product.unit || 'pcs'} / {typeLabel[product.type]}</small></span>
+        <span>{product.isVariable ? '-' : formatMoney(product.salePrice)}<small>{product.isVariable ? 'Prix multiples' : `Achat ${formatMoney(product.purchasePrice)} / TVA ${product.tvaRate}%`}</small></span>
+        <span><b className={!product.isVariable && product.trackStock && product.stock <= product.lowStockAlert ? 'stock-warn' : 'stock-ok'}>{product.isVariable ? '-' : (product.trackStock ? product.stock : '-')}</b><small>{product.isVariable ? 'Stock par variation' : (product.trackStock ? `Alerte ${product.lowStockAlert}` : 'Non suivi')}</small></span>
+        <span className="list-actions"><button className="row-action" onClick={() => addToCart(product)}>Vendre</button><button className="ghost-action">Stock</button></span>
+      </div>)}
+    </div>
+  </section>
+);
+
+const CustomerDisplay = () => {
+  const [cartState, setCartState] = useState<any>(null);
+
+  useEffect(() => {
+    const channel = new BroadcastChannel('taysr-pos-channel');
+    channel.onmessage = (event) => {
+      if (event.data.type === 'SYNC_CART') {
+        setCartState(event.data);
+      }
+    };
+    return () => channel.close();
+  }, []);
+
+  if (!cartState || !cartState.cart || cartState.cart.length === 0) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: 'linear-gradient(135deg, #0f172a, #1e293b)', color: '#fff', fontFamily: 'Inter, sans-serif' }}>
+        <img src="https://ui-avatars.com/api/?name=Taysr&background=3b82f6&color=fff&size=120&rounded=true" alt="Taysr Logo" style={{ marginBottom: '2rem', boxShadow: '0 10px 25px rgba(59,130,246,0.3)' }} />
+        <h1 style={{ fontSize: '4rem', fontWeight: 800, margin: 0, letterSpacing: '-1px' }}>Bienvenue!</h1>
+        <p style={{ fontSize: '1.5rem', color: '#94a3b8', marginTop: '1rem' }}>Votre commande s'affichera ici.</p>
+      </div>
+    );
+  }
+
+  const formatMoney = (val: number) => val.toLocaleString('fr-MA', { style: 'currency', currency: 'MAD' });
+
+  return (
+    <div style={{ height: '100vh', width: '100vw', display: 'flex', background: '#f8fafc', color: '#0f172a', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ flex: 1, padding: '3rem', overflowY: 'auto' }}>
+        <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 2rem 0', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <ShoppingCart size={36} color="#3b82f6" /> Votre Commande
+        </h2>
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          {cartState.cart.map((line: any, i: number) => {
+            const price = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '1.5rem 2rem', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#dbeafe', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.2rem' }}>
+                    {line.quantity}x
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '1.5rem', display: 'block' }}>{line.product.name}</strong>
+                    {line.variation && <span style={{ fontSize: '1rem', color: '#64748b' }}>{line.variation.name}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <strong style={{ fontSize: '1.5rem', color: '#0f172a' }}>{formatMoney(Math.max(0, price - line.discount) * line.quantity)}</strong>
+                  {line.discount > 0 && <div style={{ fontSize: '0.9rem', color: '#ef4444' }}>Remise: -{formatMoney(line.discount * line.quantity)}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      
+      <div style={{ width: '400px', background: 'linear-gradient(180deg, #1e293b, #0f172a)', color: '#fff', padding: '3rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: '1.1rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Client</div>
+          <strong style={{ fontSize: '1.5rem', display: 'block', paddingBottom: '2rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>{cartState.customerName}</strong>
+          
+          <div style={{ marginTop: '2rem', display: 'grid', gap: '1.5rem', fontSize: '1.2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}><span>Sous-total</span><span>{formatMoney(cartState.cartSubtotal)}</span></div>
+            {(cartState.cartLineDiscount > 0 || cartState.orderDiscount > 0) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#f87171' }}><span>Remise totale</span><span>-{formatMoney(cartState.cartLineDiscount + cartState.orderDiscount)}</span></div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}><span>TVA</span><span>{formatMoney(cartState.cartTax)}</span></div>
+          </div>
+        </div>
+        
+        <div style={{ background: 'rgba(255,255,255,0.1)', padding: '2rem', borderRadius: '24px', textAlign: 'center' }}>
+          <div style={{ fontSize: '1.2rem', color: '#94a3b8', marginBottom: '0.5rem' }}>Total à payer</div>
+          <div style={{ fontSize: '3.5rem', fontWeight: 800, color: '#38bdf8', lineHeight: 1 }}>{formatMoney(cartState.cartTotal)}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) { console.error("ErrorBoundary caught an error", error, errorInfo); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', color: 'red', fontFamily: 'monospace' }}>
+          <h2>Something went wrong in the frontend!</h2>
+          <pre style={{ background: '#f5f5f5', padding: '1rem', overflowX: 'auto' }}>
+            {this.state.error?.toString()}
+            <br/><br/>
+            {this.state.error?.stack}
+          </pre>
+          <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={{ padding: '10px', marginTop: '20px' }}>
+            Clear Data & Reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode') === 'customer';
+
+createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);
