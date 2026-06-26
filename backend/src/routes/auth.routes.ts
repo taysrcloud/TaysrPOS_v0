@@ -2,14 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../utils/prisma.js';
+import { prisma, getTenantPrisma } from '../utils/prisma.js';
+import { platformDb } from '../utils/platformPrisma.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'taysr-super-secret-key-1234';
 
-// ─── Primary Login: username + password ──────────────────────────────
-// This is the first login when a user opens the app in a browser.
+// Primary Login: username + password
 router.post('/login', async (req, res) => {
   try {
     const { login, username, email, password, accountId } = z.object({
@@ -21,68 +21,112 @@ router.post('/login', async (req, res) => {
     }).parse(req.body);
 
     const loginId = (email || username || login || '').trim();
-    const normalizedEmail = loginId.toLowerCase();
     if (!loginId) {
       return res.status(400).json({ message: 'Identifiant requis' });
     }
 
-    const candidates = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        OR: [{ username: loginId }, { email: normalizedEmail }],
-        ...(accountId ? { company: { accountId: String(accountId) } } : {}),
-      },
-      include: { company: { select: { id: true, name: true, accountId: true } } },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-    });
-
-    if (candidates.length === 0) {
+    // 1. Find user in the platform database
+    const platformUser = await platformDb.findPlatformUserByEmailOrUsername(loginId);
+    if (!platformUser || !platformUser.isActive) {
       return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
     }
 
-    const validCandidates = [];
-    for (const candidate of candidates) {
-      const isValid = await bcrypt.compare(password, candidate.passwordHash);
-      if (isValid) validCandidates.push(candidate);
-    }
-
-    if (validCandidates.length === 0) {
+    // 2. Verify password against platform user
+    const isValid = await bcrypt.compare(password, platformUser.password);
+    if (!isValid) {
       return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
     }
 
-    if (!accountId && validCandidates.length > 1) {
+    // 3. Get memberships
+    const allMemberships = await platformDb.getMemberships(platformUser.id);
+    const activeMemberships = allMemberships.filter(m => m.isActive && m.status !== 'SUSPENDED' && m.status !== 'EXPIRED');
+
+    if (activeMemberships.length === 0) {
+      return res.status(403).json({ message: 'Aucun compte actif trouvé' });
+    }
+
+    let targetMembership = activeMemberships.length === 1 ? activeMemberships[0] : null;
+
+    if (accountId) {
+      const parsedId = typeof accountId === 'string' && accountId.startsWith('ACC') 
+        ? accountId 
+        : Number(accountId);
+      
+      targetMembership = activeMemberships.find(m => 
+        m.accountId === parsedId || String(m.accountId) === String(parsedId) || m.code === parsedId
+      );
+
+      if (!targetMembership) {
+        return res.status(403).json({ message: 'Compte introuvable ou accès non autorisé' });
+      }
+    } else if (activeMemberships.length > 1) {
       return res.status(409).json({
-        message: 'Plusieurs comptes POS correspondent a cet identifiant',
+        message: 'Plusieurs comptes correspondent à cet identifiant',
         requiresAccountSelection: true,
-        accounts: validCandidates.map(candidate => ({
-          accountId: candidate.company.accountId,
-          companyName: candidate.company.name,
+        accounts: activeMemberships.map(m => ({
+          accountId: m.accountId,
+          companyName: m.accountName,
         })),
       });
     }
 
-    const user = validCandidates[0];
+    if (!targetMembership) {
+      return res.status(401).json({ message: 'Erreur inattendue de connexion' });
+    }
+
+    // 4. Verify local tenant user
+    const tenantPrisma = getTenantPrisma(targetMembership.databaseUrl);
+    const tenantUser = await tenantPrisma.user.findFirst({
+      where: {
+        OR: [{ username: platformUser.username }, { email: platformUser.email }],
+        isActive: true,
+      },
+      include: { company: true },
+    });
+
+    if (!tenantUser) {
+      return res.status(403).json({ message: 'Utilisateur local inactif ou introuvable' });
+    }
+
+    // 5. Issue Token
     const token = jwt.sign(
-      { userId: user.id, username: user.username, companyId: user.companyId, role: user.role, accountId: user.company.accountId },
+      { 
+        userId: tenantUser.id, 
+        username: tenantUser.username, 
+        companyId: tenantUser.companyId, 
+        role: tenantUser.role,
+        accountId: targetMembership.accountId,
+        platformUserId: platformUser.id,
+        databaseUrl: targetMembership.databaseUrl
+      },
       JWT_SECRET,
       { expiresIn: '12h' }
     );
 
     res.json({
       token,
-      user: { id: user.id, fullName: user.fullName, role: user.role, username: user.username, email: user.email, accountId: user.company.accountId },
-      company: { id: user.company.id, name: user.company.name, accountId: user.company.accountId },
+      user: { 
+        id: tenantUser.id, 
+        fullName: tenantUser.fullName, 
+        role: tenantUser.role, 
+        username: tenantUser.username, 
+        email: tenantUser.email, 
+        accountId: targetMembership.accountId 
+      },
+      company: { 
+        id: tenantUser.company.id, 
+        name: tenantUser.company.name, 
+        accountId: targetMembership.accountId 
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Requ??te invalide' });
+      return res.status(400).json({ message: 'Requête invalide' });
     }
     console.error('Login error', error);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 });
-
-
 
 // Quick unlock for POS lock screen
 router.post('/pin-unlock', async (req, res) => {
@@ -92,7 +136,7 @@ router.post('/pin-unlock', async (req, res) => {
       pin: z.string().length(4),
     }).parse(req.body);
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { company: true } });
     if (!user || !user.isActive || !user.pinHash) {
       return res.status(401).json({ message: 'Utilisateur introuvable ou inactif' });
     }
@@ -102,6 +146,13 @@ router.post('/pin-unlock', async (req, res) => {
       return res.status(401).json({ message: 'Code PIN incorrect' });
     }
 
+    // To properly support tenant context on pin-unlock, we need databaseUrl.
+    // However, pin-unlock should realistically receive the token or auth header, 
+    // or rely on the fact that if they are making a pin unlock they are using the default tenant 
+    // for now. To be robust, pin-unlock should probably be a protected route (`requireAuth`) 
+    // or the client passes the previous token to prove tenant context.
+    // For now we'll issue the token but without `databaseUrl` if we don't have it, 
+    // which relies on the fallback local database. The frontend should ideally re-auth.
     const token = jwt.sign(
       { userId: user.id, username: user.username, companyId: user.companyId, role: user.role },
       JWT_SECRET,

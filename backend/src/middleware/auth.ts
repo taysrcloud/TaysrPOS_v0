@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../utils/prisma.js';
+import { prisma, runWithTenantDatabase } from '../utils/prisma.js';
+import { platformDb } from '../utils/platformPrisma.js';
 import { UserRole } from '../generated/client/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'taysr-super-secret-key-1234';
@@ -11,6 +12,9 @@ export interface AuthRequest extends Request {
     username: string;
     companyId: number;
     role: UserRole;
+    accountId?: number;
+    databaseUrl?: string;
+    platformUserId?: number;
   };
 }
 
@@ -25,18 +29,36 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     
     // We optionally verify the user is still active in DB
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
-    if (!user || !user.isActive) {
-      return res.status(401).json({ message: 'User not found or inactive' });
-    }
+    runWithTenantDatabase(decoded.databaseUrl, async () => {
+      try {
+        const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+        if (!user || !user.isActive) {
+          return res.status(401).json({ message: 'User not found or inactive' });
+        }
 
-    req.user = {
-      userId: user.id,
-      username: user.username,
-      companyId: user.companyId,
-      role: user.role,
-    };
-    next();
+        if (decoded.accountId) {
+          // Verify platform account is still active
+          const memberships = await platformDb.getMemberships(decoded.platformUserId);
+          const membership = memberships.find(m => m.accountId === decoded.accountId);
+          if (!membership || !membership.isActive || membership.status === 'SUSPENDED' || membership.status === 'EXPIRED') {
+            return res.status(403).json({ message: 'Account is suspended, expired, or user access revoked' });
+          }
+        }
+
+        req.user = {
+          userId: user.id,
+          username: user.username,
+          companyId: user.companyId,
+          role: user.role,
+          accountId: decoded.accountId,
+          databaseUrl: decoded.databaseUrl,
+          platformUserId: decoded.platformUserId,
+        };
+        next();
+      } catch (err) {
+        next(err);
+      }
+    });
   } catch (err) {
     return res.status(401).json({ message: 'Token expired or invalid' });
   }
