@@ -22,7 +22,7 @@ router.post('/token', async (req, res, next) => {
     }
 
     const user = await prisma.user.findFirst({
-      where: { username }
+      where: { OR: [{ username }, { email: String(username).toLowerCase() }] }
     });
 
     if (!user) {

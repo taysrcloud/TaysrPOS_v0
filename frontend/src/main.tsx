@@ -209,7 +209,13 @@ type User = {
   username?: string;
   email: string;
   role: UserRole;
+  accountId?: string;
   avatarUrl?: string;
+};
+
+type LoginAccountOption = {
+  accountId: string;
+  companyName: string;
 };
 
 type RegisterHistory = {
@@ -367,6 +373,8 @@ const App = () => {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   
+    const [loginAccounts, setLoginAccounts] = useState<LoginAccountOption[]>([]);
+  const [selectedLoginAccountId, setSelectedLoginAccountId] = useState('');
   const [page, setPage] = useState<PageKey>('Tableau de bord');
 
   const [isLocked, setIsLocked] = useState(false);
@@ -389,22 +397,34 @@ const App = () => {
       const res = await fetch(`${apiBase}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginEmail, password: loginPassword })
+        body: JSON.stringify({
+          login: loginEmail,
+          password: loginPassword,
+          ...(selectedLoginAccountId ? { accountId: selectedLoginAccountId } : {}),
+        })
       });
       if (res.ok) {
         const data = await res.json();
         localStorage.setItem('taysrPOS_token', data.token);
         setCurrentUser(data.user);
+        setLoginAccounts([]);
+        setSelectedLoginAccountId('');
         setIsAuthenticated(true);
         setIsLocked(false);
       } else {
-        alert('Identifiant ou mot de passe incorrect');
+        const error = await res.json().catch(() => null);
+        if (res.status === 409 && error?.requiresAccountSelection && Array.isArray(error.accounts)) {
+          setLoginAccounts(error.accounts);
+          setSelectedLoginAccountId(error.accounts[0]?.accountId || '');
+          alert('Plusieurs comptes sont lies a cet identifiant. Choisissez le bon tenant puis reconnectez-vous.');
+        } else {
+          alert(error?.message || 'Identifiant ou mot de passe incorrect');
+        }
       }
     } catch (err) {
       alert('Erreur de connexion');
     }
   };
-
   const handlePinUnlock = async () => {
     if (!currentUser || pinEntry.length !== 4) return;
     try {
@@ -566,8 +586,8 @@ const App = () => {
         const data = await response.json();
         setInvoices(data.invoices || []);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -577,8 +597,8 @@ const App = () => {
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.sales)) setSales(data.sales);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -593,8 +613,8 @@ const App = () => {
             setCustomer(data.contacts[0]);
          }
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -607,8 +627,8 @@ const App = () => {
          setLocations(data.locations);
          if (currentLocationId === 0) setCurrentLocationId(data.locations[0].id);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -618,8 +638,8 @@ const App = () => {
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.expenses)) setExpenses(data.expenses);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -629,8 +649,8 @@ const App = () => {
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.purchases)) setPurchases(data.purchases);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -640,8 +660,8 @@ const App = () => {
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.areas)) setTableGroups(data.areas);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -654,8 +674,8 @@ const App = () => {
       const [sessData, movData] = await Promise.all([sessRes.json(), movRes.json()]);
       if (Array.isArray(sessData.sessions)) setRegisterLogs(sessData.sessions);
       if (Array.isArray(movData.movements)) setCashMovements(movData.movements);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Expected when the API/database is offline; keep the demo UI usable.
     }
   };
 
@@ -814,6 +834,20 @@ const App = () => {
     retail: visibleProducts.filter(product => product.type === 'RETAIL').length,
   }), [visibleProducts, lowStockProducts]);
 
+  const deriveSkuFromName = (name: string) => name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 18)
+    .toUpperCase() || 'PRD';
+
+  const resetProductForm = () => {
+    setForm(emptyForm);
+    autoSkuRef.current = '';
+    manualSkuRef.current = false;
+  };
+
   const updateForm = <K extends keyof ProductForm>(key: K, value: ProductForm[K]) => {
     setForm(current => ({ ...current, [key]: value }));
   };
@@ -857,6 +891,8 @@ const App = () => {
   // Barcode Scanner Integration
   const barcodeBufferRef = useRef('');
   const lastKeyTimeRef = useRef(0);
+  const autoSkuRef = useRef('');
+  const manualSkuRef = useRef(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1225,7 +1261,7 @@ const App = () => {
       if (!response.ok) throw new Error((await response.json()).message || 'Erreur creation produit');
       const created = await response.json();
       setProducts(current => [created, ...current]);
-      setForm(emptyForm);
+      resetProductForm();
       setStatus('Produit ajoute');
       setProductModalOpen(false);
     } catch (error: any) {
@@ -1341,7 +1377,7 @@ const App = () => {
           <div className="panel-title compact"><div><p>Priorite</p><h2>Actions rapides</h2></div></div>
           <div className="action-list">
             <button onClick={() => setPage('POS')}><ReceiptText size={17} /> Ouvrir le POS</button>
-            <button onClick={() => { setForm(emptyForm); setProductModalOpen(true); }}><Plus size={17} /> Ajouter un produit</button>
+            <button onClick={() => { resetProductForm(); setProductModalOpen(true); }}><Plus size={17} /> Ajouter un produit</button>
             <button onClick={() => setPage('Clients')}><Users size={17} /> Gérer les clients</button>
             <button onClick={() => setPage('Stock')}><Warehouse size={17} /> Alertes de stock</button>
             <button onClick={() => setPage('Rapports')}><TrendingUp size={17} /> Voir les rapports</button>
@@ -1480,9 +1516,15 @@ const App = () => {
       <div className="pos-search-row">
         <div className="customer-picker">
           <Users size={16} />
-          <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
-            {contacts.filter(c => c.type.includes('Client')).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
-          </select>
+          <div className="customer-picker-main">
+            <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
+              {contacts.filter(c => c.type.includes('Client')).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
+            </select>
+            <small className="credit-info">
+              Solde {formatMoney(customer.balance)}
+              {customer.creditLimit > 0 ? ` • Plafond ${formatMoney(customer.creditLimit)}` : ''}
+            </small>
+          </div>
           <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
         </div>
         <label className="product-search"><Search size={16} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
@@ -1983,7 +2025,7 @@ const App = () => {
       <PageHeader 
         title="Produits & Services" 
         subtitle="Catalogue, codes-barres et stock" 
-        action={<button type="button" className="primary-action" onClick={() => { setForm(emptyForm); setProductModalOpen(true); }}><Plus size={16} /> Nouveau Produit</button>}
+        action={<button type="button" className="primary-action" onClick={() => { resetProductForm(); setProductModalOpen(true); }}><Plus size={16} /> Nouveau Produit</button>}
       />
 
       {productModalOpen && (
@@ -1994,9 +2036,9 @@ const App = () => {
                 <div className="panel-title"><div><p>Produit</p><h2>Fiche courte, champs utiles d'abord</h2></div><button type="button" onClick={() => setProductModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
 
           <div className="field-cluster primary-product-fields">
-            <label><span>Nom du produit</span><input value={form.name} onChange={event => updateForm('name', event.target.value)} placeholder="Ex: Bouteille eau 50cl" /></label>
+            <label><span>Nom du produit</span><input value={form.name} onChange={event => { const name = event.target.value; setForm(current => { const currentSku = String(current.sku || '').trim(); const nextAutoSku = deriveSkuFromName(name); const keepSku = manualSkuRef.current && currentSku ? currentSku : nextAutoSku; autoSkuRef.current = nextAutoSku; return { ...current, name, sku: keepSku }; }); }} placeholder="Ex: Bouteille eau 50cl" /></label>
             <label><span>Code-barres</span><input value={form.barcode} onChange={event => updateForm('barcode', event.target.value)} placeholder="Scanner ou saisir" /></label>
-            <label><span>SKU</span><input value={form.sku} onChange={event => updateForm('sku', event.target.value)} placeholder="Auto si vide" /></label>
+            <label><span>SKU</span><input value={form.sku} onChange={event => { const sku = event.target.value; manualSkuRef.current = sku.trim().length > 0; if (!manualSkuRef.current) { const nextAutoSku = deriveSkuFromName(form.name); autoSkuRef.current = nextAutoSku; updateForm('sku', nextAutoSku); return; } updateForm('sku', sku); }} placeholder="Auto si vide" /></label>
           </div>
 
           <div className="field-cluster product-taxonomy-fields">
@@ -3690,9 +3732,20 @@ const App = () => {
                 <h2>Connexion</h2>
                 <p>Connectez-vous à l'aide de votre identifiant et mot de passe.</p>
                 <div className="form-group" style={{ marginTop: '1.5rem', textAlign: 'left' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Identifiant (ex: admin)</label>
-                  <input type="text" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} required style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Email ou identifiant</label>
+                  <input type="text" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginAccounts([]); setSelectedLoginAccountId(''); }} required placeholder="admin@taysr.ma ou identifiant" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
                 </div>
+                {loginAccounts.length > 0 && (
+                  <div className="form-group" style={{ marginTop: '1rem', textAlign: 'left' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Choisir le compte</label>
+                    <select value={selectedLoginAccountId} onChange={e => setSelectedLoginAccountId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff' }}>
+                      {loginAccounts.map(option => (
+                        <option key={option.accountId} value={option.accountId}>{option.companyName} - ACC{String(option.accountId).padStart(6, '0')}</option>
+                      ))}
+                    </select>
+                    <p style={{ marginTop: '8px', color: '#64748b', fontSize: '0.85rem' }}>Utilisez cette liste seulement si le meme email ou identifiant existe dans plusieurs comptes.</p>
+                  </div>
+                )}
                 <div className="form-group" style={{ marginTop: '1rem', textAlign: 'left' }}>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Mot de passe (ex: admin123)</label>
                   <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />

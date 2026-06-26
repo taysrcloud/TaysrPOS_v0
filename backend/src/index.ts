@@ -31,6 +31,7 @@ import restaurantRoutes from './routes/restaurant.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import invoiceRoutes from './routes/invoice.routes.js';
+import platformRoutes from './routes/platform.routes.js';
 import { requireAuth } from './middleware/auth.js';
 
 app.use('/api/products', productRoutes);
@@ -44,6 +45,7 @@ app.use('/api/restaurant', restaurantRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/platform', platformRoutes);
 app.use('/oauth', oauthRoutes);
 app.use('/connector/api', requireAuth, connectorRoutes);
 
