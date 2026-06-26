@@ -13328,6 +13328,7 @@ export namespace Prisma {
     isActive: number
     isSellable: number
     isVariable: number
+    variationOptions: number
     isKitchenItem: number
     createdAt: number
     updatedAt: number
@@ -13429,6 +13430,7 @@ export namespace Prisma {
     isActive?: true
     isSellable?: true
     isVariable?: true
+    variationOptions?: true
     isKitchenItem?: true
     createdAt?: true
     updatedAt?: true
@@ -13541,6 +13543,7 @@ export namespace Prisma {
     isActive: boolean
     isSellable: boolean
     isVariable: boolean
+    variationOptions: JsonValue | null
     isKitchenItem: boolean
     createdAt: Date
     updatedAt: Date
@@ -13585,6 +13588,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: boolean
     isKitchenItem?: boolean
     createdAt?: boolean
     updatedAt?: boolean
@@ -13621,6 +13625,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: boolean
     isKitchenItem?: boolean
     createdAt?: boolean
     updatedAt?: boolean
@@ -13650,6 +13655,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: boolean
     isKitchenItem?: boolean
     createdAt?: boolean
     updatedAt?: boolean
@@ -13679,12 +13685,13 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: boolean
     isKitchenItem?: boolean
     createdAt?: boolean
     updatedAt?: boolean
   }
 
-  export type ProductOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "companyId" | "categoryId" | "brandId" | "unitId" | "sku" | "barcode" | "name" | "description" | "type" | "imageUrl" | "purchasePrice" | "salePrice" | "tvaRate" | "trackStock" | "lowStockAlert" | "isActive" | "isSellable" | "isVariable" | "isKitchenItem" | "createdAt" | "updatedAt", ExtArgs["result"]["product"]>
+  export type ProductOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "companyId" | "categoryId" | "brandId" | "unitId" | "sku" | "barcode" | "name" | "description" | "type" | "imageUrl" | "purchasePrice" | "salePrice" | "tvaRate" | "trackStock" | "lowStockAlert" | "isActive" | "isSellable" | "isVariable" | "variationOptions" | "isKitchenItem" | "createdAt" | "updatedAt", ExtArgs["result"]["product"]>
   export type ProductInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     variations?: boolean | Product$variationsArgs<ExtArgs>
     company?: boolean | CompanyDefaultArgs<ExtArgs>
@@ -13745,6 +13752,7 @@ export namespace Prisma {
       isActive: boolean
       isSellable: boolean
       isVariable: boolean
+      variationOptions: Prisma.JsonValue | null
       isKitchenItem: boolean
       createdAt: Date
       updatedAt: Date
@@ -14200,6 +14208,7 @@ export namespace Prisma {
     readonly isActive: FieldRef<"Product", 'Boolean'>
     readonly isSellable: FieldRef<"Product", 'Boolean'>
     readonly isVariable: FieldRef<"Product", 'Boolean'>
+    readonly variationOptions: FieldRef<"Product", 'Json'>
     readonly isKitchenItem: FieldRef<"Product", 'Boolean'>
     readonly createdAt: FieldRef<"Product", 'DateTime'>
     readonly updatedAt: FieldRef<"Product", 'DateTime'>
@@ -35441,6 +35450,7 @@ export namespace Prisma {
     id: number
     productId: number
     name: number
+    attributes: number
     sku: number
     barcode: number
     purchasePrice: number
@@ -35490,6 +35500,7 @@ export namespace Prisma {
     id?: true
     productId?: true
     name?: true
+    attributes?: true
     sku?: true
     barcode?: true
     purchasePrice?: true
@@ -35588,6 +35599,7 @@ export namespace Prisma {
     id: number
     productId: number
     name: string
+    attributes: JsonValue | null
     sku: string | null
     barcode: string | null
     purchasePrice: Decimal | null
@@ -35618,6 +35630,7 @@ export namespace Prisma {
     id?: boolean
     productId?: boolean
     name?: boolean
+    attributes?: boolean
     sku?: boolean
     barcode?: boolean
     purchasePrice?: boolean
@@ -35633,6 +35646,7 @@ export namespace Prisma {
     id?: boolean
     productId?: boolean
     name?: boolean
+    attributes?: boolean
     sku?: boolean
     barcode?: boolean
     purchasePrice?: boolean
@@ -35645,6 +35659,7 @@ export namespace Prisma {
     id?: boolean
     productId?: boolean
     name?: boolean
+    attributes?: boolean
     sku?: boolean
     barcode?: boolean
     purchasePrice?: boolean
@@ -35657,6 +35672,7 @@ export namespace Prisma {
     id?: boolean
     productId?: boolean
     name?: boolean
+    attributes?: boolean
     sku?: boolean
     barcode?: boolean
     purchasePrice?: boolean
@@ -35664,7 +35680,7 @@ export namespace Prisma {
     isActive?: boolean
   }
 
-  export type ProductVariationOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "productId" | "name" | "sku" | "barcode" | "purchasePrice" | "salePrice" | "isActive", ExtArgs["result"]["productVariation"]>
+  export type ProductVariationOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "productId" | "name" | "attributes" | "sku" | "barcode" | "purchasePrice" | "salePrice" | "isActive", ExtArgs["result"]["productVariation"]>
   export type ProductVariationInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     product?: boolean | ProductDefaultArgs<ExtArgs>
     stocks?: boolean | ProductVariation$stocksArgs<ExtArgs>
@@ -35689,6 +35705,7 @@ export namespace Prisma {
       id: number
       productId: number
       name: string
+      attributes: Prisma.JsonValue | null
       sku: string | null
       barcode: string | null
       purchasePrice: Prisma.Decimal | null
@@ -36123,6 +36140,7 @@ export namespace Prisma {
     readonly id: FieldRef<"ProductVariation", 'Int'>
     readonly productId: FieldRef<"ProductVariation", 'Int'>
     readonly name: FieldRef<"ProductVariation", 'String'>
+    readonly attributes: FieldRef<"ProductVariation", 'Json'>
     readonly sku: FieldRef<"ProductVariation", 'String'>
     readonly barcode: FieldRef<"ProductVariation", 'String'>
     readonly purchasePrice: FieldRef<"ProductVariation", 'Decimal'>
@@ -36741,6 +36759,7 @@ export namespace Prisma {
     isActive: 'isActive',
     isSellable: 'isSellable',
     isVariable: 'isVariable',
+    variationOptions: 'variationOptions',
     isKitchenItem: 'isKitchenItem',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
@@ -36998,6 +37017,7 @@ export namespace Prisma {
     id: 'id',
     productId: 'productId',
     name: 'name',
+    attributes: 'attributes',
     sku: 'sku',
     barcode: 'barcode',
     purchasePrice: 'purchasePrice',
@@ -37016,6 +37036,14 @@ export namespace Prisma {
   export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
 
 
+  export const NullableJsonNullValueInput: {
+    DbNull: typeof DbNull,
+    JsonNull: typeof JsonNull
+  };
+
+  export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
+
+
   export const QueryMode: {
     default: 'default',
     insensitive: 'insensitive'
@@ -37030,6 +37058,15 @@ export namespace Prisma {
   };
 
   export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+  export const JsonNullValueFilter: {
+    DbNull: typeof DbNull,
+    JsonNull: typeof JsonNull,
+    AnyNull: typeof AnyNull
+  };
+
+  export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 
 
   /**
@@ -37139,6 +37176,20 @@ export namespace Prisma {
    * Reference to a field of type 'ProductType[]'
    */
   export type ListEnumProductTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'ProductType[]'>
+    
+
+
+  /**
+   * Reference to a field of type 'Json'
+   */
+  export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
+    
+
+
+  /**
+   * Reference to a field of type 'QueryMode'
+   */
+  export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
     
 
 
@@ -37964,6 +38015,7 @@ export namespace Prisma {
     isActive?: BoolFilter<"Product"> | boolean
     isSellable?: BoolFilter<"Product"> | boolean
     isVariable?: BoolFilter<"Product"> | boolean
+    variationOptions?: JsonNullableFilter<"Product">
     isKitchenItem?: BoolFilter<"Product"> | boolean
     createdAt?: DateTimeFilter<"Product"> | Date | string
     updatedAt?: DateTimeFilter<"Product"> | Date | string
@@ -37999,6 +38051,7 @@ export namespace Prisma {
     isActive?: SortOrder
     isSellable?: SortOrder
     isVariable?: SortOrder
+    variationOptions?: SortOrderInput | SortOrder
     isKitchenItem?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
@@ -38039,6 +38092,7 @@ export namespace Prisma {
     isActive?: BoolFilter<"Product"> | boolean
     isSellable?: BoolFilter<"Product"> | boolean
     isVariable?: BoolFilter<"Product"> | boolean
+    variationOptions?: JsonNullableFilter<"Product">
     isKitchenItem?: BoolFilter<"Product"> | boolean
     createdAt?: DateTimeFilter<"Product"> | Date | string
     updatedAt?: DateTimeFilter<"Product"> | Date | string
@@ -38074,6 +38128,7 @@ export namespace Prisma {
     isActive?: SortOrder
     isSellable?: SortOrder
     isVariable?: SortOrder
+    variationOptions?: SortOrderInput | SortOrder
     isKitchenItem?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
@@ -38107,6 +38162,7 @@ export namespace Prisma {
     isActive?: BoolWithAggregatesFilter<"Product"> | boolean
     isSellable?: BoolWithAggregatesFilter<"Product"> | boolean
     isVariable?: BoolWithAggregatesFilter<"Product"> | boolean
+    variationOptions?: JsonNullableWithAggregatesFilter<"Product">
     isKitchenItem?: BoolWithAggregatesFilter<"Product"> | boolean
     createdAt?: DateTimeWithAggregatesFilter<"Product"> | Date | string
     updatedAt?: DateTimeWithAggregatesFilter<"Product"> | Date | string
@@ -38213,7 +38269,7 @@ export namespace Prisma {
 
   export type ProductStockWhereUniqueInput = Prisma.AtLeast<{
     id?: number
-    productId_warehouseId?: ProductStockProductIdWarehouseIdCompoundUniqueInput
+    productId_warehouseId_variationId?: ProductStockProductIdWarehouseIdVariationIdCompoundUniqueInput
     AND?: ProductStockWhereInput | ProductStockWhereInput[]
     OR?: ProductStockWhereInput[]
     NOT?: ProductStockWhereInput | ProductStockWhereInput[]
@@ -38225,7 +38281,7 @@ export namespace Prisma {
     variation?: XOR<ProductVariationNullableScalarRelationFilter, ProductVariationWhereInput> | null
     product?: XOR<ProductScalarRelationFilter, ProductWhereInput>
     warehouse?: XOR<WarehouseScalarRelationFilter, WarehouseWhereInput>
-  }, "id" | "productId_warehouseId">
+  }, "id" | "productId_warehouseId_variationId">
 
   export type ProductStockOrderByWithAggregationInput = {
     id?: SortOrder
@@ -39487,6 +39543,7 @@ export namespace Prisma {
     id?: IntFilter<"ProductVariation"> | number
     productId?: IntFilter<"ProductVariation"> | number
     name?: StringFilter<"ProductVariation"> | string
+    attributes?: JsonNullableFilter<"ProductVariation">
     sku?: StringNullableFilter<"ProductVariation"> | string | null
     barcode?: StringNullableFilter<"ProductVariation"> | string | null
     purchasePrice?: DecimalNullableFilter<"ProductVariation"> | Decimal | DecimalJsLike | number | string | null
@@ -39501,6 +39558,7 @@ export namespace Prisma {
     id?: SortOrder
     productId?: SortOrder
     name?: SortOrder
+    attributes?: SortOrderInput | SortOrder
     sku?: SortOrderInput | SortOrder
     barcode?: SortOrderInput | SortOrder
     purchasePrice?: SortOrderInput | SortOrder
@@ -39513,12 +39571,13 @@ export namespace Prisma {
 
   export type ProductVariationWhereUniqueInput = Prisma.AtLeast<{
     id?: number
-    sku?: string
     AND?: ProductVariationWhereInput | ProductVariationWhereInput[]
     OR?: ProductVariationWhereInput[]
     NOT?: ProductVariationWhereInput | ProductVariationWhereInput[]
     productId?: IntFilter<"ProductVariation"> | number
     name?: StringFilter<"ProductVariation"> | string
+    attributes?: JsonNullableFilter<"ProductVariation">
+    sku?: StringNullableFilter<"ProductVariation"> | string | null
     barcode?: StringNullableFilter<"ProductVariation"> | string | null
     purchasePrice?: DecimalNullableFilter<"ProductVariation"> | Decimal | DecimalJsLike | number | string | null
     salePrice?: DecimalNullableFilter<"ProductVariation"> | Decimal | DecimalJsLike | number | string | null
@@ -39526,12 +39585,13 @@ export namespace Prisma {
     product?: XOR<ProductScalarRelationFilter, ProductWhereInput>
     stocks?: ProductStockListRelationFilter
     saleItems?: SaleItemListRelationFilter
-  }, "id" | "sku">
+  }, "id">
 
   export type ProductVariationOrderByWithAggregationInput = {
     id?: SortOrder
     productId?: SortOrder
     name?: SortOrder
+    attributes?: SortOrderInput | SortOrder
     sku?: SortOrderInput | SortOrder
     barcode?: SortOrderInput | SortOrder
     purchasePrice?: SortOrderInput | SortOrder
@@ -39551,6 +39611,7 @@ export namespace Prisma {
     id?: IntWithAggregatesFilter<"ProductVariation"> | number
     productId?: IntWithAggregatesFilter<"ProductVariation"> | number
     name?: StringWithAggregatesFilter<"ProductVariation"> | string
+    attributes?: JsonNullableWithAggregatesFilter<"ProductVariation">
     sku?: StringNullableWithAggregatesFilter<"ProductVariation"> | string | null
     barcode?: StringNullableWithAggregatesFilter<"ProductVariation"> | string | null
     purchasePrice?: DecimalNullableWithAggregatesFilter<"ProductVariation"> | Decimal | DecimalJsLike | number | string | null
@@ -40307,6 +40368,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -40342,6 +40404,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -40368,6 +40431,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -40403,6 +40467,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -40434,6 +40499,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -40454,6 +40520,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -40479,6 +40546,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -41801,6 +41869,7 @@ export namespace Prisma {
 
   export type ProductVariationCreateInput = {
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -41815,6 +41884,7 @@ export namespace Prisma {
     id?: number
     productId: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -41826,6 +41896,7 @@ export namespace Prisma {
 
   export type ProductVariationUpdateInput = {
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -41840,6 +41911,7 @@ export namespace Prisma {
     id?: IntFieldUpdateOperationsInput | number
     productId?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -41853,6 +41925,7 @@ export namespace Prisma {
     id?: number
     productId: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -41862,6 +41935,7 @@ export namespace Prisma {
 
   export type ProductVariationUpdateManyMutationInput = {
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -41873,6 +41947,7 @@ export namespace Prisma {
     id?: IntFieldUpdateOperationsInput | number
     productId?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -42675,6 +42750,29 @@ export namespace Prisma {
     notIn?: $Enums.ProductType[] | ListEnumProductTypeFieldRefInput<$PrismaModel>
     not?: NestedEnumProductTypeFilter<$PrismaModel> | $Enums.ProductType
   }
+  export type JsonNullableFilter<$PrismaModel = never> =
+    | PatchUndefined<
+        Either<Required<JsonNullableFilterBase<$PrismaModel>>, Exclude<keyof Required<JsonNullableFilterBase<$PrismaModel>>, 'path'>>,
+        Required<JsonNullableFilterBase<$PrismaModel>>
+      >
+    | OptionalFlat<Omit<Required<JsonNullableFilterBase<$PrismaModel>>, 'path'>>
+
+  export type JsonNullableFilterBase<$PrismaModel = never> = {
+    equals?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+    path?: string[]
+    mode?: QueryMode | EnumQueryModeFieldRefInput<$PrismaModel>
+    string_contains?: string | StringFieldRefInput<$PrismaModel>
+    string_starts_with?: string | StringFieldRefInput<$PrismaModel>
+    string_ends_with?: string | StringFieldRefInput<$PrismaModel>
+    array_starts_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_ends_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_contains?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    lt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    lte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    not?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+  }
 
   export type ProductVariationListRelationFilter = {
     every?: ProductVariationWhereInput
@@ -42781,6 +42879,7 @@ export namespace Prisma {
     isActive?: SortOrder
     isSellable?: SortOrder
     isVariable?: SortOrder
+    variationOptions?: SortOrder
     isKitchenItem?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
@@ -42885,6 +42984,32 @@ export namespace Prisma {
     _min?: NestedEnumProductTypeFilter<$PrismaModel>
     _max?: NestedEnumProductTypeFilter<$PrismaModel>
   }
+  export type JsonNullableWithAggregatesFilter<$PrismaModel = never> =
+    | PatchUndefined<
+        Either<Required<JsonNullableWithAggregatesFilterBase<$PrismaModel>>, Exclude<keyof Required<JsonNullableWithAggregatesFilterBase<$PrismaModel>>, 'path'>>,
+        Required<JsonNullableWithAggregatesFilterBase<$PrismaModel>>
+      >
+    | OptionalFlat<Omit<Required<JsonNullableWithAggregatesFilterBase<$PrismaModel>>, 'path'>>
+
+  export type JsonNullableWithAggregatesFilterBase<$PrismaModel = never> = {
+    equals?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+    path?: string[]
+    mode?: QueryMode | EnumQueryModeFieldRefInput<$PrismaModel>
+    string_contains?: string | StringFieldRefInput<$PrismaModel>
+    string_starts_with?: string | StringFieldRefInput<$PrismaModel>
+    string_ends_with?: string | StringFieldRefInput<$PrismaModel>
+    array_starts_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_ends_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_contains?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    lt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    lte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    not?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+    _count?: NestedIntNullableFilter<$PrismaModel>
+    _min?: NestedJsonNullableFilter<$PrismaModel>
+    _max?: NestedJsonNullableFilter<$PrismaModel>
+  }
 
   export type LocationNullableScalarRelationFilter = {
     is?: LocationWhereInput | null
@@ -42950,9 +43075,10 @@ export namespace Prisma {
     isNot?: WarehouseWhereInput
   }
 
-  export type ProductStockProductIdWarehouseIdCompoundUniqueInput = {
+  export type ProductStockProductIdWarehouseIdVariationIdCompoundUniqueInput = {
     productId: number
     warehouseId: number
+    variationId: number
   }
 
   export type ProductStockCountOrderByAggregateInput = {
@@ -44044,6 +44170,7 @@ export namespace Prisma {
     id?: SortOrder
     productId?: SortOrder
     name?: SortOrder
+    attributes?: SortOrder
     sku?: SortOrder
     barcode?: SortOrder
     purchasePrice?: SortOrder
@@ -47359,6 +47486,29 @@ export namespace Prisma {
     _min?: NestedEnumProductTypeFilter<$PrismaModel>
     _max?: NestedEnumProductTypeFilter<$PrismaModel>
   }
+  export type NestedJsonNullableFilter<$PrismaModel = never> =
+    | PatchUndefined<
+        Either<Required<NestedJsonNullableFilterBase<$PrismaModel>>, Exclude<keyof Required<NestedJsonNullableFilterBase<$PrismaModel>>, 'path'>>,
+        Required<NestedJsonNullableFilterBase<$PrismaModel>>
+      >
+    | OptionalFlat<Omit<Required<NestedJsonNullableFilterBase<$PrismaModel>>, 'path'>>
+
+  export type NestedJsonNullableFilterBase<$PrismaModel = never> = {
+    equals?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+    path?: string[]
+    mode?: QueryMode | EnumQueryModeFieldRefInput<$PrismaModel>
+    string_contains?: string | StringFieldRefInput<$PrismaModel>
+    string_starts_with?: string | StringFieldRefInput<$PrismaModel>
+    string_ends_with?: string | StringFieldRefInput<$PrismaModel>
+    array_starts_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_ends_with?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    array_contains?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | null
+    lt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    lte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gt?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    gte?: InputJsonValue | JsonFieldRefInput<$PrismaModel>
+    not?: InputJsonValue | JsonFieldRefInput<$PrismaModel> | JsonNullValueFilter
+  }
 
   export type NestedEnumStockMovementTypeFilter<$PrismaModel = never> = {
     equals?: $Enums.StockMovementType | EnumStockMovementTypeFieldRefInput<$PrismaModel>
@@ -47734,6 +47884,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -47767,6 +47918,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -48343,6 +48495,7 @@ export namespace Prisma {
     isActive?: BoolFilter<"Product"> | boolean
     isSellable?: BoolFilter<"Product"> | boolean
     isVariable?: BoolFilter<"Product"> | boolean
+    variationOptions?: JsonNullableFilter<"Product">
     isKitchenItem?: BoolFilter<"Product"> | boolean
     createdAt?: DateTimeFilter<"Product"> | Date | string
     updatedAt?: DateTimeFilter<"Product"> | Date | string
@@ -49974,6 +50127,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50007,6 +50161,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50245,6 +50400,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50278,6 +50434,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50516,6 +50673,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50549,6 +50707,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -50684,6 +50843,7 @@ export namespace Prisma {
 
   export type ProductVariationCreateWithoutProductInput = {
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -50696,6 +50856,7 @@ export namespace Prisma {
   export type ProductVariationUncheckedCreateWithoutProductInput = {
     id?: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -51029,6 +51190,7 @@ export namespace Prisma {
     id?: IntFilter<"ProductVariation"> | number
     productId?: IntFilter<"ProductVariation"> | number
     name?: StringFilter<"ProductVariation"> | string
+    attributes?: JsonNullableFilter<"ProductVariation">
     sku?: StringNullableFilter<"ProductVariation"> | string | null
     barcode?: StringNullableFilter<"ProductVariation"> | string | null
     purchasePrice?: DecimalNullableFilter<"ProductVariation"> | Decimal | DecimalJsLike | number | string | null
@@ -51699,6 +51861,7 @@ export namespace Prisma {
 
   export type ProductVariationCreateWithoutStocksInput = {
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -51712,6 +51875,7 @@ export namespace Prisma {
     id?: number
     productId: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -51740,6 +51904,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -51774,6 +51939,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -51826,6 +51992,7 @@ export namespace Prisma {
 
   export type ProductVariationUpdateWithoutStocksInput = {
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -51839,6 +52006,7 @@ export namespace Prisma {
     id?: IntFieldUpdateOperationsInput | number
     productId?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -51873,6 +52041,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -51907,6 +52076,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -51962,6 +52132,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -51996,6 +52167,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -52061,6 +52233,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -52095,6 +52268,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -52935,6 +53109,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -52969,6 +53144,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -53065,6 +53241,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -53099,6 +53276,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -53875,6 +54053,7 @@ export namespace Prisma {
 
   export type ProductVariationCreateWithoutSaleItemsInput = {
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -53888,6 +54067,7 @@ export namespace Prisma {
     id?: number
     productId: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -53970,6 +54150,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -54004,6 +54185,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -54057,6 +54239,7 @@ export namespace Prisma {
 
   export type ProductVariationUpdateWithoutSaleItemsInput = {
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -54070,6 +54253,7 @@ export namespace Prisma {
     id?: IntFieldUpdateOperationsInput | number
     productId?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -54164,6 +54348,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -54198,6 +54383,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -54816,6 +55002,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -54850,6 +55037,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -54923,6 +55111,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -54957,6 +55146,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -56294,6 +56484,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -56328,6 +56519,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -56431,6 +56623,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -56465,6 +56658,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -56584,6 +56778,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -56914,6 +57109,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -56947,6 +57143,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -56977,6 +57174,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58062,6 +58260,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -58082,6 +58281,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58115,6 +58315,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58145,6 +58346,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58169,6 +58371,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -58189,6 +58392,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58222,6 +58426,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58252,6 +58457,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58276,6 +58482,7 @@ export namespace Prisma {
     isActive?: boolean
     isSellable?: boolean
     isVariable?: boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: boolean
     createdAt?: Date | string
     updatedAt?: Date | string
@@ -58296,6 +58503,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58329,6 +58537,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58359,6 +58568,7 @@ export namespace Prisma {
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isSellable?: BoolFieldUpdateOperationsInput | boolean
     isVariable?: BoolFieldUpdateOperationsInput | boolean
+    variationOptions?: NullableJsonNullValueInput | InputJsonValue
     isKitchenItem?: BoolFieldUpdateOperationsInput | boolean
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
@@ -58367,6 +58577,7 @@ export namespace Prisma {
   export type ProductVariationCreateManyProductInput = {
     id?: number
     name: string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: string | null
     barcode?: string | null
     purchasePrice?: Decimal | DecimalJsLike | number | string | null
@@ -58423,6 +58634,7 @@ export namespace Prisma {
 
   export type ProductVariationUpdateWithoutProductInput = {
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -58435,6 +58647,7 @@ export namespace Prisma {
   export type ProductVariationUncheckedUpdateWithoutProductInput = {
     id?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
@@ -58447,6 +58660,7 @@ export namespace Prisma {
   export type ProductVariationUncheckedUpdateManyWithoutProductInput = {
     id?: IntFieldUpdateOperationsInput | number
     name?: StringFieldUpdateOperationsInput | string
+    attributes?: NullableJsonNullValueInput | InputJsonValue
     sku?: NullableStringFieldUpdateOperationsInput | string | null
     barcode?: NullableStringFieldUpdateOperationsInput | string | null
     purchasePrice?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null

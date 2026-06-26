@@ -108,6 +108,7 @@ type ProductVariation = {
   purchasePrice: number;
   stock: number;
   lowStockAlert: number;
+  attributes?: Record<string, string>;
 };
 
 type Product = {
@@ -128,6 +129,7 @@ type Product = {
   stock: number;
   isKitchenItem: boolean;
   isVariable: boolean;
+  variationOptions?: string[];
   variations?: ProductVariation[];
   isActive: boolean;
 };
@@ -161,7 +163,8 @@ type ProductForm = {
   lowStockAlert: string;
   isKitchenItem: boolean;
   isVariable: boolean;
-  variations: { name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; }[];
+  variationOptions?: string[];
+  variations: { name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; attributes?: Record<string, string>; }[];
 };
 
 type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
@@ -329,6 +332,7 @@ const emptyForm: ProductForm = {
   lowStockAlert: '0',
   isKitchenItem: false,
   isVariable: false,
+  variationOptions: [],
   variations: [],
 };
 
@@ -483,6 +487,7 @@ const App = () => {
   const [selectedVariableProduct, setSelectedVariableProduct] = useState<Product | null>(null);
   const [sales, setSales] = useState<SaleRecord[]>([]);
     const [invoices, setInvoices] = useState<any[]>([]);
+  const [selectedFacture, setSelectedFacture] = useState<any>(null);
     const [invoiceSearch, setInvoiceSearch] = useState('');
   const [draftSales, setDraftSales] = useState<SaleRecord[]>([]);
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
@@ -2074,15 +2079,32 @@ const App = () => {
           {form.isVariable && (
             <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ fontSize: '1.1rem', margin: 0, color: '#0f172a' }}>Déclinaisons (Tailles, Couleurs...)</h3>
-                <button type="button" className="secondary-action" style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }} onClick={() => updateForm('variations', [...form.variations, { name: '', sku: '', salePrice: form.salePrice, purchasePrice: form.purchasePrice, stock: '0', lowStockAlert: '0', barcode: '' }])}>
-                  <Plus size={14} style={{ marginRight: '4px' }} /> Ajouter
-                </button>
+                <h3 style={{ fontSize: '1.1rem', margin: 0, color: '#0f172a' }}>Options et Déclinaisons</h3>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" className="ghost-action" style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }} onClick={() => {
+                    const options = prompt('Entrez les options séparées par des virgules (ex: Taille, Couleur)');
+                    if (options) {
+                      updateForm('variationOptions', options.split(',').map(s => s.trim()).filter(Boolean));
+                    }
+                  }}>
+                    <Edit2 size={14} style={{ marginRight: '4px' }} /> Définir les Options
+                  </button>
+                  <button type="button" className="secondary-action" style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }} onClick={() => updateForm('variations', [...form.variations, { name: '', sku: '', salePrice: form.salePrice, purchasePrice: form.purchasePrice, stock: '0', lowStockAlert: '0', barcode: '' }])}>
+                    <Plus size={14} style={{ marginRight: '4px' }} /> Ajouter
+                  </button>
+                </div>
               </div>
+              
+              {form.variationOptions && form.variationOptions.length > 0 && (
+                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#e0f2fe', borderRadius: '8px', fontSize: '0.9rem', color: '#0369a1' }}>
+                  <strong>Options définies :</strong> {form.variationOptions.join(' × ')}
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {form.variations.map((v, i) => (
                   <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr 40px', gap: '0.5rem', alignItems: 'center' }}>
-                    <input value={v.name} onChange={e => { const nv = [...form.variations]; nv[i].name = e.target.value; updateForm('variations', nv); }} placeholder="Nom (ex: Rouge L)" style={{ padding: '0.5rem' }} />
+                    <input value={v.name} onChange={e => { const nv = [...form.variations]; nv[i].name = e.target.value; updateForm('variations', nv); }} placeholder={form.variationOptions?.length ? form.variationOptions.join(' - ') : "Nom (ex: Rouge L)"} style={{ padding: '0.5rem' }} />
                     <input value={v.sku} onChange={e => { const nv = [...form.variations]; nv[i].sku = e.target.value; updateForm('variations', nv); }} placeholder="SKU" style={{ padding: '0.5rem' }} />
                     <input value={v.salePrice} onChange={e => { const nv = [...form.variations]; nv[i].salePrice = e.target.value; updateForm('variations', nv); }} placeholder="Prix vente" style={{ padding: '0.5rem' }} inputMode="decimal" />
                     <input value={v.purchasePrice} onChange={e => { const nv = [...form.variations]; nv[i].purchasePrice = e.target.value; updateForm('variations', nv); }} placeholder="Prix achat" style={{ padding: '0.5rem' }} inputMode="decimal" />
@@ -2612,7 +2634,7 @@ const App = () => {
                   <span>{inv.sales?.length || 0} tickets</span>
                   <span><strong>{formatMoney(Number(inv.total))}</strong></span>
                   <span className="list-actions">
-                    <button className="row-action" onClick={() => { /* TODO: Print Invoice */ }}>Imprimer</button>
+                    <button className="row-action" onClick={() => setSelectedFacture(inv)}>Imprimer</button>
                   </span>
                 </div>
               ))}
@@ -3822,6 +3844,7 @@ const App = () => {
         {renderPage()}
         {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
         {invoiceSale && <InvoicePanel sale={invoiceSale} settings={companySettings} onClose={() => setInvoiceSale(null)} />}
+        {selectedFacture && <FacturePanel facture={selectedFacture} settings={companySettings} onClose={() => setSelectedFacture(null)} />}
       </main>
     </div>
   );
@@ -4145,3 +4168,128 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode') === 'customer';
 
 createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);
+
+
+const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: any; onClose: () => void }) => {
+  const [mode, setMode] = useState<'SUMMARY' | 'DETAILED'>('SUMMARY');
+  
+  const allItems = facture.sales.flatMap((sale: any) => sale.items || []);
+  const consolidatedItems = Object.values(allItems.reduce((acc: any, item: any) => {
+    const key = `${item.productId}-${item.variationId || ''}`;
+    if (!acc[key]) {
+      acc[key] = { name: item.name, quantity: 0, unitPrice: item.unitPrice };
+    }
+    acc[key].quantity += item.quantity;
+    return acc;
+  }, {}));
+
+  return (
+  <div className="receipt-backdrop print-a4" role="dialog" aria-modal="true">
+    <section className="invoice-panel">
+      <div className="invoice-container">
+        {/* Header */}
+        <div className="invoice-header-row">
+          <div className="invoice-brand">
+            {settings.showLogo && settings.logoUrl && <img src={settings.logoUrl} alt="Logo" />}
+            <h1>{settings.companyName}</h1>
+            <p>{settings.companyAddress}</p>
+            <p>{settings.companyPhone}</p>
+            <p>ICE: {settings.companyIce || '_________________'}</p>
+          </div>
+          <div className="invoice-title">
+            <h2>FACTURE GLOBALE</h2>
+            <p>N° {facture.number}</p>
+            <div className="no-print" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+              <button type="button" className={`ghost-action ${mode === 'SUMMARY' ? 'selected' : ''}`} onClick={() => setMode('SUMMARY')} style={{ padding: '0.25rem 0.5rem', border: mode === 'SUMMARY' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Résumée</button>
+              <button type="button" className={`ghost-action ${mode === 'DETAILED' ? 'selected' : ''}`} onClick={() => setMode('DETAILED')} style={{ padding: '0.25rem 0.5rem', border: mode === 'DETAILED' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Détaillée</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Meta */}
+        <div className="invoice-meta-row">
+          <div className="invoice-meta-col">
+            <span>Date</span>
+            <strong>{new Date(facture.createdAt).toLocaleDateString('fr-FR')}</strong>
+          </div>
+          <div className="invoice-meta-col">
+            <span>Client</span>
+            <strong>{facture.customer?.name || '______________________'}</strong>
+          </div>
+          <div className="invoice-meta-col">
+            <span>Nb. Tickets</span>
+            <strong>{facture.sales.length} ticket(s)</strong>
+          </div>
+        </div>
+
+        {/* Table */}
+        <table className="invoice-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th className="right">Qté</th>
+              <th className="right">Prix Unitaire</th>
+              <th className="right">Total TTC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mode === 'DETAILED' ? (
+              facture.sales.map((sale: any) => (
+                <React.Fragment key={sale.id}>
+                  <tr style={{ background: '#f8fafc', fontWeight: 600 }}>
+                    <td colSpan={4} style={{ padding: '0.5rem', fontSize: '0.85rem', color: '#475569' }}>
+                      Ticket {sale.ticketNumber || sale.ticket || sale.id} du {new Date(sale.createdAt).toLocaleDateString('fr-FR')}
+                    </td>
+                  </tr>
+                  {(sale.items || []).map((line: any, idx: number) => (
+                    <tr key={`${sale.id}-${idx}`}>
+                      <td>{line.name}</td>
+                      <td className="right">{line.quantity}</td>
+                      <td className="right">{formatMoney(line.unitPrice)}</td>
+                      <td className="right">{formatMoney(line.unitPrice * line.quantity)}</td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))
+            ) : (
+              (consolidatedItems as any[]).map((line: any, idx: number) => (
+                <tr key={idx}>
+                  <td>{line.name}</td>
+                  <td className="right">{line.quantity}</td>
+                  <td className="right">{formatMoney(line.unitPrice)}</td>
+                  <td className="right">{formatMoney(line.unitPrice * line.quantity)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+
+        {/* Totals */}
+        <div className="invoice-totals">
+          <div className="invoice-total-row">
+            <span>Total HT:</span>
+            <span>{formatMoney(facture.total - facture.taxTotal)}</span>
+          </div>
+          <div className="invoice-total-row">
+            <span>TVA:</span>
+            <span>{formatMoney(facture.taxTotal)}</span>
+          </div>
+          <div className="invoice-total-row grand-total">
+            <span>Net à payer TTC:</span>
+            <span>{formatMoney(facture.total)}</span>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="invoice-footer">
+          {settings.invoiceFooter?.split('\n').map((line: string, i: number) => <p key={i}>{line}</p>)}
+        </div>
+      </div>
+      <div className="receipt-actions no-print">
+        <button type="button" className="primary-action" onClick={() => window.print()}><FileText size={18} /> Imprimer</button>
+        <button type="button" className="ghost-action" onClick={onClose}><XCircle size={18} /> Fermer</button>
+      </div>
+    </section>
+  </div>
+  );
+};

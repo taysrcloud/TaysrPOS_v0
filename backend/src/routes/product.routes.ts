@@ -41,15 +41,17 @@ const productSchema = z.object({
   trackStock: z.coerce.boolean().default(true),
   lowStockAlert: z.coerce.number().min(0).default(0),
   isKitchenItem: z.coerce.boolean().default(false),
-    isVariable: z.coerce.boolean().default(false),
-    variations: z.array(z.object({
-      name: z.string(),
-      sku: z.string().optional().nullable(),
-      barcode: z.string().optional().nullable(),
-      salePrice: z.coerce.number().optional().nullable(),
-      purchasePrice: z.coerce.number().optional().nullable(),
-      stock: z.coerce.number().default(0)
-    })).optional().nullable(),
+  isVariable: z.coerce.boolean().default(false),
+  variationOptions: z.array(z.string()).optional().nullable(),
+  variations: z.array(z.object({
+    name: z.string(),
+    attributes: z.record(z.string()).optional().nullable(),
+    sku: z.string().optional().nullable(),
+    barcode: z.string().optional().nullable(),
+    salePrice: z.coerce.number().optional().nullable(),
+    purchasePrice: z.coerce.number().optional().nullable(),
+    stock: z.coerce.number().default(0)
+  })).optional().nullable(),
 });
 
 const asNumber = (value: unknown) => value && typeof value === 'object' && 'toNumber' in value
@@ -68,6 +70,7 @@ const normalizeProduct = (product: any, locationId?: number) => ({
   trackStock: product.trackStock,
   lowStockAlert: asNumber(product.lowStockAlert),
   stock: product.stocks?.reduce((sum: number, stock: any) => {
+    if (stock.variationId) return sum; // don't sum variation stocks into base stock if not needed, or do we?
     if (locationId && stock.warehouse?.locationId !== locationId) return sum;
     return sum + asNumber(stock.quantity);
   }, 0) || 0,
@@ -76,6 +79,22 @@ const normalizeProduct = (product: any, locationId?: number) => ({
   imageUrl: product.imageUrl || null,
   unit: product.unit?.shortName || 'pcs',
   isKitchenItem: product.isKitchenItem,
+  isVariable: product.isVariable,
+  variationOptions: product.variationOptions,
+  variations: product.variations?.map((v: any) => ({
+    id: v.id,
+    name: v.name,
+    sku: v.sku,
+    barcode: v.barcode,
+    salePrice: v.salePrice ? asNumber(v.salePrice) : null,
+    purchasePrice: v.purchasePrice ? asNumber(v.purchasePrice) : null,
+    attributes: v.attributes,
+    isActive: v.isActive,
+    stock: v.stocks?.reduce((sum: number, stock: any) => {
+      if (locationId && stock.warehouse?.locationId !== locationId) return sum;
+      return sum + asNumber(stock.quantity);
+    }, 0) || 0,
+  })),
   isActive: product.isActive,
   createdAt: product.createdAt,
 });
@@ -109,7 +128,13 @@ router.get('/', requireAuth, async (req: any, res: any) => {
 
     const products = await prisma.product.findMany({
       where,
-      include: { category: true, brand: true, unit: true, stocks: { include: { warehouse: true } } },
+      include: { 
+        category: true, 
+        brand: true, 
+        unit: true, 
+        stocks: { include: { warehouse: true } },
+        variations: { include: { stocks: { include: { warehouse: true } } } }
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 200,
     });
@@ -138,6 +163,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
     if (!defaultUnit) defaultUnit = await prisma.unit.create({ data: { companyId, name: 'Piece', shortName: 'pcs' } });
     let warehouse = await prisma.warehouse.findFirst({ where: { companyId, isMain: true } });
     if (!warehouse) warehouse = await prisma.warehouse.create({ data: { companyId, name: 'Magasin principal', isMain: true } });
+    
     const data = productSchema.parse(req.body);
     const category = await prisma.category.upsert({
       where: { companyId_name: { companyId: company.id, name: data.categoryName } },
@@ -159,6 +185,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
     });
 
     const sku = data.sku || data.barcode || `${slugSku(data.name)}-${Date.now().toString().slice(-5)}`;
+    
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
         data: {
@@ -177,18 +204,53 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
           trackStock: data.trackStock,
           lowStockAlert: data.lowStockAlert,
           isKitchenItem: data.type === 'MENU_ITEM' ? data.isKitchenItem : false,
+          isVariable: data.isVariable,
+          variationOptions: data.variationOptions ? data.variationOptions : undefined,
         },
       });
 
-      if (data.trackStock) {
+      if (data.isVariable && data.variations && data.variations.length > 0) {
+        for (let i = 0; i < data.variations.length; i++) {
+          const v = data.variations[i];
+          const vSku = v.sku || `${sku}-${i + 1}`;
+          const variation = await tx.productVariation.create({
+            data: {
+              productId: created.id,
+              name: v.name,
+              attributes: v.attributes ? v.attributes : undefined,
+              sku: vSku,
+              barcode: v.barcode || null,
+              salePrice: v.salePrice,
+              purchasePrice: v.purchasePrice,
+            }
+          });
+
+          if (data.trackStock) {
+            await tx.productStock.create({
+              data: { productId: created.id, warehouseId: warehouse!.id, variationId: variation.id, quantity: v.stock }
+            });
+            if (v.stock > 0) {
+              await tx.stockMovement.create({
+                data: {
+                  productId: created.id,
+                  warehouseId: warehouse!.id,
+                  type: 'IN',
+                  quantity: v.stock,
+                  reference: 'CREATION-PRODUIT-VAR'
+                }
+              });
+            }
+          }
+        }
+      } else if (data.trackStock) {
         await tx.productStock.create({
-          data: { productId: created.id, warehouseId: warehouse.id, quantity: data.initialStock },
+          data: { productId: created.id, warehouseId: warehouse!.id, quantity: data.initialStock },
         });
         if (data.initialStock > 0) {
           await tx.stockMovement.create({
             data: {
               productId: created.id,
-              warehouseId: warehouse.id,
+              warehouseId: warehouse!.id,
               type: 'IN',
               quantity: data.initialStock,
               reference: 'CREATION-PRODUIT',
@@ -199,7 +261,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
 
       return tx.product.findUnique({
         where: { id: created.id },
-        include: { category: true, brand: true, unit: true, stocks: { include: { warehouse: true } } },
+        include: { category: true, brand: true, unit: true, stocks: { include: { warehouse: true } }, variations: { include: { stocks: { include: { warehouse: true } } } } },
       });
     });
 
@@ -208,34 +270,8 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
     if (error instanceof z.ZodError) return res.status(400).json({ message: 'Produit invalide', errors: error.issues });
     if (error?.code === 'P2002') return res.status(409).json({ message: 'SKU ou code-barres deja utilise' });
     console.error('Product create error:', error);
-    const parsed = productSchema.safeParse(req.body);
-    if (parsed.success) {
-      const data = parsed.data;
-      return res.status(201).json({
-        id: Date.now(),
-        name: data.name,
-        sku: data.sku || data.barcode || `LOCAL-${Date.now().toString().slice(-4)}`,
-        barcode: data.barcode || null,
-        type: data.type,
-        category: data.categoryName,
-        brand: data.brandName || null,
-        imageUrl: data.imageUrl || null,
-        unit: data.unitName || 'pcs',
-        salePrice: data.salePrice,
-        purchasePrice: data.purchasePrice,
-        tvaRate: data.tvaRate,
-        trackStock: data.trackStock,
-        lowStockAlert: data.lowStockAlert,
-        stock: data.initialStock,
-        isKitchenItem: data.type === 'MENU_ITEM' && data.isKitchenItem,
-            isVariable: data.isVariable,
-        isActive: true,
-        source: 'demo',
-      });
-    }
     res.status(500).json({ message: 'Erreur lors de la creation du produit' });
   }
 });
 
 export default router;
-

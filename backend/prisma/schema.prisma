@@ -252,6 +252,7 @@ model Product {
   isActive      Boolean            @default(true)
   isSellable    Boolean            @default(true)
   isVariable    Boolean            @default(false)
+  variationOptions Json?
   variations    ProductVariation[]
   isKitchenItem Boolean            @default(false)
   createdAt     DateTime           @default(now())
@@ -549,7 +550,8 @@ model ProductVariation {
   id            Int      @id @default(autoincrement())
   productId     Int
   name          String
-  sku           String?  @unique
+  attributes    Json?
+  sku           String?
   barcode       String?
   purchasePrice Decimal? @db.Decimal(12, 2)
   salePrice     Decimal? @db.Decimal(12, 2)
