@@ -80,7 +80,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
 
       for (const item of parsed.items) {
         await tx.productStock.upsert({
-          where: { productId_warehouseId: { productId: item.productId, warehouseId: warehouse.id } },
+          where: { productId_warehouseId: { productId: item.productId, warehouseId: warehouse.id } } as any,
           update: { quantity: { increment: item.quantity } },
           create: { productId: item.productId, warehouseId: warehouse.id, quantity: item.quantity },
         });

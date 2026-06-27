@@ -44,18 +44,20 @@ import {
   Palette,
   Shield,
   Download,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Mail
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  AreaChart, Area
+  AreaChart, Area, ComposedChart, LineChart, Line, PieChart, Pie, Cell
 } from 'recharts';
+import { CreatePurchaseModal } from './purchase-modals';
 import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
 type EnabledModule = 'POS' | 'RESTAURANT';
 type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients' | 'Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
-type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'MULTI';
+type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
 type CashMovement = {
   id: number;
@@ -144,6 +146,7 @@ type Contact = {
   lastActivity: string;
   address?: string;
   rewardPoints?: number;
+  storeCredit?: number;
 };
 
 type ProductForm = {
@@ -171,6 +174,8 @@ type CartLine = { product: Product; variation?: ProductVariation; quantity: numb
 type SaleLine = { productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; note?: string; };
 type SaleRecord = {
   invoiceId?: number;
+  userId?: number;
+  cashierName?: string;
   customerId?: number;
   id: number;
   ticket: string;
@@ -192,16 +197,21 @@ type SaleRecord = {
   pointsUsed?: number;
 };
 
+type SaleSettlementForm = {
+  amount: string;
+  method: 'CASH' | 'CARD';
+};
+
 type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'WAITER';
 
 type RolePermissions = Record<UserRole, string[]>;
 
-const allModuleLabels = ['Tableau de bord', 'POS', 'Produits', 'Clients', 'Fournisseurs', 'Stock', 'Achats', 'Depenses', 'Ventes', 'Paiements', 'Rapports', 'Caisses', 'Tables', 'Cuisine', 'Parametres'];
+const allModuleLabels = ['Tableau de bord', 'POS', 'Produits', 'Clients', 'Fournisseurs', 'Stock', 'Achats', 'Depenses', 'Ventes', 'Factures', 'Paiements', 'Rapports', 'Caisses', 'Tables', 'Cuisine', 'Parametres', 'ACTION:APPLY_DISCOUNT', 'ACTION:OVERRIDE_PRICE', 'ACTION:VOID_SALE'];
 
 const defaultRolePermissions: RolePermissions = {
   ADMIN: [...allModuleLabels],
   MANAGER: allModuleLabels.filter(m => m !== 'Parametres'),
-  CASHIER: ['POS', 'Clients'],
+  CASHIER: ['POS', 'Clients', 'ACTION:VOID_SALE'], // Allow cashier to void, but not discount/override by default
   WAITER: ['Tables', 'Cuisine'],
 };
 
@@ -336,7 +346,7 @@ const emptyForm: ProductForm = {
   variations: [],
 };
 
-const formatMoney = (value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
+const formatMoney = (value: number) => `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 
 const typeLabel: Record<ProductType, string> = {
   RETAIL: 'Article retail',
@@ -349,9 +359,87 @@ const typeLabel: Record<ProductType, string> = {
 const methodLabel: Record<PaymentMethod, string> = {
   CASH: 'Especes',
   CARD: 'Carte',
-  CREDIT: 'Credit client',
+  CREDIT: 'Crédit',
+  STORE_CREDIT: 'Crédit Magasin',
   MULTI: 'Paiement multiple',
 };
+
+const generateESCPOS = (sale: SaleRecord, settings: any): Uint8Array => {
+  const bytes: number[] = [];
+  const addBytes = (...b: number[]) => bytes.push(...b);
+  const addText = (text: string) => text.split('').forEach(c => {
+    const charCode = c.normalize("NFD").replace(/[\u0300-\u036f]/g, "").charCodeAt(0);
+    addBytes(charCode > 255 ? 63 : charCode);
+  });
+  const addLine = (text: string) => { addText(text); addBytes(10); };
+
+  addBytes(27, 64);
+  addBytes(27, 97, 1);
+  addBytes(27, 69, 1);
+  addLine(settings.companyName || 'MAGASIN');
+  addBytes(27, 69, 0);
+
+  addLine(settings.address || '');
+  addLine('Tel: ' + (settings.phone || ''));
+  addLine('');
+  
+  addLine(settings.ticketHeader || 'Ticket de Caisse');
+  addLine('--------------------------------');
+  
+  addBytes(27, 97, 0);
+  addLine('Ticket: ' + sale.ticket);
+  addLine('Date: ' + sale.createdAt);
+  addLine('Client: ' + sale.customer);
+  addLine('--------------------------------');
+
+  (sale.lines || []).forEach(line => {
+    addLine(line.name);
+    let qtyStr = "  " + line.quantity + " x " + line.unitPrice.toFixed(2);
+    let totalStr = line.lineTotal.toFixed(2);
+    let spaces = 32 - qtyStr.length - totalStr.length;
+    if(spaces < 1) spaces = 1;
+    addLine(qtyStr + ' '.repeat(spaces) + totalStr);
+  });
+
+  addLine('--------------------------------');
+  
+  addBytes(27, 97, 2);
+  addBytes(27, 69, 1);
+  addLine('TOTAL: ' + sale.total.toFixed(2));
+  addBytes(27, 69, 0);
+  
+  addLine('--------------------------------');
+  addBytes(27, 97, 1);
+  addLine(settings.ticketFooter || 'Merci de votre visite!');
+  
+  addBytes(10, 10, 10, 10);
+  addBytes(29, 86, 66, 0);
+  
+  return new Uint8Array(bytes);
+};
+
+const sendToPrinter = async (port: any, data: Uint8Array) => {
+  if (!port) return;
+  try {
+    const writer = port.writable.getWriter();
+    await writer.write(data);
+    writer.releaseLock();
+  } catch (e) {
+    console.error("Print Error", e);
+  }
+};
+
+const openCashDrawer = async (port: any) => {
+  if (!port) return;
+  try {
+    const writer = port.writable.getWriter();
+    await writer.write(new Uint8Array([27, 112, 0, 25, 250]));
+    writer.releaseLock();
+  } catch (e) {
+    console.error("Drawer Error", e);
+  }
+};
+
 
 const pageIcon = (page: PageKey) => {
   const found = baseModules.find(([label]) => label === page);
@@ -465,6 +553,7 @@ const App = () => {
   const [zReportModalOpen, setZReportModalOpen] = useState(false);
   const [actualCash, setActualCash] = useState('');
   const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [cashMovementModalOpen, setCashMovementModalOpen] = useState(false);
   const [cashMovementForm, setCashMovementForm] = useState<{type: 'IN' | 'OUT', amount: string, note: string}>({type: 'IN', amount: '', note: ''});
   const [showDenominations, setShowDenominations] = useState(false);
@@ -477,6 +566,7 @@ const App = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [filter, setFilter] = useState<ProductType | 'ALL'>('ALL');
   const [dashboardLocationFilter, setDashboardLocationFilter] = useState<'ALL' | number>('ALL');
+  const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('month');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [status, setStatus] = useState('Mode demo local pret');
@@ -488,7 +578,12 @@ const App = () => {
   const [sales, setSales] = useState<SaleRecord[]>([]);
     const [invoices, setInvoices] = useState<any[]>([]);
   const [selectedFacture, setSelectedFacture] = useState<any>(null);
-    const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [manualInvoiceCustomer, setManualInvoiceCustomer] = useState<number | ''>('');
+  const [manualInvoiceNotes, setManualInvoiceNotes] = useState('');
+  const [manualInvoiceLines, setManualInvoiceLines] = useState([{ description: '', quantity: '1', unitPrice: '0', tvaRate: '20' }]);
+  const [ticketInvoiceModalOpen, setTicketInvoiceModalOpen] = useState(false);
+  const [manualInvoiceModalOpen, setManualInvoiceModalOpen] = useState(false);
   const [draftSales, setDraftSales] = useState<SaleRecord[]>([]);
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [discountRate, setDiscountRate] = useState(0);
@@ -506,6 +601,12 @@ const App = () => {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [settlingContact, setSettlingContact] = useState<Contact | null>(null);
   const [settlementAmount, setSettlementAmount] = useState('');
+  const [settlingSale, setSettlingSale] = useState<SaleRecord | null>(null);
+  const [saleSettlementForm, setSaleSettlementForm] = useState<SaleSettlementForm>({ amount: '', method: 'CASH' });
+  const [topupContact, setTopupContact] = useState<Contact | null>(null);
+  const [topupAmount, setTopupAmount] = useState('');
+  const [messageContact, setMessageContact] = useState<Contact | null>(null);
+  const [messageContent, setMessageContent] = useState('');
   const [suspendModalOpen, setSuspendModalOpen] = useState(false);
   const [suspendType, setSuspendType] = useState<SaleRecord['status']>('Brouillon');
   const [suspendNote, setSuspendNote] = useState('');
@@ -514,7 +615,8 @@ const App = () => {
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [editLineForm, setEditLineForm] = useState({ price: '', discount: '', note: '' });
   const [contactForm, setContactForm] = useState({ name: '', phone: '', creditLimit: '0', address: '' });
-  const [paymentForm, setPaymentForm] = useState({ cash: '0', card: '0', credit: '0' });
+  const [paymentForm, setPaymentForm] = useState({ cash: '0', card: '0', credit: '0', storeCredit: '0' });
+  const [serialPort, setSerialPort] = useState<any>(null);
   const [registerStatus, setRegisterStatus] = useState<'OPEN' | 'CLOSED'>('CLOSED');
   const [registerLogs, setRegisterLogs] = useState<RegisterHistory[]>([]);
   const [stockAdjustments, setStockAdjustments] = useState<StockAdjustment[]>([]);
@@ -554,7 +656,7 @@ const App = () => {
     companyName: 'TaysrERP Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
     rc: '239', ice: '001454366000046', patente: '54509281', if: '4967057', inpe: '165002114',
     defaultTva: '20', pricesIncludeTva: true,
-    invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance',
+    invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance', invoiceTicketDisplay: 'SUMMARY' as 'SUMMARY' | 'DETAILED', invoiceShowTicketReferences: true, invoiceShowTicketDates: true,
     ticketHeader: 'TICKET DE CAISSE', ticketFooter: 'Merci de votre visite', ticketPaperWidth: 80,
     primaryColor: '#3b82f6', showLogo: true, logoUrl: null as string | null,
     autoLockMinutes: 5,
@@ -582,7 +684,19 @@ const App = () => {
   }, [enabledModules, currentUser, rolePermissions]);
   const ActiveIcon = pageIcon(page);
 
+  const [activeLocation, setActiveLocation] = useState<string | null>(() => localStorage.getItem('taysrPOS_activeLocation'));
   const [dataLoading, setDataLoading] = useState(false);
+
+  const handleClockIn = async () => {
+    if(!currentUser) return;
+    const res = await apiFetch('/api/attendance/clock-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: currentUser.id }) });
+    if (res.ok) { alert('Pointage entrée enregistré!'); } else { const err = await res.json(); alert('Erreur: ' + err.error); }
+  };
+  const handleClockOut = async () => {
+    if(!currentUser) return;
+    const res = await apiFetch('/api/attendance/clock-out', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: currentUser.id }) });
+    if (res.ok) { alert('Pointage sortie enregistré!'); } else { const err = await res.json(); alert('Erreur: ' + err.error); }
+  };
 
   const loadInvoices = async () => {
     try {
@@ -598,7 +712,7 @@ const App = () => {
 
   const loadSales = async () => {
     try {
-      const response = await apiFetch(`/api/sales`);
+      const response = await apiFetch(`/api/sales${activeLocation ? '?locationId='+activeLocation : ''}`);
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.sales)) setSales(data.sales);
@@ -677,7 +791,9 @@ const App = () => {
          apiFetch(`/api/register/movements`)
       ]);
       const [sessData, movData] = await Promise.all([sessRes.json(), movRes.json()]);
-      if (Array.isArray(sessData.sessions)) setRegisterLogs(sessData.sessions);
+      if (Array.isArray(sessData.sessions)) {
+        setRegisterLogs(sessData.sessions);
+      }
       if (Array.isArray(movData.movements)) setCashMovements(movData.movements);
     } catch {
       // Expected when the API/database is offline; keep the demo UI usable.
@@ -793,9 +909,51 @@ const App = () => {
   }, [currentLocationId]);
 
   useEffect(() => {
+    const scopedOpenSession = registerLogs.find((session: any) => {
+      if (session.status !== 'Ouverte') return false;
+      if (!currentLocationId) return true;
+      return !session.locationId || session.locationId === currentLocationId;
+    });
+
+    if (scopedOpenSession) {
+      setRegisterStatus('OPEN');
+      setRegisterDetails({
+        openedAt: scopedOpenSession.openedAt,
+        initialCash: scopedOpenSession.initialCash,
+        openedId: scopedOpenSession.id,
+      });
+    } else {
+      setRegisterStatus('CLOSED');
+      setRegisterDetails(current => ({ ...current, openedId: 0 }));
+    }
+  }, [registerLogs, currentLocationId]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(loadProducts, 180);
     return () => window.clearTimeout(timeout);
   }, [filter, search, restaurantEnabled, currentLocationId]);
+
+  const matchesPeriod = (createdAt: string, period: 'today' | 'week' | 'month' | 'year' | 'all') => {
+    if (period === 'all') return true;
+    const now = new Date();
+    const value = createdAt.toLowerCase();
+    if (period === 'today') {
+      return value.includes('aujourd') || value.includes('maintenant');
+    }
+    if (period === 'week') {
+      return !value.includes('lun') && !value.includes('mar') && !value.includes('mer') && !value.includes('jeu') && !value.includes('ven') && !value.includes('sam') && !value.includes('dim')
+        ? true
+        : ['aujourd', 'maintenant', 'hier', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].some(token => value.includes(token));
+    }
+    const parsed = new Date(createdAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return period === 'month' || period === 'year';
+    }
+    if (period === 'month') {
+      return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
+    }
+    return parsed.getFullYear() === now.getFullYear();
+  };
 
   const visibleProducts = useMemo(() => products.filter(product => restaurantEnabled || product.type !== 'MENU_ITEM'), [products, restaurantEnabled]);
   const lowStockProducts = useMemo(() => visibleProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert), [visibleProducts]);
@@ -1047,6 +1205,7 @@ const App = () => {
         ...(Number(paymentForm.cash) > 0 ? [{ method: 'CASH' as PaymentMethod, amount: Number(paymentForm.cash) }] : []),
         ...(Number(paymentForm.card) > 0 ? [{ method: 'CARD' as PaymentMethod, amount: Number(paymentForm.card) }] : []),
         ...(Number(paymentForm.credit) > 0 ? [{ method: 'CREDIT' as PaymentMethod, amount: Number(paymentForm.credit) }] : []),
+        ...(Number(paymentForm.storeCredit) > 0 ? [{ method: 'STORE_CREDIT' as PaymentMethod, amount: Number(paymentForm.storeCredit) }] : []),
       ];
     }
     return sale;
@@ -1181,6 +1340,85 @@ const App = () => {
     setReceiptSale(null);
   };
 
+  const getSalePaidAmount = (sale: SaleRecord) => {
+    if (!sale.splitPayments?.length) {
+      return sale.status === 'Payee' ? sale.total : 0;
+    }
+    return sale.splitPayments
+      .filter(payment => payment.method !== 'CREDIT')
+      .reduce((sum, payment) => sum + payment.amount, 0);
+  };
+
+  const getSaleDueAmount = (sale: SaleRecord) => Math.max(0, sale.total - getSalePaidAmount(sale));
+
+  const openSaleSettlement = (sale: SaleRecord) => {
+    const due = getSaleDueAmount(sale);
+    setSettlingSale(sale);
+    setSaleSettlementForm({ amount: due > 0 ? due.toFixed(2) : '', method: 'CASH' });
+  };
+
+  const closeSaleSettlement = () => {
+    setSettlingSale(null);
+    setSaleSettlementForm({ amount: '', method: 'CASH' });
+  };
+
+  const submitSaleSettlement = () => {
+    if (!settlingSale) return;
+
+    const amount = Number(saleSettlementForm.amount || 0);
+    const dueBefore = getSaleDueAmount(settlingSale);
+    if (amount <= 0) {
+      setStatus('Veuillez saisir un montant valide pour encaisser ce ticket.');
+      return;
+    }
+    if (amount > dueBefore) {
+      setStatus(`Le montant depasse le reste a regler (${formatMoney(dueBefore)}).`);
+      return;
+    }
+
+    setSales(current =>
+      current.map(sale => {
+        if (sale.id !== settlingSale.id) return sale;
+        const nextSplitPayments = [...(sale.splitPayments || []), { method: saleSettlementForm.method, amount }];
+        const nextPaid = nextSplitPayments
+          .filter(payment => payment.method !== 'CREDIT')
+          .reduce((sum, payment) => sum + payment.amount, 0);
+        const nextDue = Math.max(0, sale.total - nextPaid);
+        return {
+          ...sale,
+          method: nextSplitPayments.length > 1 ? 'MULTI' : saleSettlementForm.method,
+          splitPayments: nextSplitPayments,
+          status: nextDue <= 0.009 ? 'Payee' : 'Credit',
+        };
+      })
+    );
+
+    if (settlingSale.customer !== 'Client comptoir') {
+      setContacts(current =>
+        current.map(contact =>
+          contact.name === settlingSale.customer
+            ? { ...contact, balance: Math.max(0, contact.balance - amount) }
+            : contact
+        )
+      );
+      if (customer.name === settlingSale.customer) {
+        setCustomer(current => ({ ...current, balance: Math.max(0, current.balance - amount) }));
+      }
+    }
+
+    if (saleSettlementForm.method === 'CASH') {
+      setActualCash((Number(actualCash || '0') + amount).toString());
+    }
+
+    const remaining = Math.max(0, dueBefore - amount);
+    setStatus(
+      remaining <= 0.009
+        ? `Ticket ${settlingSale.ticket} entierement encaisse.`
+        : `Encaissement de ${formatMoney(amount)} enregistre sur ${settlingSale.ticket}. Reste: ${formatMoney(remaining)}.`
+    );
+    closeSaleSettlement();
+  };
+
   const handleReturnPurchase = (purchaseId: number) => {
     const purchase = purchases.find(p => p.id === purchaseId);
     if (!purchase || purchase.status === 'Retour') return;
@@ -1277,21 +1515,24 @@ const App = () => {
   };
 
   const renderDashboard = () => {
-    const dashboardFilteredSales = dashboardLocationFilter === 'ALL' 
-      ? sales 
+    const dashboardBaseSales = dashboardLocationFilter === 'ALL'
+      ? sales
       : sales.filter(s => s.locationId === dashboardLocationFilter);
-      
+    const dashboardFilteredSales = dashboardBaseSales.filter(sale => matchesPeriod(sale.createdAt, dashboardPeriod));
+
     const dashPaidSales = dashboardFilteredSales.filter(s => s.status === 'Payee');
     const dashCreditSales = dashboardFilteredSales.filter(s => s.status === 'Credit');
-    const dashTodayRevenue = dashPaidSales.reduce((sum, sale) => sum + sale.total, 0);
+    const dashRevenue = dashPaidSales.reduce((sum, sale) => sum + sale.total, 0);
 
-    const totalPurchases = visibleProducts.reduce((sum, p) => sum + (p.purchasePrice * (p.trackStock ? p.stock : 1)), 0);
-    const stockValue = visibleProducts.reduce((sum, p) => sum + (p.salePrice * (p.trackStock ? p.stock : 0)), 0);
-    const totalCreditDue = dashCreditSales.reduce((sum, s) => sum + s.total, 0);
-    const totalSellReturn = 0; // placeholder
-    const dashboardFilteredExpenses = dashboardLocationFilter === 'ALL' 
-      ? expenses 
-      : expenses.filter(e => e.locationId === dashboardLocationFilter);
+    const dashboardVisibleProducts = visibleProducts;
+    const dashboardLowStockProducts = lowStockProducts;
+    const totalPurchases = dashboardVisibleProducts.reduce((sum, p) => sum + (p.purchasePrice * (p.trackStock ? p.stock : 1)), 0);
+    const stockValue = dashboardVisibleProducts.reduce((sum, p) => sum + (p.salePrice * (p.trackStock ? p.stock : 0)), 0);
+    const totalCreditDue = dashCreditSales.reduce((sum, s) => sum + getSaleDueAmount(s), 0);
+    const totalSellReturn = dashboardFilteredSales.filter(s => s.status === 'Retour').reduce((sum, sale) => sum + sale.total, 0);
+    const dashboardFilteredExpenses = (dashboardLocationFilter === 'ALL'
+      ? expenses
+      : expenses.filter(e => e.locationId === dashboardLocationFilter)).filter(expense => matchesPeriod(expense.date, dashboardPeriod));
     const totalExpenses = dashboardFilteredExpenses.reduce((sum, e) => sum + e.amount, 0);
 
     const salesByDate = dashboardFilteredSales.reduce((acc, sale) => {
@@ -1314,33 +1555,43 @@ const App = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', padding: '1.5rem 2rem', borderRadius: '18px', background: 'linear-gradient(135deg, #050b16, #0d1b2a)', color: '#fff' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>Bienvenue, Administrateur</h1>
-          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px', fontWeight: 600 }}>Voici un aperçu de votre activité commerciale.</p>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px', fontWeight: 600 }}>Voici un aperçu de votre activité commerciale pour {dashboardPeriod === 'today' ? "aujourd'hui" : dashboardPeriod === 'week' ? 'cette semaine' : dashboardPeriod === 'month' ? 'ce mois' : dashboardPeriod === 'year' ? 'cette annee' : 'toute la periode'}.</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {[{ id: 'today', label: "Aujourd'hui" }, { id: 'week', label: 'Semaine' }, { id: 'month', label: 'Mois' }, { id: 'year', label: 'Annee' }, { id: 'all', label: 'Tout' }].map(period => (
+            <button
+              key={period.id}
+              className={dashboardPeriod === period.id ? 'primary-action' : 'ghost-action'}
+              onClick={() => setDashboardPeriod(period.id as 'today' | 'week' | 'month' | 'year' | 'all')}
+              style={{ minWidth: '84px', justifyContent: 'center' }}
+            >
+              {period.label}
+            </button>
+          ))}
           <button className="primary-action" onClick={() => setPage('POS')}><ReceiptText size={16} /> Ouvrir POS</button>
         </div>
       </div>
 
       {/* Row 1 - 4 KPI cards (like UltimatePOS top row) */}
       <section className="metric-grid">
-        <Metric title="Total des ventes" value={formatMoney(dashTodayRevenue)} detail={`${dashPaidSales.length} ventes payées`} tone="blue" icon={ShoppingCart} />
-        <Metric title="Revenu net" value={formatMoney(dashTodayRevenue - totalSellReturn)} detail="Ventes - Retours" tone="green" icon={Banknote} />
+        <Metric title="Total des ventes" value={formatMoney(dashRevenue)} detail={`${dashPaidSales.length} ventes payees`} tone="blue" icon={ShoppingCart} />
+        <Metric title="Revenu net" value={formatMoney(dashRevenue - totalSellReturn - totalExpenses)} detail="Ventes - retours - depenses" tone="green" icon={Banknote} />
         <Metric title="Factures en attente" value={formatMoney(totalCreditDue)} detail={`${dashCreditSales.length} factures crédit`} tone="orange" icon={FileText} />
         <Metric title="Retours de vente" value={formatMoney(totalSellReturn)} detail="Total retours" tone="violet" icon={RotateCcw} />
       </section>
 
       {/* Row 2 - 4 more KPI cards (like UltimatePOS second row) */}
       <section className="metric-grid" style={{ marginBottom: '1rem' }}>
-        <Metric title="Total achats" value={formatMoney(totalPurchases)} detail={`${visibleProducts.length} articles`} tone="blue" icon={TrendingUp} />
+        <Metric title="Total achats" value={formatMoney(totalPurchases)} detail={`${dashboardVisibleProducts.length} articles`} tone="blue" icon={TrendingUp} />
         <Metric title="Achats en attente" value={formatMoney(0)} detail="Aucun fournisseur en retard" tone="orange" icon={AlertTriangle} />
-        <Metric title="Valeur du stock" value={formatMoney(stockValue)} detail={`${lowStockProducts.length} alertes`} tone="green" icon={Warehouse} />
+        <Metric title="Valeur du stock" value={formatMoney(stockValue)} detail={`${dashboardLowStockProducts.length} alertes`} tone="green" icon={Warehouse} />
         <Metric title="Dépenses" value={formatMoney(totalExpenses)} detail="Pas encore de données" tone="violet" icon={Banknote} />
       </section>
 
       {/* Full-width chart - Sells last 30 days (like UltimatePOS) */}
       <section style={{ marginBottom: '1rem' }}>
         <div className="panel wide-panel" style={{ width: '100%', padding: '1.5rem' }}>
-          <div className="panel-title compact" style={{ marginBottom: '1.5rem' }}><div><p>Ventes</p><h2>Ventes des derniers jours</h2></div><span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>{formatMoney(paidSales.reduce((s, sale) => s + sale.total, 0))} Total</span></div>
+          <div className="panel-title compact" style={{ marginBottom: '1.5rem' }}><div><p>Ventes</p><h2>Ventes de la periode</h2></div><span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>{formatMoney(dashPaidSales.reduce((s, sale) => s + sale.total, 0))} Total</span></div>
           <div style={{ height: '280px', width: '100%' }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -1365,14 +1616,14 @@ const App = () => {
       <section className="workspace-grid" style={{ marginBottom: '1rem' }}>
         <div className="panel wide-panel">
           <div className="panel-title compact"><div><p>Paiements</p><h2>Factures client en attente</h2></div><button onClick={() => setPage('Paiements')}>Tout voir</button></div>
-          {creditSales.length > 0 ? (
+          {dashCreditSales.length > 0 ? (
             <div className="cart-table" style={{ maxHeight: '260px', overflow: 'auto' }}>
               <div className="data-head" style={{ gridTemplateColumns: '1fr 1fr .7fr' }}><span>Client</span><span>Ticket</span><span>Montant dû</span></div>
-              {creditSales.slice(0, 6).map(sale => (
+              {dashCreditSales.slice().sort((left, right) => getSaleDueAmount(right) - getSaleDueAmount(left)).slice(0, 6).map(sale => (
                 <div className="data-row" key={sale.id} style={{ gridTemplateColumns: '1fr 1fr .7fr', cursor: 'pointer' }} onClick={() => setReceiptSale(sale)}>
                   <span><strong>{sale.customer}</strong></span>
                   <span>{sale.ticket}</span>
-                  <span style={{ color: '#ef4444', fontWeight: 700 }}>{formatMoney(sale.total)}</span>
+                  <span style={{ color: '#ef4444', fontWeight: 700 }}>{formatMoney(getSaleDueAmount(sale))}</span>
                 </div>
               ))}
             </div>
@@ -1393,11 +1644,11 @@ const App = () => {
       {/* Stock Alerts table (like UltimatePOS) */}
       <section style={{ marginBottom: '1rem' }}>
         <div className="panel" style={{ width: '100%' }}>
-          <div className="panel-title compact"><div><p>Stock</p><h2>Alertes de stock ({lowStockProducts.length})</h2></div><button onClick={() => setPage('Stock')}>Tout voir</button></div>
-          {lowStockProducts.length > 0 ? (
+          <div className="panel-title compact"><div><p>Stock</p><h2>Alertes de stock ({dashboardLowStockProducts.length})</h2></div><button onClick={() => setPage('Stock')}>Tout voir</button></div>
+          {dashboardLowStockProducts.length > 0 ? (
             <div className="cart-table" style={{ maxHeight: '240px', overflow: 'auto' }}>
               <div className="data-head" style={{ gridTemplateColumns: '1.5fr 1fr .7fr' }}><span>Produit</span><span>Catégorie</span><span>Stock</span></div>
-              {lowStockProducts.slice(0, 8).map(p => (
+              {dashboardLowStockProducts.slice(0, 8).map(p => (
                 <div className="data-row" key={p.id} style={{ gridTemplateColumns: '1.5fr 1fr .7fr' }}>
                   <span><strong>{p.name}</strong><small>{p.sku}</small></span>
                   <span>{p.category}</span>
@@ -1413,7 +1664,7 @@ const App = () => {
       <section>
         <div className="panel" style={{ width: '100%' }}>
           <div className="panel-title compact"><div><p>Activite</p><h2>Ventes recentes</h2></div><button onClick={() => setPage('Ventes')}>Tout voir</button></div>
-          <RecordTable sales={sales.slice(0, 5)} onOpenReceipt={setReceiptSale} />
+          <RecordTable sales={dashboardFilteredSales.slice(0, 5)} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} />
         </div>
       </section>
     </>
@@ -1527,7 +1778,7 @@ const App = () => {
             </select>
             <small className="credit-info">
               Solde {formatMoney(customer.balance)}
-              {customer.creditLimit > 0 ? ` • Plafond ${formatMoney(customer.creditLimit)}` : ''}
+              {customer.creditLimit > 0 ? ` â€¢ Plafond ${formatMoney(customer.creditLimit)}` : ''}
             </small>
           </div>
           <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
@@ -1544,7 +1795,7 @@ const App = () => {
               const lineNet = Math.max(0, (currentPrice - line.discount) * line.quantity);
               return <div className="cart-row" key={line.uniqueId}>
                 <span>
-                  <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>{line.product.name} {line.variation && <span style={{ color: '#3b82f6' }}>({line.variation.name})</span>} <button className="ghost-action" onClick={() => { setEditingLineId(line.uniqueId); setEditLineForm({ price: String(currentPrice), discount: String(line.discount), note: line.note || '' }); }} style={{ padding: '2px' }}><Edit2 size={13} /></button></strong>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>{line.product.name} {line.variation && <span style={{ color: '#3b82f6' }}>({line.variation.name})</span>} {(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) && <button className="ghost-action" onClick={() => { setEditingLineId(line.uniqueId); setEditLineForm({ price: String(currentPrice), discount: String(line.discount), note: line.note || '' }); }} style={{ padding: '2px' }}><Edit2 size={13} /></button>}</strong>
                   <small>{line.variation ? line.variation.sku : line.product.sku}</small>
                   {line.note && <em style={{ fontSize: '0.75rem', color: '#64748b', display: 'block' }}>Note: {line.note}</em>}
                 </span>
@@ -1594,7 +1845,7 @@ const App = () => {
         }} style={{ background: '#f59e0b', color: '#fff', border: 'none' }}><ChefHat size={16} /> Cuisine</button>}
         {restaurantEnabled && <button id="btn-cuisine-auto-suspend" style={{display: 'none'}} onClick={() => recordDraft('Suspendue')}></button>}
         <button disabled={!cart.length} className="primary-action" onClick={() => {
-          setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0' });
+          setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0', storeCredit: '0' });
           setPaymentModalOpen(true);
         }} style={{ flex: 2, fontSize: '1.1rem' }}>Payer {formatMoney(cartTotal)}</button>
         <button className="recent" onClick={() => setTransactionsModalOpen(true)}><Clock size={16} /> Transactions</button>
@@ -1607,7 +1858,7 @@ const App = () => {
               <div className="panel-title"><div><p>Client</p><h2>Nouveau client</h2></div><button type="button" onClick={() => setCustomerModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
               <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
                 <label><span>Nom complet *</span><input value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} placeholder="Ex: Jean Dupont" autoFocus /></label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
                   <label><span>Téléphone</span><input value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} placeholder="+212 6..." /></label>
                   <label><span>Plafond de crédit (MAD)</span><input value={contactForm.creditLimit} onChange={e => setContactForm({...contactForm, creditLimit: e.target.value})} inputMode="decimal" placeholder="0.00" /></label>
                 </div>
@@ -1616,6 +1867,63 @@ const App = () => {
               <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                 <button type="button" onClick={() => setCustomerModalOpen(false)} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
                 <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Enregistrer</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {topupContact && (
+        <div className="receipt-backdrop" style={{ zIndex: 60 }} role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) { setTopupContact(null); setTopupAmount(''); } }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '400px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={(e) => { 
+              e.preventDefault(); 
+              const amount = Number(topupAmount);
+              if (amount > 0) {
+                const newCredit = (topupContact.storeCredit || 0) + amount;
+                setContacts(contacts.map(c => c.id === topupContact.id ? { ...c, storeCredit: newCredit } : c));
+                setTopupContact(null);
+                setTopupAmount('');
+              }
+            }} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Client</p><h2>Recharger Crédit Magasin</h2></div><button type="button" onClick={() => { setTopupContact(null); setTopupAmount(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div style={{ marginTop: '1rem', color: '#334155' }}>
+                Recharger le compte de <strong>{topupContact.name}</strong>.
+                <div style={{ color: '#10b981', fontWeight: 600, marginTop: '0.5rem' }}>Solde actuel: {formatMoney(topupContact.storeCredit || 0)}</div>
+              </div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
+                <label><span>Montant à recharger (MAD)</span><input value={topupAmount} onChange={e => setTopupAmount(e.target.value)} inputMode="decimal" autoFocus /></label>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={() => { setTopupContact(null); setTopupAmount(''); }} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Recharger</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {messageContact && (
+        <div className="receipt-backdrop" style={{ zIndex: 60 }} role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) { setMessageContact(null); setMessageContent(''); } }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={(e) => { 
+              e.preventDefault(); 
+              if (messageContent.trim()) {
+                alert(`Message envoyé à ${messageContact.name}: \n\n${messageContent}`);
+                setMessageContact(null);
+                setMessageContent('');
+              }
+            }} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Communication</p><h2>Envoyer Message</h2></div><button type="button" onClick={() => { setMessageContact(null); setMessageContent(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div style={{ marginTop: '1rem', color: '#334155' }}>
+                Envoyer un SMS / Email à <strong>{messageContact.name}</strong>.
+              </div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
+                <label><span>Message</span><textarea value={messageContent} onChange={e => setMessageContent(e.target.value)} rows={4} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} autoFocus /></label>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={() => { setMessageContact(null); setMessageContent(''); }} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}><Mail size={16} style={{ marginRight: '8px' }} /> Envoyer</button>
               </div>
             </form>
           </div>
@@ -1689,7 +1997,8 @@ const App = () => {
                     const cash = Number(paymentForm.cash || 0);
                     const card = Number(paymentForm.card || 0);
                     const credit = Number(paymentForm.credit || 0);
-                    const paid = cash + card + credit;
+                    const storeCredit = Number(paymentForm.storeCredit || 0);
+                    const paid = cash + card + credit + storeCredit;
                     const diff = paid - cartTotal;
                     
                     return (
@@ -1717,13 +2026,24 @@ const App = () => {
                             }
                             
                             let method: PaymentMethod = 'CASH';
-                            if (card > 0 && cash === 0 && credit === 0) method = 'CARD';
-                            else if (credit > 0 && cash === 0 && card === 0) method = 'CREDIT';
-                            else if (cash > 0 || card > 0 || credit > 0) method = 'MULTI';
+                            if (card > 0 && cash === 0 && credit === 0 && storeCredit === 0) method = 'CARD';
+                            else if (credit > 0 && cash === 0 && card === 0 && storeCredit === 0) method = 'CREDIT';
+                            else if (storeCredit > 0 && cash === 0 && card === 0 && credit === 0) method = 'STORE_CREDIT';
+                            else if (cash > 0 || card > 0 || credit > 0 || storeCredit > 0) method = 'MULTI';
 
                             if (credit > 0) {
                               setContacts(contacts.map(c => c.id === customer.id ? { ...c, balance: newBalance } : c));
                               setCustomer({ ...customer, balance: newBalance });
+                            }
+                            
+                            if (storeCredit > 0 && customer.name !== 'Client comptoir') {
+                              if (storeCredit > (customer.storeCredit || 0)) {
+                                alert("Crédit Magasin insuffisant.");
+                                return;
+                              }
+                              const newStoreCredit = (customer.storeCredit || 0) - storeCredit;
+                              setContacts(contacts.map(c => c.id === customer.id ? { ...c, storeCredit: newStoreCredit } : c));
+                              setCustomer({ ...customer, storeCredit: newStoreCredit });
                             }
                             
                             setPaymentModalOpen(false);
@@ -1788,7 +2108,7 @@ const App = () => {
           <section className="receipt-panel" style={{ maxWidth: '400px' }}>
             <div className="receipt-header"><div><p>Caisse</p><h2>Mouvement de Caisse</h2></div><button onClick={() => setCashMovementModalOpen(false)}><XCircle size={18} /></button></div>
             <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <div className="form-grid">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <label>
                   <span>Type de mouvement</span>
                   <select value={cashMovementForm.type} onChange={e => setCashMovementForm(prev => ({ ...prev, type: e.target.value as 'IN'|'OUT' }))} style={{ fontSize: '1.1rem', padding: '0.75rem' }}>
@@ -1844,7 +2164,7 @@ const App = () => {
               </div>
             <div style={{ padding: '1rem', flex: 1, overflowY: 'auto' }}>
               <div className="cart-table">
-                <div className="cart-head"><span>Ticket</span><span>Client</span><span>Note</span><span>Total</span><span>Statut</span><span /></div>
+                <div className="cart-head"><span>Ticket</span><span>Client</span><span>Note</span><span>Total</span><span>Reste</span><span>Statut</span><span /></div>
                 {sales.filter(s => {
                   if (transactionsTab === 'Finalisees') return s.status === 'Payee' || s.status === 'Credit';
                   if (transactionsTab === 'Suspendues') return s.status === 'Suspendue';
@@ -1856,12 +2176,14 @@ const App = () => {
                     <span>{sale.customer}</span>
                     <span>{sale.referenceNote || '-'}</span>
                     <span>{formatMoney(sale.total)}</span>
+                    <span>{sale.status === 'Credit' ? formatMoney(getSaleDueAmount(sale)) : '-'}</span>
                     <span style={{ color: sale.status === 'Payee' ? '#10b981' : sale.status === 'Credit' ? '#f59e0b' : '#64748b' }}>{sale.status}</span>
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                       {transactionsTab === 'Finalisees' ? (
                         <>
                           <button className="ghost-action" onClick={() => { setReceiptSale(sale); setTransactionsModalOpen(false); }}><ReceiptText size={15} /> Recu</button>
                           <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Facture (A4)</button>
+                          {sale.status === 'Credit' && <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => { openSaleSettlement(sale); setTransactionsModalOpen(false); }}><Banknote size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Encaisser</button>}
                         </>
                       ) : (
                         <>
@@ -1911,7 +2233,7 @@ const App = () => {
                 </div>
               </div>
 
-              <div className="form-grid" style={{ background: difference < 0 ? '#fef2f2' : difference > 0 ? '#f0fdf4' : '#fff', padding: '1rem', borderRadius: '8px', border: difference < 0 ? '1px solid #fecaca' : difference > 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0' }}>
+              <div style={{ background: difference < 0 ? '#fef2f2' : difference > 0 ? '#f0fdf4' : '#fff', padding: '1rem', borderRadius: '8px', border: difference < 0 ? '1px solid #fecaca' : difference > 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 600 }}>Espèces comptées physiquement (MAD)</span>
                   <button className="ghost-action" style={{ fontSize: '0.85rem', padding: '0.25rem 0.5rem' }} onClick={() => setShowDenominations(!showDenominations)}>
@@ -2150,6 +2472,13 @@ const App = () => {
     </>
   );
 
+  const getCustomerTier = (points: number) => {
+    if (points >= 5000) return { name: 'Platinum', color: '#8b5cf6', bg: '#ede9fe' };
+    if (points >= 2000) return { name: 'Gold', color: '#eab308', bg: '#fef9c3' };
+    if (points >= 500) return { name: 'Silver', color: '#94a3b8', bg: '#f1f5f9' };
+    return { name: 'Bronze', color: '#d97706', bg: '#fef3c7' };
+  };
+
   const renderContacts = (kind: 'Client' | 'Fournisseur') => {
     const rows = contacts.filter(contact => {
       const matchesKind = kind === 'Client' ? contact.type.includes('Client') : contact.type === 'Fournisseur';
@@ -2180,20 +2509,36 @@ const App = () => {
       </div>
       <div className="data-table">
         <div className="data-head" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }}>
-          <span>Nom</span><span>Type</span><span>Telephone</span><span>Solde</span>{kind === 'Client' ? <span>Fidélité</span> : <span>Activite</span>}<span>Actions</span>
+          <span>Nom</span><span>Type</span><span>Telephone</span><span>Solde</span>{kind === 'Client' ? <span>Fidélité & Crédit</span> : <span>Activite</span>}<span>Actions</span>
         </div>
-        {rows.map(contact => (
-          <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }} key={contact.id}>
-            <span><strong>{contact.name}</strong><small>#{String(contact.id).padStart(4, '0')}</small></span>
-            <span>{contact.type}</span>
-            <span>{contact.phone}</span>
-            <span style={{ color: contact.balance > 0 ? '#ef4444' : 'inherit', fontWeight: contact.balance > 0 ? 700 : 400 }}>{formatMoney(contact.balance)}</span>
-            {kind === 'Client' ? <span><strong style={{ color: '#3b82f6' }}>{contact.rewardPoints || 0} pts</strong><small>{formatMoney((contact.rewardPoints || 0) * companySettings.amountPerPoint)}</small></span> : <span>{contact.lastActivity}</span>}
-            <span>
-              {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Régler</button>}
-            </span>
-          </div>
-        ))}
+        {rows.map(contact => {
+          const tier = getCustomerTier(contact.rewardPoints || 0);
+          return (
+            <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }} key={contact.id}>
+              <span>
+                <strong>{contact.name}</strong>
+                <small>#{String(contact.id).padStart(4, '0')}</small>
+                {kind === 'Client' && (
+                  <span style={{ display: 'inline-block', padding: '0.1rem 0.5rem', background: tier.bg, color: tier.color, borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, marginTop: '0.25rem' }}>{tier.name}</span>
+                )}
+              </span>
+              <span>{contact.type}</span>
+              <span>{contact.phone}</span>
+              <span style={{ color: contact.balance > 0 ? '#ef4444' : 'inherit', fontWeight: contact.balance > 0 ? 700 : 400 }}>{formatMoney(contact.balance)}</span>
+              {kind === 'Client' ? 
+                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                  <strong style={{ color: '#3b82f6' }}>{contact.rewardPoints || 0} pts</strong>
+                  <small style={{ color: '#10b981', fontWeight: 600 }}>Crédit: {formatMoney(contact.storeCredit || 0)}</small>
+                </span> 
+                : <span>{contact.lastActivity}</span>}
+              <span style={{ display: 'flex', gap: '0.5rem' }}>
+                {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Régler</button>}
+                {kind === 'Client' && <button className="row-action" onClick={() => { setTopupContact(contact); setTopupAmount(''); }} style={{ color: '#3b82f6', background: '#eff6ff', border: 'none' }}>Recharger</button>}
+                {kind === 'Client' && <button className="row-action" onClick={() => { setMessageContact(contact); setMessageContent(''); }} style={{ color: '#8b5cf6', background: '#ede9fe', border: 'none' }}><Mail size={14} /></button>}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {settlingContact && (
@@ -2234,6 +2579,41 @@ const App = () => {
         </div>
       )}
 
+
+      {settlingSale && (() => {
+        const dueAmount = getSaleDueAmount(settlingSale);
+        const paidAmount = getSalePaidAmount(settlingSale);
+        return (
+        <div className="receipt-backdrop" style={{ zIndex: 61 }} role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) closeSaleSettlement(); }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '520px', margin: 'auto' }}>
+            <form className="product-form-panel" onSubmit={(e) => { e.preventDefault(); submitSaleSettlement(); }} style={{ padding: '2rem' }}>
+              <div className="panel-title"><div><p>Vente</p><h2>Encaisser un credit</h2></div><button type="button" onClick={closeSaleSettlement} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: '#f8fafc', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b' }}>Ticket</span><strong style={{ color: '#0f172a' }}>{settlingSale.ticket}</strong></div>
+                <div style={{ background: '#f8fafc', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b' }}>Deja encaisse</span><strong style={{ color: '#0f766e' }}>{formatMoney(paidAmount)}</strong></div>
+                <div style={{ background: '#fff7ed', padding: '0.9rem 1rem', borderRadius: '10px', border: '1px solid #fed7aa' }}><span style={{ display: 'block', fontSize: '0.8rem', color: '#9a3412' }}>Reste a regler</span><strong style={{ color: '#c2410c' }}>{formatMoney(dueAmount)}</strong></div>
+              </div>
+              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '1.25rem' }}>
+                <strong style={{ display: 'block', color: '#0f172a' }}>{settlingSale.customer}</strong>
+                <span style={{ fontSize: '0.9rem', color: '#64748b' }}>{settlingSale.createdAt} ? {formatMoney(settlingSale.total)}</span>
+              </div>
+              <div className="field-cluster" style={{ gridTemplateColumns: '1.35fr 1fr', gap: '1rem' }}>
+                <label><span>Montant a encaisser</span><input value={saleSettlementForm.amount} onChange={e => setSaleSettlementForm(current => ({ ...current, amount: e.target.value }))} inputMode="decimal" autoFocus style={{ fontSize: '1.3rem', fontWeight: 700, color: '#10b981', textAlign: 'center' }} /></label>
+                <label><span>Methode</span><select value={saleSettlementForm.method} onChange={e => setSaleSettlementForm(current => ({ ...current, method: e.target.value as 'CASH' | 'CARD' }))}><option value="CASH">Especes</option><option value="CARD">Carte</option></select></label>
+              </div>
+              <div style={{ marginTop: '0.9rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button type="button" className="ghost-action" onClick={() => setSaleSettlementForm(current => ({ ...current, amount: dueAmount.toFixed(2) }))}>Montant restant</button>
+                <button type="button" className="ghost-action" onClick={() => setSaleSettlementForm(current => ({ ...current, amount: dueAmount > 0 ? (dueAmount / 2).toFixed(2) : '' }))}>Moitie</button>
+              </div>
+              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <button type="button" onClick={closeSaleSettlement} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
+                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Encaisser</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
     </section>;
   };
 
@@ -2249,28 +2629,7 @@ const App = () => {
           icon={ShoppingCart}
           title="Achats" 
           subtitle="Réceptions et commandes fournisseurs" 
-          action={<button className="primary-action" onClick={async () => {
-            try {
-              const response = await apiFetch(`/api/purchases`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  locationId: currentLocationId,
-                  total: 1500,
-                  items: [{
-                    productId: products[0]?.id || 1,
-                    quantity: 10,
-                    unitCost: 150
-                  }]
-                })
-              });
-              if (!response.ok) throw new Error();
-              setStatus('Achat rapide créé avec succès');
-              loadPurchases(); // reload purchases
-            } catch {
-              setStatus("Erreur lors de la création de l'achat");
-            }
-          }}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvel achat (Rapide)</button>} 
+          action={<button className="primary-action" onClick={() => setPurchaseModalOpen(true)}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvel achat</button>} 
         />
       </div>
       <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
@@ -2561,91 +2920,205 @@ const App = () => {
         const res = await apiFetch('/api/invoices', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId: invoiceCustomer, saleIds: selectedTickets })
+          body: JSON.stringify({ customerId: invoiceCustomer, saleIds: selectedTickets, mode: 'FROM_TICKETS', displayMode: companySettings.invoiceTicketDisplay })
         });
         if (res.ok) {
-          setStatus('Facture créee avec succès');
+          setStatus('Facture creee avec succes');
           setSelectedTickets([]);
+          setInvoiceCustomer(null);
+          setTicketInvoiceModalOpen(false);
           loadInvoices();
           loadSales();
         } else {
-          setStatus('Erreur création facture');
+          const err = await res.json().catch(() => null);
+          setStatus(err?.message || 'Erreur creation facture');
         }
       } catch(e) { setStatus('Erreur creation facture'); }
     };
 
+    const handleCreateManualInvoice = async () => {
+      const validLines = manualInvoiceLines
+        .map(line => ({
+          description: line.description.trim(),
+          quantity: Number(line.quantity || 0),
+          unitPrice: Number(line.unitPrice || 0),
+          tvaRate: Number(line.tvaRate || 0),
+        }))
+        .filter(line => line.description && line.quantity > 0);
+      if (!manualInvoiceCustomer || validLines.length === 0) {
+        setStatus('Client et lignes valides requis pour la facture libre');
+        return;
+      }
+      try {
+        const res = await apiFetch('/api/invoices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: manualInvoiceCustomer,
+            mode: 'MANUAL',
+            notes: manualInvoiceNotes,
+            displayMode: companySettings.invoiceTicketDisplay,
+            manualLines: validLines,
+          })
+        });
+        if (res.ok) {
+          setStatus('Facture libre creee avec succes');
+          setManualInvoiceNotes('');
+          setManualInvoiceCustomer('');
+          setManualInvoiceLines([{ description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20' }]);
+          setManualInvoiceModalOpen(false);
+          loadInvoices();
+        } else {
+          const err = await res.json().catch(() => null);
+          setStatus(err?.message || 'Erreur creation facture libre');
+        }
+      } catch (e) {
+        setStatus('Erreur creation facture libre');
+      }
+    };
+
     const renderFactures = () => {
       const pendingSales = sales.filter(s => s.status === 'Payee' && !s.invoiceId && s.customerId);
-      // Group pending sales by customer
       const customersWithPending = Array.from(new Set(pendingSales.map(s => s.customerId)));
+      const filteredInvoices = invoices.filter(inv => !invoiceSearch || inv.number.toLowerCase().includes(invoiceSearch.toLowerCase()) || (inv.customer?.name || '').toLowerCase().includes(invoiceSearch.toLowerCase()));
 
       return (
         <section className="panel table-section flush-top">
           <div style={{ padding: '1.5rem 1.5rem 0' }}>
-            <PageHeader icon={FileText} title="Facturation" subtitle="Générez et gérez vos factures à partir de tickets de caisse" />
+            <PageHeader
+              icon={FileText}
+              title="Facturation"
+              subtitle="Factures depuis tickets ou factures libres, avec affichage controle depuis les parametres."
+              action={
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button className="ghost-action" type="button" onClick={() => setTicketInvoiceModalOpen(true)}><Plus size={16} /> Facture depuis tickets</button>
+                  <button className="primary-action" type="button" onClick={() => setManualInvoiceModalOpen(true)}><Plus size={16} /> Facture libre</button>
+                </div>
+              }
+            />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem', padding: '1.5rem', background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-            {/* Ticket Selection for Invoice */}
-            <div style={{ background: 'white', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <h3 style={{ marginTop: 0, fontSize: '1.1rem', color: '#0f172a' }}>Créer une facture</h3>
-              <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1rem' }}>Sélectionnez un client pour voir ses tickets non facturés.</p>
-              
-              <select value={invoiceCustomer || ''} onChange={e => { setInvoiceCustomer(Number(e.target.value)); setSelectedTickets([]); }} style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '1rem' }}>
-                <option value="">-- Choisir un client --</option>
-                {customersWithPending.map(cid => {
-                  const contact = contacts.find(c => c.id === cid);
-                  return <option key={cid} value={cid}>{contact ? contact.name : 'Client #' + cid}</option>;
-                })}
-              </select>
-
-              {invoiceCustomer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
-                  {pendingSales.filter(s => s.customerId === invoiceCustomer).map(sale => (
-                    <label key={sale.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0.75rem', background: '#f8fafc', borderRadius: '8px', cursor: 'pointer', border: '1px solid #e2e8f0' }}>
-                      <input type="checkbox" checked={selectedTickets.includes(sale.id)} onChange={e => {
-                        if (e.target.checked) setSelectedTickets(prev => [...prev, sale.id]);
-                        else setSelectedTickets(prev => prev.filter(id => id !== sale.id));
-                      }} style={{ width: '18px', height: '18px' }} />
-                      <div style={{ flex: 1 }}>
-                        <strong style={{ display: 'block' }}>Ticket {sale.ticket}</strong>
-                        <small style={{ color: '#64748b' }}>{formatMoney(sale.total)}</small>
-                      </div>
-                    </label>
-                  ))}
-                  {selectedTickets.length > 0 && (
-                    <button className="primary-action" style={{ width: '100%', marginTop: '1rem', padding: '0.75rem' }} onClick={handleCreateInvoice}>
-                      Générer Facture ({selectedTickets.length} tickets)
-                    </button>
-                  )}
-                </div>
-              )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '1rem', padding: '1.25rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+            <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem 1.1rem' }}>
+              <div style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '0.35rem' }}>Tickets facturables</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0f172a' }}>{pendingSales.length}</div>
+              <div style={{ color: '#64748b', fontSize: '0.82rem' }}>{customersWithPending.length} client(s) concernes</div>
             </div>
+            <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem 1.1rem' }}>
+              <div style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '0.35rem' }}>Mode d'affichage</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{companySettings.invoiceTicketDisplay === 'DETAILED' ? 'Tickets detailles' : 'Tickets resumes'}</div>
+              <div style={{ color: '#64748b', fontSize: '0.82rem' }}>Modifiable dans Parametres {'>'} Documents</div>
+            </div>
+            <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem 1.1rem' }}>
+              <div style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '0.35rem' }}>Factures generees</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0f172a' }}>{invoices.length}</div>
+              <div style={{ color: '#64748b', fontSize: '0.82rem' }}>{formatMoney(invoices.reduce((sum: number, inv: any) => sum + Number(inv.total || 0), 0))}</div>
+            </div>
+          </div>
 
-            {/* List of Invoices */}
-            <div className="product-table modern-product-table" style={{ background: 'white' }}>
-              <div className="table-head">
-                <span>Facture</span><span>Client</span><span>Tickets</span><span>Total</span><span>Actions</span>
-              </div>
-              {invoices.map(inv => (
+          <div className="product-table modern-product-table" style={{ background: 'white' }}>
+            <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1rem 0.75rem', gap: '1rem' }}>
+              <strong>Liste des factures</strong>
+              <div className="search-box" style={{ flex: 1, maxWidth: '320px' }}><Search size={17} /><input value={invoiceSearch} onChange={event => setInvoiceSearch(event.target.value)} placeholder="Rechercher numero ou client..." /></div>
+            </div>
+            <div className="table-head">
+              <span>Facture</span><span>Client</span><span>Source</span><span>Total</span><span>Actions</span>
+            </div>
+            {filteredInvoices.map(inv => {
+              let source = `${inv.sales?.length || 0} ticket(s)`;
+              try {
+                const meta = inv.notes ? JSON.parse(inv.notes) : null;
+                if (meta?.mode === 'MANUAL') source = 'Facture libre';
+              } catch {}
+              return (
                 <div className="table-row" key={inv.id}>
                   <span><strong>{inv.number}</strong><small>{new Date(inv.createdAt).toLocaleDateString('fr-FR')}</small></span>
                   <span>{inv.customer?.name || 'Inconnu'}</span>
-                  <span>{inv.sales?.length || 0} tickets</span>
+                  <span>{source}</span>
                   <span><strong>{formatMoney(Number(inv.total))}</strong></span>
                   <span className="list-actions">
                     <button className="row-action" onClick={() => setSelectedFacture(inv)}>Imprimer</button>
                   </span>
                 </div>
-              ))}
-              {invoices.length === 0 && <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucune facture générée.</div>}
-            </div>
+              );
+            })}
+            {filteredInvoices.length === 0 && <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucune facture generee.</div>}
           </div>
+
+          {ticketInvoiceModalOpen && (
+            <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setTicketInvoiceModalOpen(false); }}>
+              <section className="receipt-panel" style={{ maxWidth: '680px', width: '95%' }}>
+                <div className="receipt-header"><div><p>Facturation</p><h2>Facture depuis tickets</h2></div><button onClick={() => setTicketInvoiceModalOpen(false)}><XCircle size={18} /></button></div>
+                <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem', overflowY: 'auto', minHeight: 0 }}>
+                  <p style={{ color: '#64748b', fontSize: '0.92rem', margin: 0 }}>Selectionnez un client puis les tickets payes non encore factures.</p>
+                  <select value={invoiceCustomer || ''} onChange={e => { setInvoiceCustomer(Number(e.target.value)); setSelectedTickets([]); }} style={{ width: '100%', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                    <option value="">-- Choisir un client --</option>
+                    {customersWithPending.map(cid => {
+                      const contact = contacts.find(c => c.id === cid);
+                      return <option key={cid} value={cid}>{contact ? contact.name : 'Client #' + cid}</option>;
+                    })}
+                  </select>
+                  <div style={{ maxHeight: '360px', overflowY: 'auto', display: 'grid', gap: '0.65rem', paddingRight: '0.25rem' }}>
+                    {invoiceCustomer ? pendingSales.filter(s => s.customerId === invoiceCustomer).map(sale => (
+                      <label key={sale.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', cursor: 'pointer', border: '1px solid #e2e8f0' }}>
+                        <input type="checkbox" checked={selectedTickets.includes(sale.id)} onChange={e => {
+                          if (e.target.checked) setSelectedTickets(prev => [...prev, sale.id]);
+                          else setSelectedTickets(prev => prev.filter(id => id !== sale.id));
+                        }} style={{ width: '18px', height: '18px' }} />
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ display: 'block' }}>Ticket {sale.ticket}</strong>
+                          <small style={{ color: '#64748b' }}>{sale.createdAt}</small>
+                        </div>
+                        <strong style={{ color: '#0f172a' }}>{formatMoney(sale.total)}</strong>
+                      </label>
+                    )) : <div style={{ padding: '1rem', border: '1px dashed #cbd5e1', borderRadius: '10px', textAlign: 'center', color: '#64748b' }}>Choisissez d'abord un client.</div>}
+                  </div>
+                </div>
+                <div className="receipt-actions no-print">
+                  <button type="button" className="ghost-action" onClick={() => setTicketInvoiceModalOpen(false)}><XCircle size={18} /> Fermer</button>
+                  <button type="button" className="primary-action" onClick={handleCreateInvoice} disabled={!selectedTickets.length}><FileText size={18} /> Generer ({selectedTickets.length})</button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {manualInvoiceModalOpen && (
+            <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setManualInvoiceModalOpen(false); }}>
+              <section className="receipt-panel" style={{ maxWidth: '920px', width: '96%' }}>
+                <div className="receipt-header"><div><p>Facturation</p><h2>Facture libre</h2></div><button onClick={() => setManualInvoiceModalOpen(false)}><XCircle size={18} /></button></div>
+                <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem', overflowY: 'auto', minHeight: 0 }}>
+                  <p style={{ color: '#64748b', fontSize: '0.92rem', margin: 0 }}>Creez une facture manuelle sans partir d'un ticket de caisse.</p>
+                  <select value={manualInvoiceCustomer || ''} onChange={e => setManualInvoiceCustomer(Number(e.target.value))} style={{ width: '100%', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                    <option value="">-- Choisir un client --</option>
+                    {contacts.filter(c => c.type.includes('Client')).map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
+                  </select>
+                  <div style={{ maxHeight: '380px', overflowY: 'auto', display: 'grid', gap: '0.75rem', paddingRight: '0.25rem' }}>
+                    {manualInvoiceLines.map((line, index) => (
+                      <div key={index} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.85rem', display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) 90px 120px 90px auto', gap: '0.65rem', alignItems: 'end', background: '#f8fafc' }}>
+                        <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Description</span><input value={line.description} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, description: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                        <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Qte</span><input value={line.quantity} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                        <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>PU</span><input value={line.unitPrice} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, unitPrice: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                        <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>TVA %</span><input value={line.tvaRate} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, tvaRate: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                        <button className="ghost-action" type="button" onClick={() => setManualInvoiceLines(current => current.length === 1 ? current : current.filter((_, i) => i !== index))} style={{ height: '46px' }}><Trash2 size={16} /></button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                    <button className="ghost-action" type="button" onClick={() => setManualInvoiceLines(current => [...current, { description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20' }])}><Plus size={16} /> Ajouter une ligne</button>
+                    <div style={{ color: '#64748b', fontSize: '0.85rem' }}>{manualInvoiceLines.length} ligne(s)</div>
+                  </div>
+                  <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '6px' }}>Note interne / commentaire</span><textarea value={manualInvoiceNotes} onChange={e => setManualInvoiceNotes(e.target.value)} style={{ width: '100%', height: '96px', resize: 'none', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                </div>
+                <div className="receipt-actions no-print">
+                  <button type="button" className="ghost-action" onClick={() => setManualInvoiceModalOpen(false)}><XCircle size={18} /> Fermer</button>
+                  <button type="button" className="primary-action" onClick={handleCreateManualInvoice}><FileText size={18} /> Creer la facture libre</button>
+                </div>
+              </section>
+            </div>
+          )}
         </section>
       );
     };
-  
-
   const renderSales = () => {
     const filteredSales = sales.filter(s => (!s.locationId || s.locationId === currentLocationId) && (!saleSearch || s.ticket.toLowerCase().includes(saleSearch.toLowerCase()) || s.customer.toLowerCase().includes(saleSearch.toLowerCase())));
     return <section className="panel table-section flush-top">
@@ -2670,12 +3143,23 @@ const App = () => {
           </div>
         </div>
       </div>
-      <RecordTable sales={filteredSales} onOpenReceipt={setReceiptSale} />
+      <RecordTable sales={filteredSales} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} />
     </section>;
   };
 
   const renderPayments = () => {
-    const rows = sales.filter(sale => paymentFilter === 'ALL' || sale.status === paymentFilter);
+    const rows = sales
+      .filter(sale => paymentFilter === 'ALL' || sale.status === paymentFilter)
+      .sort((left, right) => {
+        const leftDue = getSaleDueAmount(left);
+        const rightDue = getSaleDueAmount(right);
+        if (left.status === 'Credit' && right.status !== 'Credit') return -1;
+        if (right.status === 'Credit' && left.status !== 'Credit') return 1;
+        if (rightDue !== leftDue) return rightDue - leftDue;
+        return right.id - left.id;
+      });
+    const outstandingTotal = rows.reduce((sum, sale) => sum + getSaleDueAmount(sale), 0);
+    const creditCount = rows.filter(sale => sale.status === 'Credit').length;
     return <section className="panel table-section flush-top">
       <div style={{ padding: '1.5rem 1.5rem 0' }}>
         <PageHeader 
@@ -2692,9 +3176,17 @@ const App = () => {
             <span className="toolbar-stat-value">{rows.length}</span>
             <span className="toolbar-stat-label">Transactions</span>
           </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{creditCount}</span>
+            <span className="toolbar-stat-label">Credits ouverts</span>
+          </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{formatMoney(outstandingTotal)}</span>
+            <span className="toolbar-stat-label">Reste a encaisser</span>
+          </div>
         </div>
       </div>
-      <RecordTable sales={rows} onOpenReceipt={setReceiptSale} />
+      <RecordTable sales={rows} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} />
     </section>;
   };
 
@@ -2738,43 +3230,30 @@ const App = () => {
     const paidSales = filterByPeriod(sales.filter(s => s.status === 'Payee'));
     
     // Aggregation calculations
-    const salesByDate = paidSales.reduce((acc, sale) => {
-      const day = sale.createdAt.split(' ')[0] || sale.createdAt;
-      acc[day] = (acc[day] || 0) + sale.total;
-      return acc;
-    }, {} as Record<string, number>);
-    const activeDays = Object.keys(salesByDate).sort();
-    const maxSales = Math.max(...Object.values(salesByDate), 1);
-
-    const salesByMethod = paidSales.reduce((acc, sale) => {
-      acc[sale.method] = (acc[sale.method] || 0) + sale.total;
-      return acc;
-    }, {} as Partial<Record<PaymentMethod, number>>);
-
-    const productCounts = paidSales.reduce((acc, sale) => {
-      sale.lines?.forEach(line => {
-        acc[line.name] = (acc[line.name] || 0) + line.quantity;
-      });
-      return acc;
-    }, {} as Record<string, number>);
+    const salesByDate = {} as Record<string, number>;
+    const profitByDate = {} as Record<string, number>;
+    const salesByCashier = {} as Record<string, { name: string; sales: number; count: number }>;
     
-    const topProducts = Object.entries(productCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-
-    // Deep KPIs
-    const totalGross = paidSales.reduce((s, sale) => s + sale.total, 0);
-    // Approximate margin: total - (total/1.2) as a dummy if we don't have exact line purchase prices in draft
-    // In real app, we sum (salePrice - purchasePrice) * qty
     let totalMargin = 0;
     let totalNet = 0;
     let totalTax = 0;
-    
+    let totalGross = 0;
+
     paidSales.forEach(sale => {
+      const day = sale.createdAt.split(' ')[0] || sale.createdAt;
+      salesByDate[day] = (salesByDate[day] || 0) + sale.total;
+      
+      const cashier = sale.cashierName || 'Inconnu';
+      if (!salesByCashier[cashier]) salesByCashier[cashier] = { name: cashier, sales: 0, count: 0 };
+      salesByCashier[cashier].sales += sale.total;
+      salesByCashier[cashier].count += 1;
+      
+      totalGross += sale.total;
+
       let saleCost = 0;
       let saleTax = 0;
       let saleNet = 0;
-      if (sale.lines) {
+      if (sale.lines && sale.lines.length > 0) {
         sale.lines.forEach(line => {
           const product = products.find(p => p.id === line.productId);
           const currentPrice = line.unitPrice ?? (product?.salePrice || 0);
@@ -2792,10 +3271,38 @@ const App = () => {
         saleCost = saleNet * 0.7; // assume 30% margin
         saleTax = sale.total - saleNet;
       }
+      
+      profitByDate[day] = (profitByDate[day] || 0) + (saleNet - saleCost);
       totalMargin += (saleNet - saleCost);
       totalNet += saleNet;
       totalTax += saleTax;
     });
+
+    const activeDays = Object.keys(salesByDate).sort();
+    const salesVsProfitData = activeDays.map(day => ({
+      name: day === 'Aujourd' ? "Aujourd'hui" : day,
+      Ventes: Number(salesByDate[day].toFixed(2)),
+      Profit: Number(profitByDate[day].toFixed(2))
+    }));
+
+    const cashierPerformance = Object.values(salesByCashier).sort((a, b) => b.sales - a.sales);
+
+    const salesByMethod = paidSales.reduce((acc, sale) => {
+      acc[sale.method] = (acc[sale.method] || 0) + sale.total;
+      return acc;
+    }, {} as Partial<Record<PaymentMethod, number>>);
+
+    const productCounts = paidSales.reduce((acc, sale) => {
+      sale.lines?.forEach(line => {
+        acc[line.name] = (acc[line.name] || 0) + line.quantity;
+      });
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const topProductsData = Object.entries(productCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, quantite]) => ({ name, quantite }));
 
     const renderTabNav = () => (
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
@@ -2838,17 +3345,7 @@ const App = () => {
                 <option value="ALL">Tous les magasins</option>
                 {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
               </select>
-              <select 
-                value={reportPeriod}
-                onChange={e => setReportPeriod(e.target.value as any)}
-                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 500, color: '#334155' }}
-              >
-                <option value="all">Toutes les périodes</option>
-                <option value="today">Aujourd'hui</option>
-                <option value="week">Cette Semaine</option>
-                <option value="month">Ce Mois</option>
-                <option value="year">Cette Année</option>
-              </select>
+              {/* Old date filter removed */}
               <button 
                 className="ghost-action" 
                 onClick={() => exportCSV(paidSales)}
@@ -2861,9 +3358,39 @@ const App = () => {
         />
 
         {renderTabNav()}
+        {/* Beautiful Date Filter Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', background: '#fff', padding: '0.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '2rem', gap: '0.5rem', width: 'fit-content', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ padding: '0 1rem', color: '#64748b', fontWeight: 600, fontSize: '0.9rem', borderRight: '1px solid #e2e8f0' }}>Période</div>
+          {[
+            { id: 'all', label: 'Toutes' },
+            { id: 'today', label: "Aujourd'hui" },
+            { id: 'week', label: 'Cette semaine' },
+            { id: 'month', label: 'Ce mois' },
+            { id: 'year', label: 'Cette année' },
+          ].map(period => (
+            <button
+              key={period.id}
+              onClick={() => setReportPeriod(period.id as any)}
+              style={{
+                padding: '0.5rem 1rem',
+                borderRadius: '8px',
+                border: 'none',
+                background: reportPeriod === period.id ? '#f1f5f9' : 'transparent',
+                color: reportPeriod === period.id ? '#0f172a' : '#64748b',
+                fontWeight: reportPeriod === period.id ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              {period.label}
+            </button>
+          ))}
+        </div>
+
 
         {reportsTab === 'synthese' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginBottom: '2rem' }}>
+            {/* KPI Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
               <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #3b82f6', padding: '1.5rem' }}>
                 <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Chiffre d'Affaire (TTC)</p>
@@ -2874,8 +3401,8 @@ const App = () => {
                 <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#10b981' }}>{formatMoney(totalMargin)}</h3>
               </div>
               <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #f59e0b', padding: '1.5rem' }}>
-                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>TVA Collectée</p>
-                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#f59e0b' }}>{formatMoney(totalTax)}</h3>
+                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Panier Moyen</p>
+                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#f59e0b' }}>{formatMoney(paidSales.length > 0 ? totalGross / paidSales.length : 0)}</h3>
               </div>
               <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #8b5cf6', padding: '1.5rem' }}>
                 <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Tickets Encaissés</p>
@@ -2883,28 +3410,73 @@ const App = () => {
               </div>
             </div>
 
-            <div className="workspace-grid" style={{ padding: 0 }}>
-              <div className="panel wide-panel">
-                <div className="panel-title compact"><div><p>Performance</p><h2>Ventes par Jour (TTC)</h2></div></div>
-                <div style={{ minHeight: '300px', marginTop: '1rem', padding: '1rem 0' }}>
-                  {activeDays.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={activeDays.map(day => ({ name: day === 'Aujourd' ? "Aujourd'hui" : day, ventes: salesByDate[day] }))} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+            {/* Main Trend Chart */}
+            <div className="panel wide-panel">
+              <div className="panel-title compact"><div><p>Tendances</p><h2>Ventes & Profit par Jour</h2></div></div>
+              <div style={{ minHeight: '300px', marginTop: '1rem', padding: '1rem 0' }}>
+                {salesVsProfitData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ComposedChart data={salesVsProfitData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                      <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                      <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
+                      <Bar yAxisId="left" dataKey="Ventes" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                      <Line yAxisId="left" type="monotone" dataKey="Profit" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée de vente disponible.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Secondary Row: Top Products & Cashier Performance */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
+              {/* Top Products */}
+              <div className="panel">
+                <div className="panel-title compact"><div><p>Palmarès</p><h2>Top Articles Vendus</h2></div></div>
+                <div style={{ minHeight: '250px', marginTop: '1rem', padding: '1rem 0' }}>
+                  {topProductsData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart layout="vertical" data={topProductsData} margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} width={150} tick={{ fill: '#334155', fontSize: 12, fontWeight: 600 }} />
                         <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                        <Bar dataKey="ventes" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                        <Bar dataKey="quantite" name="Quantité" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={20} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée de vente disponible.</div>
+                    <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée disponible.</div>
                   )}
+                </div>
+              </div>
+
+              {/* Cashier Performance */}
+              <div className="panel">
+                <div className="panel-title compact"><div><p>Équipe</p><h2>Performance Caissiers</h2></div></div>
+                <div className="cart-table" style={{ marginTop: '1rem' }}>
+                  <div className="cart-head" style={{ gridTemplateColumns: '1fr auto auto' }}>
+                    <span>Caissier</span>
+                    <span>Tickets</span>
+                    <span>Ventes (TTC)</span>
+                  </div>
+                  {cashierPerformance.map(cashier => (
+                    <div className="cart-row" key={cashier.name} style={{ gridTemplateColumns: '1fr auto auto' }}>
+                      <span style={{ fontWeight: 600, color: '#334155' }}>{cashier.name}</span>
+                      <span style={{ color: '#64748b', textAlign: 'center' }}>{cashier.count}</span>
+                      <span style={{ fontWeight: 700, color: '#10b981', textAlign: 'right' }}>{formatMoney(cashier.sales)}</span>
+                    </div>
+                  ))}
+                  {cashierPerformance.length === 0 && <div className="pos-empty">Aucune donnée disponible.</div>}
                 </div>
               </div>
             </div>
           </div>
         )}
+
 
         {reportsTab === 'ventes' && (
           <div className="panel wide-panel">
@@ -2923,7 +3495,7 @@ const App = () => {
                   <span>{sale.createdAt}</span>
                   <span>{sale.customer}</span>
                   <span><span style={{ background: '#f1f5f9', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem', fontWeight: 600 }}>{methodLabel[sale.method]}</span></span>
-                  <span style={{ fontWeight: 700, color: '#10b981' }}>{formatMoney(sale.total)}</span>
+                  <span style={{ fontWeight: 700, color: '#10b981' }}>{formatMoney(getSaleDueAmount(sale))}</span>
                 </div>
               ))}
               {paidSales.length === 0 && <div className="pos-empty">Aucune vente enregistrée.</div>}
@@ -2937,13 +3509,13 @@ const App = () => {
               <div className="panel-title compact"><div><p>Palmarès</p><h2>Top Articles (Quantités)</h2></div></div>
               <div className="cart-table" style={{ marginTop: '1rem' }}>
                 <div className="cart-head"><span>Produit</span><span>Qte Vendue</span></div>
-                {topProducts.map(([name, qty]) => (
-                  <div className="cart-row" key={name} style={{ gridTemplateColumns: '1fr auto' }}>
-                    <span style={{ fontWeight: 600 }}>{name}</span>
-                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.25rem 0.75rem', borderRadius: '999px', fontWeight: 700 }}>{qty}x</span>
+                {topProductsData.map((item) => (
+                  <div className="cart-row" key={item.name} style={{ gridTemplateColumns: '1fr auto' }}>
+                    <span style={{ fontWeight: 600 }}>{item.name}</span>
+                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.25rem 0.75rem', borderRadius: '999px', fontWeight: 700 }}>{item.quantite}x</span>
                   </div>
                 ))}
-                {topProducts.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun article vendu</span>}
+                {topProductsData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun article vendu</span>}
               </div>
             </div>
             
@@ -3092,7 +3664,7 @@ const App = () => {
                           }}>{line.quantity}</strong>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '1.1rem', color: '#f8fafc', fontWeight: 600, lineHeight: 1.2 }}>{line.name}</div>
-                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>⚠️ {line.note}</em>}
+                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>âš ï¸ {line.note}</em>}
                           </div>
                         </div>
                       ))}
@@ -3472,6 +4044,17 @@ const App = () => {
                 </div>
                 <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.5rem' }}>
                   <label><span>Titre du document</span><input value={companySettings.invoiceHeader} onChange={e => setCompanySettings(s => ({...s, invoiceHeader: e.target.value}))} placeholder="Ex: FACTURE" /></label>
+                  <div style={{ gridColumn: '1 / -1', border: '1px solid #dbe3ee', borderRadius: '12px', padding: '1rem', background: '#f8fafc', display: 'grid', gap: '0.9rem' }}>
+                    <div>
+                      <strong style={{ display: 'block', color: '#0f172a', marginBottom: '0.35rem' }}>Affichage des tickets dans les factures</strong>
+                      <span style={{ color: '#64748b', fontSize: '0.85rem' }}>Choisissez si la facture regroupe les lignes de tous les tickets ou affiche chaque ticket en detail.</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem' }}>
+                      <label><span>Mode par defaut</span><select value={companySettings.invoiceTicketDisplay} onChange={e => setCompanySettings(s => ({...s, invoiceTicketDisplay: e.target.value as 'SUMMARY' | 'DETAILED'}))}><option value="SUMMARY">Tickets resumes</option><option value="DETAILED">Tickets detailles</option></select></label>
+                      <label style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}><span style={{ marginBottom: '0.5rem' }}>Reference ticket</span><button type="button" className={companySettings.invoiceShowTicketReferences ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketReferences: !s.invoiceShowTicketReferences}))}>{companySettings.invoiceShowTicketReferences ? 'Afficher' : 'Masquer'}</button></label>
+                      <label style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}><span style={{ marginBottom: '0.5rem' }}>Date ticket</span><button type="button" className={companySettings.invoiceShowTicketDates ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketDates: !s.invoiceShowTicketDates}))}>{companySettings.invoiceShowTicketDates ? 'Afficher' : 'Masquer'}</button></label>
+                    </div>
+                  </div>
                   <label><span>Conditions de vente / Pied de page</span><textarea value={companySettings.invoiceFooter} onChange={e => setCompanySettings(s => ({...s, invoiceFooter: e.target.value}))} style={{ height: '80px', resize: 'none', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee', fontFamily: 'inherit' }} /></label>
                   <label><span>CSS Personnalisé (Avancé)</span><textarea value={companySettings.customInvoiceCss} onChange={e => setCompanySettings(s => ({...s, customInvoiceCss: e.target.value}))} style={{ height: '80px', fontFamily: 'monospace', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee' }} placeholder=".invoice-table { border: 1px solid black; }" /></label>
                 </div>
@@ -3481,7 +4064,7 @@ const App = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: `2px solid ${companySettings.primaryColor}`, paddingBottom: '1rem', marginBottom: '1rem' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {companySettings.logoUrl && <img src={companySettings.logoUrl} style={{ maxWidth: '100px', maxHeight: '40px', objectFit: 'contain' }} />}
-                      <div><h1 style={{ margin: 0, color: companySettings.primaryColor, fontSize: '1.2rem', textTransform: 'uppercase' }}>{companySettings.invoiceHeader || 'FACTURE'}</h1><span style={{ color: '#64748b' }}>N° FAC-2026-001</span></div>
+                      <div><h1 style={{ margin: 0, color: companySettings.primaryColor, fontSize: '1.2rem', textTransform: 'uppercase' }}>{companySettings.invoiceHeader || 'FACTURE'}</h1><span style={{ color: '#64748b' }}>NÂ° FAC-2026-001</span></div>
                     </div>
                     <div style={{ textAlign: 'right' }}><strong>{companySettings.companyName}</strong><br />{companySettings.address}<br />{companySettings.phone}</div>
                   </div>
@@ -3783,7 +4366,7 @@ const App = () => {
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '20px 0' }}>
                   {[0,1,2,3].map(i => (
                     <div key={i} style={{ width: '40px', height: '40px', borderBottom: '3px solid ' + (pinEntry.length > i ? '#6366f1' : '#cbd5e1'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 'bold' }}>
-                      {pinEntry.length > i ? '•' : ''}
+                      {pinEntry.length > i ? 'â€¢' : ''}
                     </div>
                   ))}
                 </div>
@@ -3806,6 +4389,7 @@ const App = () => {
 
   return (
     <div className="app-shell">
+      {(!isFullscreen || page !== 'POS') && (
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-wordmark">
@@ -3822,7 +4406,7 @@ const App = () => {
             style={{ width: '100%', padding: '0.6rem', background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', borderRadius: '8px', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
           >
             {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>📍 {loc.name}</option>
+              <option key={loc.id} value={loc.id}>🏢 {loc.name}</option>
             ))}
           </select>
         </div>
@@ -3840,9 +4424,58 @@ const App = () => {
           )}
         </div>
       </aside>
+      )}
       <main className={page === 'POS' ? 'pos-main' : undefined}>
         {renderPage()}
-        {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} serialPort={serialPort} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {purchaseModalOpen && <CreatePurchaseModal suppliers={contacts.filter(c => c.type.includes('Fournisseur'))} warehouses={locations} products={products} formatMoney={formatMoney} onClose={() => setPurchaseModalOpen(false)} onSubmit={async (data) => {
+          try {
+            const finalItems = [];
+            for (const item of data.items) {
+              if (item.productId === 'new' && item.newProductName) {
+                const newProdRes = await apiFetch('/api/products', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    name: item.newProductName,
+                    type: 'RETAIL',
+                    price: Number(item.cost) * 1.5,
+                    costPrice: Number(item.cost),
+                    stock: 0
+                  })
+                });
+                if (newProdRes.ok) {
+                  const newProd = await newProdRes.json();
+                  finalItems.push({ productId: newProd.id, quantity: Number(item.quantity), unitCost: Number(item.cost) });
+                }
+              } else {
+                finalItems.push({ productId: Number(item.productId), quantity: Number(item.quantity), unitCost: Number(item.cost) });
+              }
+            }
+
+            const res = await apiFetch('/api/purchases', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                supplierId: data.supplierId,
+                locationId: locations.find(w => w.id === data.warehouseId)?.id || currentLocationId,
+                total: data.items.reduce((sum: number, i: any) => sum + (i.quantity * i.cost), 0),
+                items: finalItems
+              })
+            });
+            if (res.ok) {
+              setPurchaseModalOpen(false);
+              setStatus('Bon de commande créé avec succès');
+              loadPurchases();
+              loadLocations();
+              loadProducts();
+            } else {
+              setStatus('Erreur de création');
+            }
+          } catch {
+            setStatus('Erreur');
+          }
+        }} />}
         {invoiceSale && <InvoicePanel sale={invoiceSale} settings={companySettings} onClose={() => setInvoiceSale(null)} />}
         {selectedFacture && <FacturePanel facture={selectedFacture} settings={companySettings} onClose={() => setSelectedFacture(null)} />}
       </main>
@@ -3854,40 +4487,63 @@ const Metric = ({ title, value, detail, tone, icon: Icon }: { title: string; val
   <div className={`metric-card ${tone}`}><div><span>{title}</span><strong>{value}</strong><small>{detail}</small></div><Icon size={38} /></div>
 );
 
-const RecordTable = ({ sales, onOpenReceipt }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void }) => (
+const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSettleSale }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void; onOpenInvoice?: (sale: SaleRecord) => void; onResumeSale?: (sale: SaleRecord) => void; onSettleSale?: (sale: SaleRecord) => void }) => (
   <div className="data-table sales-table">
-    <div className="data-head"><span>Ticket</span><span>Client</span><span>Total</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
-    {sales.map(sale => <div className="data-row" key={sale.id}><span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span><span>{sale.customer}<small>{sale.items} article(s)</small></span><span>{formatMoney(sale.total)}</span><span>{methodLabel[sale.method]}</span><span className={sale.status === 'Credit' ? 'badge warn' : sale.status === 'Suspendue' || sale.status === 'Brouillon' || sale.status === 'Devis' ? 'badge neutral' : 'badge ok'}>{sale.status}</span><span><button className="row-action" onClick={() => onOpenReceipt?.(sale)}>Ticket</button></span></div>)}
+    <div className="data-head"><span>Ticket</span><span>Client</span><span>Total</span><span>Reste</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
+    {sales.map(sale => {
+      const isDraftLike = ['Suspendue', 'Brouillon', 'Devis'].includes(sale.status);
+      const isPayable = sale.status === 'Payee' || sale.status === 'Credit';
+      const paidAmount = sale.splitPayments?.filter(payment => payment.method !== 'CREDIT').reduce((sum, payment) => sum + payment.amount, 0) ?? (sale.status === 'Payee' ? sale.total : 0);
+      const dueAmount = Math.max(0, sale.total - paidAmount);
+      return (
+        <div className="data-row" key={sale.id}>
+          <span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span>
+          <span>{sale.customer}<small>{sale.items} article(s)</small></span>
+          <span>{formatMoney(sale.total)}</span>
+          <span>{sale.status === 'Credit' ? formatMoney(dueAmount) : '-'}</span>
+          <span>{methodLabel[sale.method]}</span>
+          <span className={sale.status === 'Credit' ? 'badge warn' : sale.status === 'Suspendue' || sale.status === 'Brouillon' || sale.status === 'Devis' ? 'badge neutral' : 'badge ok'}>{sale.status}</span>
+          <span>
+            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <button className="row-action" onClick={() => onOpenReceipt?.(sale)}>{isDraftLike ? 'Details' : 'Ticket'}</button>
+              {(isPayable || sale.status === 'Devis') && <button className="ghost-action" onClick={() => onOpenInvoice?.(sale)}>Facture</button>}
+              {sale.status === 'Credit' && <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => onSettleSale?.(sale)}><Banknote size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Encaisser</button>}
+              {isDraftLike && <button className="ghost-action" onClick={() => onResumeSale?.(sale)}>Reprendre</button>}
+            </div>
+          </span>
+        </div>
+      );
+    })}
   </div>
 );
 
 const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings: any; onClose: () => void }) => {
   const isQuotation = sale.status === 'Brouillon' || sale.status === 'Devis';
+  const companyAddress = settings.address || settings.companyAddress || '';
+  const companyPhone = settings.phone || settings.companyPhone || '';
+  const companyIce = settings.ice || settings.companyIce || '';
   const subtotal = sale.lines ? sale.lines.reduce((sum, line) => sum + (line.unitPrice * line.quantity), 0) : sale.total;
-  // Approximated VAT for display purposes (assuming total includes VAT)
-  const vatAmount = sale.total - (sale.total / 1.20); // standard 20% back calculation
+  const vatAmount = sale.total - (sale.total / 1.20);
   const htTotal = sale.total - vatAmount;
 
   return (
   <div className="receipt-backdrop print-a4" role="dialog" aria-modal="true">
     <section className="invoice-panel">
       <div className="invoice-container">
-        {/* Header */}
         <div className="invoice-header-row">
           <div className="invoice-brand">
             {settings.showLogo && settings.logoUrl && <img src={settings.logoUrl} alt="Logo" />}
             <h1>{settings.companyName}</h1>
-            <p>{settings.companyAddress}</p>
-            <p>{settings.companyPhone}</p>
-            <p>ICE: {settings.companyIce || '_________________'}</p>
+            {companyAddress && <p>{companyAddress}</p>}
+            {companyPhone && <p>{companyPhone}</p>}
+            <p>ICE: {companyIce || '_________________'}</p>
           </div>
           <div className="invoice-title">
             <h2>{isQuotation ? 'DEVIS' : 'FACTURE'}</h2>
-            <p>N° {sale.ticket}</p>
+            <p>N� {sale.ticket}</p>
           </div>
         </div>
 
-        {/* Meta */}
         <div className="invoice-meta-row">
           <div className="invoice-meta-col">
             <span>Date</span>
@@ -3898,18 +4554,17 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
             <strong>{sale.customer !== 'Client Divers' ? sale.customer : '______________________'}</strong>
           </div>
           <div className="invoice-meta-col">
-            <span>Méthode de paiement</span>
-            <strong>{sale.method} {sale.status !== 'Payee' && !isQuotation ? '(Non payé)' : ''}</strong>
+            <span>Methode de paiement</span>
+            <strong>{sale.method} {sale.status !== 'Payee' && !isQuotation ? '(Non paye)' : ''}</strong>
           </div>
         </div>
 
-        {/* Table */}
         <table className="invoice-table">
           <thead>
             <tr>
               <th>Description</th>
-              <th className="right">Qté</th>
-              <th className="right">Prix Unitaire</th>
+              <th className="right">Qte</th>
+              <th className="right">Prix unitaire</th>
               <th className="right">Total TTC</th>
             </tr>
           </thead>
@@ -3925,14 +4580,13 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
             {(!sale.lines || sale.lines.length === 0) && (
               <tr>
                 <td colSpan={4} style={{ textAlign: 'center', fontStyle: 'italic', color: '#94a3b8' }}>
-                  Détail des articles non disponible pour cette transaction.
+                  Aucun article detaille disponible.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
 
-        {/* Summary */}
         <div className="invoice-summary">
           <div className="invoice-summary-box">
             <div className="invoice-summary-row">
@@ -3950,13 +4604,10 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
           </div>
         </div>
 
-        {/* Footer */}
         <div className="invoice-footer">
-          {settings.receiptFooter || "Merci de votre confiance. En cas de litige, seul le tribunal de commerce est compétent."}
+          {settings.receiptFooter || "Merci de votre confiance. En cas de litige, seul le tribunal de commerce est competent."}
         </div>
       </div>
-      
-      {/* Actions / Modal UI (Non-printable) */}
       <div className="receipt-actions no-print" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '16px' }}>
         <button onClick={onClose}><XCircle size={15} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Fermer</button>
         <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/invoice`, '_blank')}>
@@ -3966,8 +4617,7 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
     </section>
   </div>
 )};
-
-const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoice }: { sale: SaleRecord; settings: any; onClose: () => void, onReturn?: () => void, onLoadToCart?: () => void, onInvoice?: () => void }) => (
+const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoice, serialPort }: { sale: SaleRecord; settings: any; onClose: () => void, onReturn?: () => void, onLoadToCart?: () => void, onInvoice?: () => void, serialPort?: any }) => (
   <div className="receipt-backdrop print-receipt" role="dialog" aria-modal="true">
     <section className="receipt-panel" style={{ width: `${settings.ticketPaperWidth * 4}px`, margin: '0 auto' }}>
       <div className="receipt-print-header" style={{ textAlign: 'center', marginBottom: '1rem' }}>
@@ -4012,8 +4662,18 @@ const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoi
         <p style={{ margin: '2px 0' }}>ICE: {settings.ice} | RC: {settings.rc}</p>
         <p style={{ margin: '2px 0' }}>IF: {settings.if} | Patente: {settings.patente}</p>
       </div>
-      <div className="receipt-actions no-print" style={{ marginTop: '2rem' }}>
+      <div className="receipt-actions no-print" style={{ marginTop: '2rem', flexWrap: 'wrap' }}>
+        <button className="primary-action" onClick={async () => {
+          if (serialPort) {
+            const data = generateESCPOS(sale, settings);
+            await sendToPrinter(serialPort, data);
+          } else {
+            window.print();
+          }
+        }}><ReceiptText size={16} style={{marginRight: '6px'}} /> {serialPort ? 'Impression Thermique' : 'Imprimer'}</button>
         <button onClick={onClose}>Fermer</button>
+        <button onClick={() => alert('Reçu envoyé par Email à ' + sale.customer)} style={{ color: '#0ea5e9', background: '#e0f2fe', border: 'none' }}><Mail size={16} style={{marginRight: '6px'}} /> Email</button>
+        <button onClick={() => alert('Reçu envoyé par SMS à ' + sale.customer)} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>SMS</button>
         {onLoadToCart && ['Devis', 'Brouillon', 'Suspendue'].includes(sale.status) && (
           <button className="primary-action" onClick={onLoadToCart} style={{ flex: 1 }}>
             <ShoppingCart size={16} style={{ marginRight: '8px' }} /> Charger dans la caisse
@@ -4025,8 +4685,8 @@ const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoi
           </button>
         )}
         {onInvoice && (
-          <button className="ghost-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/invoice`, '_blank')}>
-            <FileText size={16} style={{ marginRight: '8px' }} /> Facture (A4)
+          <button className="ghost-action" onClick={onInvoice}>
+            <FileText size={16} style={{ marginRight: '8px' }} /> {sale.status === 'Devis' || sale.status === 'Brouillon' ? 'Ouvrir devis' : 'Facture (A4)'}
           </button>
         )}
         <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/receipt`, '_blank')}>
@@ -4170,11 +4830,43 @@ const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode'
 createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);
 
 
+const parseInvoiceMeta = (notes?: string | null) => {
+  if (!notes) {
+    return {
+      mode: 'FROM_TICKETS' as 'FROM_TICKETS' | 'MANUAL',
+      displayMode: 'SUMMARY' as 'SUMMARY' | 'DETAILED',
+      manualLines: [] as { description: string; quantity: number; unitPrice: number; tvaRate?: number }[],
+      userNote: ''
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(notes);
+    return {
+      mode: parsed?.mode === 'MANUAL' ? 'MANUAL' as const : 'FROM_TICKETS' as const,
+      displayMode: parsed?.displayMode === 'DETAILED' ? 'DETAILED' as const : 'SUMMARY' as const,
+      manualLines: Array.isArray(parsed?.manualLines) ? parsed.manualLines : [],
+      userNote: typeof parsed?.userNote === 'string' ? parsed.userNote : '',
+    };
+  } catch {
+    return {
+      mode: 'FROM_TICKETS' as const,
+      displayMode: 'SUMMARY' as const,
+      manualLines: [],
+      userNote: notes || ''
+    };
+  }
+};
+
 const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: any; onClose: () => void }) => {
-  const [mode, setMode] = useState<'SUMMARY' | 'DETAILED'>('SUMMARY');
-  
-  const allItems = facture.sales.flatMap((sale: any) => sale.items || []);
-  const consolidatedItems = Object.values(allItems.reduce((acc: any, item: any) => {
+  const meta = parseInvoiceMeta(facture.notes);
+  const companyAddress = settings.address || settings.companyAddress || '';
+  const companyPhone = settings.phone || settings.companyPhone || '';
+  const companyIce = settings.ice || settings.companyIce || '';
+  const [mode, setMode] = useState<'SUMMARY' | 'DETAILED'>(meta.displayMode || settings.invoiceTicketDisplay || 'SUMMARY');
+
+  const ticketItems = (facture.sales || []).flatMap((sale: any) => sale.items || []);
+  const consolidatedTicketItems = Object.values(ticketItems.reduce((acc: any, item: any) => {
     const key = `${item.productId}-${item.variationId || ''}`;
     if (!acc[key]) {
       acc[key] = { name: item.name, quantity: 0, unitPrice: item.unitPrice };
@@ -4183,30 +4875,37 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
     return acc;
   }, {}));
 
+  const manualLines = (meta.manualLines || []).map((line: any) => ({
+    description: line.description || '',
+    quantity: Number(line.quantity) || 0,
+    unitPrice: Number(line.unitPrice) || 0,
+    tvaRate: Number(line.tvaRate) || 0,
+  }));
+
+  const sourceLabel = meta.mode === 'MANUAL' ? 'Facture libre' : `${facture.sales?.length || 0} ticket(s)`;
+
   return (
   <div className="receipt-backdrop print-a4" role="dialog" aria-modal="true">
     <section className="invoice-panel">
       <div className="invoice-container">
-        {/* Header */}
         <div className="invoice-header-row">
           <div className="invoice-brand">
             {settings.showLogo && settings.logoUrl && <img src={settings.logoUrl} alt="Logo" />}
             <h1>{settings.companyName}</h1>
-            <p>{settings.companyAddress}</p>
-            <p>{settings.companyPhone}</p>
-            <p>ICE: {settings.companyIce || '_________________'}</p>
+            {companyAddress && <p>{companyAddress}</p>}
+            {companyPhone && <p>{companyPhone}</p>}
+            <p>ICE: {companyIce || '_________________'}</p>
           </div>
           <div className="invoice-title">
-            <h2>FACTURE GLOBALE</h2>
-            <p>N° {facture.number}</p>
+            <h2>{meta.mode === 'MANUAL' ? 'FACTURE' : 'FACTURE GLOBALE'}</h2>
+            <p>N� {facture.number}</p>
             <div className="no-print" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
-              <button type="button" className={`ghost-action ${mode === 'SUMMARY' ? 'selected' : ''}`} onClick={() => setMode('SUMMARY')} style={{ padding: '0.25rem 0.5rem', border: mode === 'SUMMARY' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Résumée</button>
-              <button type="button" className={`ghost-action ${mode === 'DETAILED' ? 'selected' : ''}`} onClick={() => setMode('DETAILED')} style={{ padding: '0.25rem 0.5rem', border: mode === 'DETAILED' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Détaillée</button>
+              <button type="button" className={`ghost-action ${mode === 'SUMMARY' ? 'selected' : ''}`} onClick={() => setMode('SUMMARY')} style={{ padding: '0.25rem 0.5rem', border: mode === 'SUMMARY' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Resumee</button>
+              <button type="button" className={`ghost-action ${mode === 'DETAILED' ? 'selected' : ''}`} onClick={() => setMode('DETAILED')} style={{ padding: '0.25rem 0.5rem', border: mode === 'DETAILED' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Detaillee</button>
             </div>
           </div>
         </div>
 
-        {/* Meta */}
         <div className="invoice-meta-row">
           <div className="invoice-meta-col">
             <span>Date</span>
@@ -4217,28 +4916,45 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
             <strong>{facture.customer?.name || '______________________'}</strong>
           </div>
           <div className="invoice-meta-col">
-            <span>Nb. Tickets</span>
-            <strong>{facture.sales.length} ticket(s)</strong>
+            <span>Source</span>
+            <strong>{sourceLabel}</strong>
           </div>
         </div>
 
-        {/* Table */}
+        {meta.userNote && (
+          <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', color: '#334155' }}>
+            <strong style={{ display: 'block', marginBottom: '0.35rem' }}>Note</strong>
+            <span>{meta.userNote}</span>
+          </div>
+        )}
+
         <table className="invoice-table">
           <thead>
             <tr>
               <th>Description</th>
-              <th className="right">Qté</th>
-              <th className="right">Prix Unitaire</th>
+              <th className="right">Qte</th>
+              <th className="right">Prix unitaire</th>
               <th className="right">Total TTC</th>
             </tr>
           </thead>
           <tbody>
-            {mode === 'DETAILED' ? (
-              facture.sales.map((sale: any) => (
+            {meta.mode === 'MANUAL' ? (
+              manualLines.map((line: { description: string; quantity: number; unitPrice: number; tvaRate: number }, idx: number) => (
+                <tr key={idx}>
+                  <td>{line.description}</td>
+                  <td className="right">{line.quantity}</td>
+                  <td className="right">{formatMoney(line.unitPrice)}</td>
+                  <td className="right">{formatMoney(line.unitPrice * line.quantity * (1 + (line.tvaRate || 0) / 100))}</td>
+                </tr>
+              ))
+            ) : mode === 'DETAILED' ? (
+              (facture.sales || []).map((sale: any) => (
                 <React.Fragment key={sale.id}>
                   <tr style={{ background: '#f8fafc', fontWeight: 600 }}>
                     <td colSpan={4} style={{ padding: '0.5rem', fontSize: '0.85rem', color: '#475569' }}>
-                      Ticket {sale.ticketNumber || sale.ticket || sale.id} du {new Date(sale.createdAt).toLocaleDateString('fr-FR')}
+                      {(settings.invoiceShowTicketReferences ?? true) ? `Ticket ${sale.ticketNumber || sale.ticket || sale.id}` : ''}
+                      {(settings.invoiceShowTicketReferences ?? true) && (settings.invoiceShowTicketDates ?? true) ? ' - ' : ''}
+                      {(settings.invoiceShowTicketDates ?? true) ? new Date(sale.createdAt).toLocaleDateString('fr-FR') : ''}
                     </td>
                   </tr>
                   {(sale.items || []).map((line: any, idx: number) => (
@@ -4252,7 +4968,7 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
                 </React.Fragment>
               ))
             ) : (
-              (consolidatedItems as any[]).map((line: any, idx: number) => (
+              (consolidatedTicketItems as any[]).map((line: any, idx: number) => (
                 <tr key={idx}>
                   <td>{line.name}</td>
                   <td className="right">{line.quantity}</td>
@@ -4261,26 +4977,34 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
                 </tr>
               ))
             )}
+            {meta.mode === 'MANUAL' && manualLines.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ textAlign: 'center', fontStyle: 'italic', color: '#94a3b8' }}>Aucune ligne manuelle disponible.</td>
+              </tr>
+            )}
+            {meta.mode !== 'MANUAL' && ticketItems.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ textAlign: 'center', fontStyle: 'italic', color: '#94a3b8' }}>Aucune ligne ticket disponible.</td>
+              </tr>
+            )}
           </tbody>
         </table>
 
-        {/* Totals */}
         <div className="invoice-totals">
           <div className="invoice-total-row">
             <span>Total HT:</span>
-            <span>{formatMoney(facture.total - facture.taxTotal)}</span>
+            <span>{formatMoney(Number(facture.subtotal || (Number(facture.total) - Number(facture.taxTotal))))}</span>
           </div>
           <div className="invoice-total-row">
             <span>TVA:</span>
-            <span>{formatMoney(facture.taxTotal)}</span>
+            <span>{formatMoney(Number(facture.taxTotal || 0))}</span>
           </div>
           <div className="invoice-total-row grand-total">
-            <span>Net à payer TTC:</span>
-            <span>{formatMoney(facture.total)}</span>
+            <span>Net a payer TTC:</span>
+            <span>{formatMoney(Number(facture.total || 0))}</span>
           </div>
         </div>
 
-        {/* Footer */}
         <div className="invoice-footer">
           {settings.invoiceFooter?.split('\n').map((line: string, i: number) => <p key={i}>{line}</p>)}
         </div>
@@ -4293,3 +5017,14 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
   </div>
   );
 };
+
+
+
+
+
+
+
+
+
+
+

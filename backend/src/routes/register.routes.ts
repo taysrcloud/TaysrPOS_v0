@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/sessions', async (req, res, next) => {
+router.get('/sessions', requireAuth, async (req: any, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ sessions: [] });
+    const companyId = req.user.companyId;
+    if (!companyId) return res.json({ sessions: [] });
 
     const sessions = await prisma.cashRegisterSession.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       include: { user: true },
       orderBy: { openedAt: 'desc' }
     });
@@ -24,7 +25,7 @@ router.get('/sessions', async (req, res, next) => {
       expectedCash: Number(s.expectedCash),
       actualCash: s.countedCash ? Number(s.countedCash) : null,
       difference: s.difference ? Number(s.difference) : 0,
-      status: s.closedAt ? (Number(s.difference) === 0 ? 'Juste' : Number(s.difference) > 0 ? 'Ecart positif' : 'Ecart négatif') : 'Ouverte',
+      status: s.closedAt ? (Number(s.difference) === 0 ? 'Juste' : Number(s.difference) > 0 ? 'Ecart positif' : 'Ecart negatif') : 'Ouverte',
       locationId: s.locationId
     }));
 
@@ -34,27 +35,34 @@ router.get('/sessions', async (req, res, next) => {
   }
 });
 
-router.post('/open', async (req, res, next) => {
+router.post('/open', requireAuth, async (req: any, res, next) => {
   try {
     const parsed = z.object({
       initialCash: z.coerce.number().min(0),
       locationId: z.number().optional().nullable()
     }).parse(req.body);
 
-    let company = await prisma.company.findFirst();
-    if (!company) {
-      company = await prisma.company.create({ data: { name: 'Demo Company' } });
-    }
+    const companyId = req.user.companyId;
+    const userId = req.user.id;
 
-    let user = await prisma.user.findFirst({ where: { companyId: company.id } });
-    if (!user) {
-      user = await prisma.user.create({ data: { companyId: company.id, username: 'admin', passwordHash: 'hash', fullName: 'Admin' } });
+    const activeSession = await prisma.cashRegisterSession.findFirst({
+      where: {
+        companyId,
+        userId,
+        locationId: parsed.locationId ?? null,
+        closedAt: null,
+      },
+      orderBy: { openedAt: 'desc' }
+    });
+
+    if (activeSession) {
+      return res.status(409).json({ message: 'Une caisse est deja ouverte pour cet utilisateur sur cet emplacement.', session: activeSession });
     }
 
     const session = await prisma.cashRegisterSession.create({
       data: {
-        companyId: company.id,
-        userId: user.id,
+        companyId,
+        userId,
         locationId: parsed.locationId,
         openingCash: parsed.initialCash,
       }
@@ -66,13 +74,21 @@ router.post('/open', async (req, res, next) => {
   }
 });
 
-router.post('/close', async (req, res, next) => {
+router.post('/close', requireAuth, async (req: any, res, next) => {
   try {
     const parsed = z.object({
       sessionId: z.number(),
       countedCash: z.coerce.number().min(0),
       expectedCash: z.coerce.number()
     }).parse(req.body);
+
+    const existingSession = await prisma.cashRegisterSession.findFirst({
+      where: { id: parsed.sessionId, companyId: req.user.companyId }
+    });
+
+    if (!existingSession) {
+      return res.status(404).json({ message: 'Session introuvable' });
+    }
 
     const difference = parsed.countedCash - parsed.expectedCash;
 
@@ -82,7 +98,7 @@ router.post('/close', async (req, res, next) => {
         closedAt: new Date(),
         countedCash: parsed.countedCash,
         expectedCash: parsed.expectedCash,
-        difference: difference
+        difference
       }
     });
 
@@ -92,13 +108,13 @@ router.post('/close', async (req, res, next) => {
   }
 });
 
-router.get('/movements', async (req, res, next) => {
+router.get('/movements', requireAuth, async (req: any, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ movements: [] });
+    const companyId = req.user.companyId;
+    if (!companyId) return res.json({ movements: [] });
 
     const movements = await prisma.cashMovement.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -117,7 +133,7 @@ router.get('/movements', async (req, res, next) => {
   }
 });
 
-router.post('/movements', async (req, res, next) => {
+router.post('/movements', requireAuth, async (req: any, res, next) => {
   try {
     const parsed = z.object({
       type: z.enum(['IN', 'OUT']),
@@ -127,14 +143,11 @@ router.post('/movements', async (req, res, next) => {
       sessionId: z.number().optional().nullable(),
     }).parse(req.body);
 
-    let company = await prisma.company.findFirst();
-    if (!company) {
-      company = await prisma.company.create({ data: { name: 'Demo Company' } });
-    }
+    const companyId = req.user.companyId;
 
     const movement = await prisma.cashMovement.create({
       data: {
-        companyId: company.id,
+        companyId,
         type: parsed.type,
         amount: parsed.amount,
         note: parsed.note,

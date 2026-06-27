@@ -45,7 +45,7 @@ const productSchema = z.object({
   variationOptions: z.array(z.string()).optional().nullable(),
   variations: z.array(z.object({
     name: z.string(),
-    attributes: z.record(z.string()).optional().nullable(),
+    attributes: z.record(z.string(), z.string()).optional().nullable(),
     sku: z.string().optional().nullable(),
     barcode: z.string().optional().nullable(),
     salePrice: z.coerce.number().optional().nullable(),

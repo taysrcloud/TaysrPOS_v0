@@ -146,6 +146,7 @@ model User {
   sales        Sale[]                @relation("SaleCashier")
   servedSales  Sale[]                @relation("SaleWaiter")
   cashSessions CashRegisterSession[]
+  attendances  Attendance[]
 
   @@unique([companyId, username])
   @@unique([companyId, email])
@@ -568,4 +569,14 @@ enum InvoiceStatus {
   PAID
   PARTIAL
   CANCELLED
+}
+
+model Attendance {
+  id        Int       @id @default(autoincrement())
+  companyId Int
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  clockIn   DateTime  @default(now())
+  clockOut  DateTime?
+  duration  Float?
 }

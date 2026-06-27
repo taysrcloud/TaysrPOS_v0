@@ -34,7 +34,7 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
       for (const adj of parsed.adjustments) {
         // Find or create product stock
         let stock = await tx.productStock.findUnique({
-          where: { productId_warehouseId: { productId: adj.productId, warehouseId: warehouse!.id } }
+          where: { productId_warehouseId: { productId: adj.productId, warehouseId: warehouse!.id } } as any
         });
 
         if (!stock) {
@@ -68,6 +68,83 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
     res.json({ success: true });
   } catch (err) {
     next(err);
+  }
+});
+
+router.get('/warehouses', requireAuth, async (req, res, next) => {
+  try {
+    const company = await prisma.company.findFirst();
+    if (!company) return res.status(400).json({ error: 'No company found' });
+    const warehouses = await prisma.warehouse.findMany({
+      where: { companyId: company.id },
+      include: { stocks: { include: { product: true } } }
+    });
+    res.json({ warehouses });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/movements', requireAuth, async (req, res, next) => {
+  try {
+    const company = await prisma.company.findFirst();
+    if (!company) return res.status(400).json({ error: 'No company found' });
+    const movements = await prisma.stockMovement.findMany({
+      where: { warehouse: { companyId: company.id } },
+      include: { product: true, warehouse: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100
+    });
+    res.json({ movements });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/transfer', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res, next) => {
+  try {
+    const parsed = z.object({
+      sourceWarehouseId: z.number().int().positive(),
+      destinationWarehouseId: z.number().int().positive(),
+      productId: z.number().int().positive(),
+      quantity: z.number().positive(),
+      notes: z.string().optional()
+    }).parse(req.body);
+
+    if (parsed.sourceWarehouseId === parsed.destinationWarehouseId) {
+      return res.status(400).json({ error: 'Source and destination warehouses must be different' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Check and deduct from source
+      const sourceStock = await tx.productStock.findUnique({
+        where: { productId_warehouseId: { productId: parsed.productId, warehouseId: parsed.sourceWarehouseId } } as any
+      });
+      if (!sourceStock || Number(sourceStock.quantity) < parsed.quantity) {
+        throw new Error('Insufficient stock in source warehouse');
+      }
+      await tx.productStock.update({
+        where: { id: sourceStock.id },
+        data: { quantity: { decrement: parsed.quantity } }
+      });
+      await tx.stockMovement.create({
+        data: { productId: parsed.productId, warehouseId: parsed.sourceWarehouseId, type: 'TRANSFER', quantity: -parsed.quantity, reference: parsed.notes || 'Transfer Out' }
+      });
+
+      // Add to destination
+      await tx.productStock.upsert({
+        where: { productId_warehouseId: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId } } as any,
+        update: { quantity: { increment: parsed.quantity } },
+        create: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, quantity: parsed.quantity }
+      });
+      await tx.stockMovement.create({
+        data: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, type: 'TRANSFER', quantity: parsed.quantity, reference: parsed.notes || 'Transfer In' }
+      });
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Server error' });
   }
 });
 

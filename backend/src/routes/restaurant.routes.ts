@@ -69,3 +69,60 @@ router.get('/tables', async (req, res, next) => {
 });
 
 export default router;
+
+// Helper to get company from request context. Currently relying on the same logic used elsewhere.
+const getCompanyId = async (req: any) => {
+  // If requireAuth sets req.user.companyId, use it. Otherwise, fallback to the first company.
+  if (req.user && req.user.companyId) return req.user.companyId;
+  const company = await prisma.company.findFirst();
+  return company?.id;
+};
+
+router.post('/areas', async (req: any, res: any, next) => {
+  try {
+    const companyId = await getCompanyId(req);
+    if (!companyId) return res.status(400).json({ message: 'No company found' });
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ message: 'Name is required' });
+
+    const area = await prisma.restaurantArea.create({
+      data: { name, companyId },
+      include: { tables: true }
+    });
+    res.status(201).json(area);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/areas/:areaId/tables', async (req: any, res: any, next) => {
+  try {
+    const companyId = await getCompanyId(req);
+    if (!companyId) return res.status(400).json({ message: 'No company found' });
+    const { areaId } = req.params;
+    const { name, seats } = req.body;
+    if (!name) return res.status(400).json({ message: 'Name is required' });
+
+    const table = await prisma.restaurantTable.create({
+      data: {
+        name,
+        seats: Number(seats) || 2,
+        areaId: Number(areaId),
+        companyId
+      }
+    });
+    res.status(201).json(table);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/tables/:id', async (req: any, res: any, next) => {
+  try {
+    const { id } = req.params;
+    await prisma.restaurantTable.delete({ where: { id: Number(id) } });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});

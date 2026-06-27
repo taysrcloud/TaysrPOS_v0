@@ -18,10 +18,13 @@ const saleSchema = z.object({
   status: z.enum(['FINAL', 'DRAFT', 'SUSPENDED', 'QUOTE']).default('FINAL'),
   discountRate: z.coerce.number().min(0).max(100).default(0),
   locationId: z.coerce.number().int().positive().optional(),
+  tableId: z.coerce.number().int().positive().optional(),
   items: z.array(z.object({
     productId: z.coerce.number().int().positive(),
     quantity: z.coerce.number().positive(),
     discount: z.coerce.number().min(0).default(0),
+    variationId: z.coerce.number().int().positive().optional(),
+    note: z.string().optional(),
   })).min(1),
 });
 
@@ -82,8 +85,9 @@ router.get('/', requireAuth, async (req: any, res: any) => {
   try {
     const companyId = req.user.companyId;
     const company = { id: companyId };
+    const locationId = req.query.locationId ? parseInt(req.query.locationId) : undefined;
     const sales = await prisma.sale.findMany({
-      where: { companyId: company.id },
+      where: { companyId: company.id, ...(locationId ? { locationId } : {}) },
       include: { customer: true, payments: true, items: { include: { product: true } } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 80,
@@ -160,6 +164,7 @@ router.post('/', async (req, res) => {
           discountTotal,
           taxTotal,
           total,
+          tableId: data.tableId,
           finalizedAt: shouldFinalize ? new Date() : null,
           items: {
             create: rawLines.map(line => ({
@@ -186,7 +191,7 @@ router.post('/', async (req, res) => {
         for (const line of rawLines) {
           if (!line.product.trackStock || line.product.type === ProductType.SERVICE) continue;
           await tx.productStock.upsert({
-            where: { productId_warehouseId: { productId: line.product.id, warehouseId: warehouse.id } },
+            where: { productId_warehouseId: { productId: line.product.id, warehouseId: warehouse.id } } as any,
             update: { quantity: { decrement: line.item.quantity } },
             create: { productId: line.product.id, warehouseId: warehouse.id, quantity: -line.item.quantity },
           });
@@ -258,19 +263,19 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.patch('/:id/kitchen', async (req, res, next) => {
+router.patch('/:id/kitchen', async (req: any, res: any, next) => {
   try {
     const { id } = req.params;
     const { kitchenStatus } = req.body;
     
-    // In our schema, kitchenStatus doesn't explicitly exist as a field on Sale.
-    // SaleStatus enum has KITCHEN and READY. We will update the status field if it matches.
+    // We will update the status of the Sale to READY if that's what's sent, or update items.
+    // For simplicity, we just mark the sale status for now since the UI uses it.
     if (kitchenStatus === 'READY') {
       const sale = await prisma.sale.update({
         where: { id: Number(id) },
         data: { status: 'READY' }
       });
-      res.json({ success: true, sale });
+      res.json({ success: true, sale: normalizeSale(sale) });
     } else {
       res.status(400).json({ message: 'Invalid kitchen status' });
     }
@@ -279,4 +284,187 @@ router.patch('/:id/kitchen', async (req, res, next) => {
   }
 });
 
+router.post('/:id/split', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const { id } = req.params;
+    // selectedItems is an array of { productId, quantity }
+    const { selectedItems } = req.body; 
+    
+    if (!selectedItems || !selectedItems.length) {
+      return res.status(400).json({ message: 'No items selected to split' });
+    }
+
+    const companyId = req.user.companyId;
+
+    const originalSale = await prisma.sale.findUnique({
+      where: { id: Number(id) },
+      include: { items: true }
+    });
+
+    if (!originalSale || originalSale.companyId !== companyId) {
+      return res.status(404).json({ message: 'Sale not found' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Create new sale
+      const newSale = await tx.sale.create({
+        data: {
+          companyId,
+          locationId: originalSale.locationId,
+          customerId: originalSale.customerId,
+          tableId: originalSale.tableId,
+          channel: originalSale.channel,
+          status: originalSale.status,
+          paymentStatus: originalSale.paymentStatus,
+          ticketNumber: `TCK-${Date.now().toString().slice(-7)}-S`,
+          items: {
+            create: selectedItems.map((si: any) => {
+              const origItem = originalSale.items.find(i => i.productId === si.productId);
+              return {
+                productId: si.productId,
+                quantity: si.quantity,
+                unitPrice: origItem?.unitPrice || 0,
+                discount: origItem?.discount || 0,
+                tvaRate: origItem?.tvaRate || 0,
+                lineTotal: (Number(origItem?.unitPrice || 0) - Number(origItem?.discount || 0)) * si.quantity
+              };
+            })
+          }
+        },
+        include: { items: { include: { product: true } }, customer: true, payments: true }
+      });
+
+      // Update new sale totals
+      const newSub = newSale.items.reduce((s, i) => s + Number(i.unitPrice) * Number(i.quantity), 0);
+      const newTax = newSale.items.reduce((s, i) => s + (Number(i.lineTotal) * Number(i.tvaRate) / 100), 0);
+      const newTot = newSub + newTax; // simplistic, ignoring order discount for split
+
+      await tx.sale.update({
+        where: { id: newSale.id },
+        data: { subtotal: newSub, taxTotal: newTax, total: newTot }
+      });
+
+      // Update original sale items by decrementing quantities
+      for (const si of selectedItems) {
+        const origItem = originalSale.items.find(i => i.productId === si.productId);
+        if (origItem) {
+          const newQty = Number(origItem.quantity) - si.quantity;
+          if (newQty <= 0) {
+            await tx.saleItem.delete({ where: { id: origItem.id } });
+          } else {
+            const newLineTotal = (Number(origItem.unitPrice) - Number(origItem.discount)) * newQty;
+            await tx.saleItem.update({
+              where: { id: origItem.id },
+              data: { quantity: newQty, lineTotal: newLineTotal }
+            });
+          }
+        }
+      }
+
+      // Recalculate original sale totals
+      const updatedOriginalItems = await tx.saleItem.findMany({ where: { saleId: originalSale.id } });
+      const origSub = updatedOriginalItems.reduce((s, i) => s + Number(i.unitPrice) * Number(i.quantity), 0);
+      const origTax = updatedOriginalItems.reduce((s, i) => s + (Number(i.lineTotal) * Number(i.tvaRate) / 100), 0);
+      const origTot = origSub + origTax;
+
+      const updatedOriginal = await tx.sale.update({
+        where: { id: originalSale.id },
+        data: { subtotal: origSub, taxTotal: origTax, total: origTot },
+        include: { items: { include: { product: true } }, customer: true, payments: true }
+      });
+
+      return { originalSale: updatedOriginal, newSale };
+    });
+
+    res.json({
+      success: true,
+      originalSale: normalizeSale(result.originalSale),
+      newSale: normalizeSale(result.newSale)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/merge', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const { saleIds } = req.body; // Array of sale IDs to merge
+    if (!saleIds || saleIds.length < 2) {
+      return res.status(400).json({ message: 'Need at least 2 sales to merge' });
+    }
+    
+    const companyId = req.user.companyId;
+
+    const sales = await prisma.sale.findMany({
+      where: { companyId, id: { in: saleIds } },
+      include: { items: true }
+    });
+
+    if (sales.length !== saleIds.length) {
+      return res.status(400).json({ message: 'Some sales not found' });
+    }
+
+    const primarySale = sales[0];
+    const salesToMerge = sales.slice(1);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Move items to primary sale
+      for (const sale of salesToMerge) {
+        for (const item of sale.items) {
+          // Check if item exists in primary
+          const existingItem = await tx.saleItem.findFirst({
+            where: { saleId: primarySale.id, productId: item.productId, variationId: item.variationId }
+          });
+
+          if (existingItem) {
+            await tx.saleItem.update({
+              where: { id: existingItem.id },
+              data: {
+                quantity: Number(existingItem.quantity) + Number(item.quantity),
+                lineTotal: Number(existingItem.lineTotal) + Number(item.lineTotal)
+              }
+            });
+          } else {
+            await tx.saleItem.create({
+              data: {
+                saleId: primarySale.id,
+                productId: item.productId,
+                variationId: item.variationId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                discount: item.discount,
+                tvaRate: item.tvaRate,
+                lineTotal: item.lineTotal
+              }
+            });
+          }
+        }
+        
+        // Delete merged sales
+        await tx.saleItem.deleteMany({ where: { saleId: sale.id } });
+        await tx.sale.delete({ where: { id: sale.id } });
+      }
+
+      // Recalculate primary sale
+      const updatedPrimaryItems = await tx.saleItem.findMany({ where: { saleId: primarySale.id } });
+      const newSub = updatedPrimaryItems.reduce((s, i) => s + Number(i.unitPrice) * Number(i.quantity), 0);
+      const newTax = updatedPrimaryItems.reduce((s, i) => s + (Number(i.lineTotal) * Number(i.tvaRate) / 100), 0);
+      const newTot = newSub + newTax;
+
+      const updatedPrimary = await tx.sale.update({
+        where: { id: primarySale.id },
+        data: { subtotal: newSub, taxTotal: newTax, total: newTot },
+        include: { items: { include: { product: true } }, customer: true, payments: true }
+      });
+
+      return updatedPrimary;
+    });
+
+    res.json({ success: true, primarySale: normalizeSale(result) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
+

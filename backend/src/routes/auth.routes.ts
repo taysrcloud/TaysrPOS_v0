@@ -25,67 +25,64 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Identifiant requis' });
     }
 
-    // 1. Find user in the platform database
-    const platformUser = await platformDb.findPlatformUserByEmailOrUsername(loginId);
-    if (!platformUser || !platformUser.isActive) {
-      return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
-    }
+    let tenantUser = null;
+    let targetAccountId = undefined;
+    let platformUserId = undefined;
 
-    // 2. Verify password against platform user
-    const isValid = await bcrypt.compare(password, platformUser.password);
-    if (!isValid) {
-      return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
-    }
-
-    // 3. Get memberships
-    const allMemberships = await platformDb.getMemberships(platformUser.id);
-    const activeMemberships = allMemberships.filter(m => m.isActive && m.status !== 'SUSPENDED' && m.status !== 'EXPIRED');
-
-    if (activeMemberships.length === 0) {
-      return res.status(403).json({ message: 'Aucun compte actif trouvé' });
-    }
-
-    let targetMembership = activeMemberships.length === 1 ? activeMemberships[0] : null;
-
-    if (accountId) {
-      const parsedId = typeof accountId === 'string' && accountId.startsWith('ACC') 
-        ? accountId 
-        : Number(accountId);
-      
-      targetMembership = activeMemberships.find(m => 
-        m.accountId === parsedId || String(m.accountId) === String(parsedId) || m.code === parsedId
-      );
-
-      if (!targetMembership) {
-        return res.status(403).json({ message: 'Compte introuvable ou accès non autorisé' });
+    try {
+      // 1. Try Platform Database first (Multi-tenant mode)
+      const platformUser = await platformDb.findPlatformUserByEmailOrUsername(loginId);
+      if (platformUser && platformUser.isActive) {
+        const isValid = await bcrypt.compare(password, platformUser.password);
+        if (isValid) {
+          const allMemberships = await platformDb.getMemberships(platformUser.id);
+          const activeMemberships = allMemberships.filter(m => m.isActive && m.status !== 'SUSPENDED' && m.status !== 'EXPIRED');
+          
+          if (activeMemberships.length > 0) {
+            let targetMembership = activeMemberships.length === 1 ? activeMemberships[0] : null;
+            if (accountId) {
+              const parsedId = typeof accountId === 'string' && accountId.startsWith('ACC') ? accountId : Number(accountId);
+              targetMembership = activeMemberships.find(m => m.accountId === parsedId || String(m.accountId) === String(parsedId) || m.code === parsedId);
+            } else if (activeMemberships.length > 1) {
+              return res.status(409).json({
+                message: 'Plusieurs comptes correspondent à cet identifiant',
+                requiresAccountSelection: true,
+                accounts: activeMemberships.map(m => ({ accountId: m.accountId, companyName: m.accountName })),
+              });
+            }
+            if (targetMembership) {
+              const tenantPrisma = getTenantPrisma(targetMembership.databaseUrl);
+              tenantUser = await tenantPrisma.user.findFirst({
+                where: { OR: [{ username: platformUser.username }, { email: platformUser.email }], isActive: true },
+                include: { company: true },
+              });
+              if (tenantUser) {
+                targetAccountId = targetMembership.accountId;
+                platformUserId = platformUser.id;
+              }
+            }
+          }
+        }
       }
-    } else if (activeMemberships.length > 1) {
-      return res.status(409).json({
-        message: 'Plusieurs comptes correspondent à cet identifiant',
-        requiresAccountSelection: true,
-        accounts: activeMemberships.map(m => ({
-          accountId: m.accountId,
-          companyName: m.accountName,
-        })),
-      });
+    } catch (err) {
+      console.warn('Platform DB login failed or not configured, falling back to standalone mode', (err as any)?.message);
     }
 
-    if (!targetMembership) {
-      return res.status(401).json({ message: 'Erreur inattendue de connexion' });
-    }
-
-    // 4. Verify local tenant user
-    const tenantPrisma = getTenantPrisma(targetMembership.databaseUrl);
-    const tenantUser = await tenantPrisma.user.findFirst({
-      where: {
-        OR: [{ username: platformUser.username }, { email: platformUser.email }],
-        isActive: true,
-      },
-      include: { company: true },
-    });
-
+    // 2. Fallback to Standalone Mode (Local DB)
     if (!tenantUser) {
-      return res.status(403).json({ message: 'Utilisateur local inactif ou introuvable' });
+      tenantUser = await prisma.user.findFirst({
+        where: { OR: [{ username: loginId }, { email: loginId }], isActive: true },
+        include: { company: true },
+      });
+
+      if (!tenantUser) {
+        return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
+      }
+
+      const isValid = await bcrypt.compare(password, (tenantUser as any).passwordHash || tenantUser.password);
+      if (!isValid) {
+        return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
+      }
     }
 
     // 5. Issue Token
@@ -95,9 +92,8 @@ router.post('/login', async (req, res) => {
         username: tenantUser.username, 
         companyId: tenantUser.companyId, 
         role: tenantUser.role,
-        accountId: targetMembership.accountId,
-        platformUserId: platformUser.id,
-        databaseUrl: targetMembership.databaseUrl
+        accountId: targetAccountId,
+        platformUserId: platformUserId,
       },
       JWT_SECRET,
       { expiresIn: '12h' }
@@ -105,26 +101,15 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { 
-        id: tenantUser.id, 
-        fullName: tenantUser.fullName, 
-        role: tenantUser.role, 
-        username: tenantUser.username, 
-        email: tenantUser.email, 
-        accountId: targetMembership.accountId 
-      },
-      company: { 
-        id: tenantUser.company.id, 
-        name: tenantUser.company.name, 
-        accountId: targetMembership.accountId 
-      },
+      user: { id: tenantUser.id, fullName: tenantUser.fullName, role: tenantUser.role, username: tenantUser.username, accountId: targetAccountId },
+      company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: 'Requête invalide' });
     }
     console.error('Login error', error);
-    res.status(500).json({ message: 'Erreur serveur' });
+    res.status(500).json({ message: 'Erreur serveur: ' + ((error as any).message || 'Unknown') });
   }
 });
 
