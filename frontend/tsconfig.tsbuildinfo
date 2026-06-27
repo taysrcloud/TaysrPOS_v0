@@ -1,1 +1,1 @@
-{"root":["./src/main.tsx","./src/vite-env.d.ts"],"version":"6.0.3"}
+{"root":["./src/inventory-modals.tsx","./src/main.tsx","./src/purchase-modals.tsx","./src/split-merge-modals.tsx","./src/vite-env.d.ts"],"version":"6.0.3"}

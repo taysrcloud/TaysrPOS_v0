@@ -221,7 +221,7 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
 .calc-grid button.calc-op { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
 .calc-grid button.calc-eq { background: #2563eb; color: #fff; border-color: #2563eb; }
 .calc-grid button.calc-clear { color: #ef4444; }
-.pos-grid { display: grid; grid-template-columns: minmax(0,1.12fr) minmax(360px,.72fr); gap: 10px; min-height: 0; }
+.pos-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(360px,0.85fr); gap: 10px; min-height: 0; }
 .pos-sale-panel, .pos-products-panel { min-height: 570px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.96); box-shadow: 0 6px 16px rgba(15,23,42,.04); overflow: hidden; }
 .pos-sale-panel { display: grid; grid-template-rows: minmax(0,1fr) auto; }
 .cart-table { min-height: 0; overflow: auto; }
@@ -269,7 +269,8 @@ input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37
 .pos-footer-actions button.recent { color: #fff; background: #646ee4; border-color: #646ee4; }
 
 @media (max-width: 1180px) {
-  .pos-search-row, .pos-grid { grid-template-columns: 1fr; }
+  .pos-search-row { grid-template-columns: 1fr; }
+    .pos-grid { grid-template-columns: 1fr; }
   .pos-totals-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .pos-totals-strip .grand-total { grid-column: 1 / -1; }
 }

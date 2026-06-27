@@ -1769,8 +1769,25 @@ const App = () => {
         </div>
       </div>
 
-      <div className="pos-search-row">
-        <div className="customer-picker">
+      
+      <div className="pos-grid">
+        <aside className="pos-products-panel">
+          <div className="pos-search-row" style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', background: '#fff', borderTopLeftRadius: '16px' }}>
+            <label className="product-search"><Search size={16} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
+          </div>
+          <div className="pos-tabs">{categories.map(category => <button key={category} className={selectedCategory === category ? 'selected' : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}</div>
+          <div className="pos-product-grid">
+            {registerProducts.map(product => <button className="pos-product-card" key={product.id} onClick={() => addToCart(product)}>
+              <span className="pos-product-photo">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={24} />}</span>
+              <strong>{product.name}</strong><span>{product.category}</span><em>{formatMoney(product.salePrice)}</em><small>{product.trackStock ? `${product.stock} stock` : 'Service'}</small>
+            </button>)}
+          </div>
+          {showRecent && <div className="recent-box"><div className="recent-title"><Clock size={15} /> Transactions recentes</div>{sales.filter(s => !s.locationId || s.locationId === currentLocationId).slice(0, 4).map(sale => <button key={sale.id}><span>{sale.ticket}</span><strong>{formatMoney(sale.total)}</strong><small>{sale.status}</small></button>)}</div>}
+        </aside>
+
+        <div className="pos-sale-panel">
+          <div className="pos-search-row" style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', background: '#fff', borderTopRightRadius: '16px' }}>
+            <div className="customer-picker">
           <Users size={16} />
           <div className="customer-picker-main">
             <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
@@ -1783,11 +1800,7 @@ const App = () => {
           </div>
           <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
         </div>
-        <label className="product-search"><Search size={16} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
-      </div>
-
-      <div className="pos-grid">
-        <div className="pos-sale-panel">
+          </div>
           <div className="cart-table">
             <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
             {cart.length === 0 ? <div className="pos-empty"><ShoppingCart size={34} /><strong>Votre panier est vide</strong><span>Scannez un code-barres ou cliquez sur un produit.</span></div> : cart.map(line => {
@@ -1815,21 +1828,7 @@ const App = () => {
             <div><span>TVA</span><strong>{formatMoney(cartTax)}</strong></div>
             <div className="grand-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div>
           </div>
-        </div>
-
-        <aside className="pos-products-panel">
-          <div className="pos-tabs">{categories.map(category => <button key={category} className={selectedCategory === category ? 'selected' : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}</div>
-          <div className="pos-product-grid">
-            {registerProducts.map(product => <button className="pos-product-card" key={product.id} onClick={() => addToCart(product)}>
-              <span className="pos-product-photo">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={24} />}</span>
-              <strong>{product.name}</strong><span>{product.category}</span><em>{formatMoney(product.salePrice)}</em><small>{product.trackStock ? `${product.stock} stock` : 'Service'}</small>
-            </button>)}
-          </div>
-          {showRecent && <div className="recent-box"><div className="recent-title"><Clock size={15} /> Transactions recentes</div>{sales.filter(s => !s.locationId || s.locationId === currentLocationId).slice(0, 4).map(sale => <button key={sale.id}><span>{sale.ticket}</span><strong>{formatMoney(sale.total)}</strong><small>{sale.status}</small></button>)}</div>}
-        </aside>
-      </div>
-
-      <div className="pos-footer-actions">
+          <div className="pos-footer-actions">
         <button className="danger" onClick={clearCart}><XCircle size={16} /> Annuler</button>
         <button disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={16} /> Brouillon</button>
         <button disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={16} /> Devis</button>
@@ -1850,7 +1849,9 @@ const App = () => {
         }} style={{ flex: 2, fontSize: '1.1rem' }}>Payer {formatMoney(cartTotal)}</button>
         <button className="recent" onClick={() => setTransactionsModalOpen(true)}><Clock size={16} /> Transactions</button>
       </div>
-
+        </div>
+      </div>
+      
       {customerModalOpen && (
         <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setCustomerModalOpen(false); }}>
           <div style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: 'auto' }}>
