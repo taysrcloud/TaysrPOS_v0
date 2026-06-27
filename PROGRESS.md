@@ -70,6 +70,21 @@ This v0 app is not a direct port. It keeps the useful business flows from that s
 - [x] Added direct credit-settlement actions from sales and payments lists with remaining-due visibility and a sale-level encaissement modal.
 - [x] Sorted the payments queue so open credits surface first and exposed quick outstanding-credit stats in the toolbar.
 
+### Phase F: POS Layout Swap
+- [x] Swapped POS layout to Products left, Cart right (matching UltimatePOS).
+- [x] Moved search bar and category tabs into the products panel.
+- [x] Moved customer picker into the cart panel header.
+- [x] Updated CSS grid columns for the new layout proportions.
+
+### Phase G: Docker-Only Dependencies + Super Admin Optic Fix
+- [x] Deleted all local `node_modules` folders (~2GB) across all apps and platform.
+- [x] Dependencies now live inside Docker images only (`npm ci` in Dockerfiles).
+- [x] Created root `.gitignore` for TaysrSuite.
+- [x] Fixed Super Admin account creation for OPTIC: auto-provisions tenant database + syncs admin user on account creation.
+- [x] Added INVOICE schema path support in `provisionTenantDatabase`.
+- [x] Added INVOICE-specific seeding branch with Company (platformAccountId) and User (OWNER role).
+- [x] INVOICE accounts correctly use shared database (no per-tenant DB creation).
+
 ## Important Current Notes
 
 - `apps/TaysrPOS` remains the legacy reference/source of workflow inspiration.
