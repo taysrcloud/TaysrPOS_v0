@@ -69,6 +69,18 @@ This v0 app is not a direct port. It keeps the useful business flows from that s
 - [x] Improved sales table actions so paid sales expose Ticket + Facture and draft-like sales expose Details + Reprendre directly from list views.
 - [x] Added direct credit-settlement actions from sales and payments lists with remaining-due visibility and a sale-level encaissement modal.
 - [x] Sorted the payments queue so open credits surface first and exposed quick outstanding-credit stats in the toolbar.
+- [x] Added a dedicated dashboard period filter so KPI cards, chart, credit queue, and recent sales react to today / week / month / year views.
+- [x] Added client-side facture shortcuts from the Clients portfolio, with automatic ticket-based invoicing when eligible tickets exist and fallback to Facture libre otherwise.
+- [x] Client portfolio now shows open credit and invoiceable-ticket hints directly in each customer row for faster follow-up.
+- [x] Added selection-based invoice creation directly from the sales history table, with same-customer guardrails before opening the shared ticket-invoice modal.
+- [x] Added facture status management directly from the invoice list with tenant-side labels for brouillon, validee, partiellement payee, payee, and annulee.
+- [x] Added payment recording against factures themselves, including remaining-due checks and lightweight payment history stored in invoice metadata.
+- [x] Reworked invoice settings in `Parametres` into a cleaner facture control card with clearer defaults for grouped vs detailed tickets and ticket-reference visibility.
+- [x] Added facture export/share actions so accountants can open, print, export, or share a facture summary directly from the invoice workspace.
+- [x] Added a product-assisted fast path in `Facture libre` so choosing a known catalogue item can prefill description, sale price, and TVA.
+- [x] Replaced new manual-facture storage with a proper `InvoiceLine` Prisma model path, while keeping a legacy metadata fallback so older factures still render.
+- [x] Added a clearer POS workflow strip so customer, scan/search, draft/devis/suspend, remise, and encaissement actions stay visible together for cashiers.
+- [ ] Local frontend typecheck could not be rerun in this workspace after Docker-only dependency cleanup because `tsc` is not installed locally anymore; verify next inside the container/runtime.
 
 ### Phase F: POS Layout Swap
 - [x] Swapped POS layout to Products left, Cart right (matching UltimatePOS).
@@ -100,6 +112,7 @@ These are the next best tasks to take in parallel if needed.
 - [ ] Create a fresh POS tenant from the Super Admin UI.
 - [ ] Confirm the success panel shows the resolved credentials and sync status correctly.
 - [ ] Log into POS from the real frontend using the generated tenant login.
+- [ ] Run Prisma generate/migrate for the new `InvoiceLine` model in the runtime, then validate both legacy and new manual factures render correctly.
 - [ ] Trigger the multi-account selector with a duplicated login and verify the correct tenant opens.
 - [ ] Validate the sidebar for Admin, Manager, and Cashier after login.
 
@@ -126,23 +139,23 @@ These are the next best tasks to take in parallel if needed.
   - show / hide ticket dates
 - [x] Add `Facture libre` creation without starting from POS tickets.
 - [x] Update facture viewer so manual factures and grouped ticket factures both render correctly.
-- [ ] Add a cleaner facture settings card in `Parametres` instead of burying options in generic template text.
-- [ ] Add manual facture line editing with product autocomplete as an optional fast path.
-- [ ] Add ability to create a facture directly from customer/account page, not only from POS tickets.
-- [ ] Add ability to create a facture directly from sales history selected rows.
-- [ ] Add status on factures:
+- [x] Add a cleaner facture settings card in `Parametres` instead of burying options in generic template text.
+- [x] Add manual facture line editing with product autocomplete as an optional fast path.
+- [x] Add ability to create a facture directly from customer/account page, not only from POS tickets.
+- [x] Add ability to create a facture directly from sales history selected rows.
+- [x] Add status on factures:
   - brouillon
   - validee
   - partiellement payee
   - payee
   - annulee
-- [ ] Add payment recording against factures themselves.
-- [ ] Add PDF/download/share flow for factures.
-- [ ] Replace JSON-in-notes manual facture storage with a proper invoice-lines model in Prisma.
+- [x] Add payment recording against factures themselves.
+- [x] Add PDF/download/share flow for factures.
+- [x] Replace JSON-in-notes manual facture storage with a proper invoice-lines model in Prisma.
 
 ### 4. POS / Caisse Workflow Properly Rebuilt
 - [ ] Rework the main POS page to feel closer to UltimatePOS workflow but with cleaner Taysr UI.
-- [ ] Add stronger top action flow for:
+- [x] Add stronger top action flow for:
   - customer selection
   - fast product search
   - barcode scan
@@ -179,7 +192,7 @@ These are the next best tasks to take in parallel if needed.
   - open factures
   - latest tickets
   - last payment
-- [ ] Connect contact-level credit follow-up with specific unpaid sales and facture references.
+- [x] Connect contact-level credit follow-up with specific unpaid sales and facture references at a lightweight UI level from the client portfolio.
 - [ ] Add supplier ledger and purchase history shortcuts.
 
 ### 8. Stock, Purchases, And Warehouse Operations
@@ -228,6 +241,9 @@ Each time a meaningful block is finished:
 1. Add it to the matching completed phase here.
 2. Mark what was verified, not only what was coded.
 3. Move the next best items into the targeted steps section so another worker can pick them up immediately.
+
+
+
 
 
 

@@ -578,10 +578,12 @@ const App = () => {
   const [sales, setSales] = useState<SaleRecord[]>([]);
     const [invoices, setInvoices] = useState<any[]>([]);
   const [selectedFacture, setSelectedFacture] = useState<any>(null);
+  const [invoicePaymentTarget, setInvoicePaymentTarget] = useState<any>(null);
   const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoicePaymentForm, setInvoicePaymentForm] = useState({ amount: '', method: 'CASH', note: '' });
   const [manualInvoiceCustomer, setManualInvoiceCustomer] = useState<number | ''>('');
   const [manualInvoiceNotes, setManualInvoiceNotes] = useState('');
-  const [manualInvoiceLines, setManualInvoiceLines] = useState([{ description: '', quantity: '1', unitPrice: '0', tvaRate: '20' }]);
+  const [manualInvoiceLines, setManualInvoiceLines] = useState([{ description: '', quantity: '1', unitPrice: '0', tvaRate: '20', productId: '' }]);
   const [ticketInvoiceModalOpen, setTicketInvoiceModalOpen] = useState(false);
   const [manualInvoiceModalOpen, setManualInvoiceModalOpen] = useState(false);
   const [draftSales, setDraftSales] = useState<SaleRecord[]>([]);
@@ -708,6 +710,12 @@ const App = () => {
     } catch {
       // Expected when the API/database is offline; keep the demo UI usable.
     }
+  };
+
+  const syncInvoiceInState = (invoice: any) => {
+    setInvoices(current => current.map(item => item.id === invoice.id ? invoice : item));
+    setSelectedFacture(current => current?.id === invoice.id ? invoice : current);
+    setInvoicePaymentTarget(current => current?.id === invoice.id ? invoice : current);
   };
 
   const loadSales = async () => {
@@ -1056,6 +1064,8 @@ const App = () => {
   const lastKeyTimeRef = useRef(0);
   const autoSkuRef = useRef('');
   const manualSkuRef = useRef(false);
+  const productSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const orderDiscountInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1555,7 +1565,20 @@ const App = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', padding: '1.5rem 2rem', borderRadius: '18px', background: 'linear-gradient(135deg, #050b16, #0d1b2a)', color: '#fff' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>Bienvenue, Administrateur</h1>
-          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px', fontWeight: 600 }}>Voici un aperçu de votre activité commerciale pour {dashboardPeriod === 'today' ? "aujourd'hui" : dashboardPeriod === 'week' ? 'cette semaine' : dashboardPeriod === 'month' ? 'ce mois' : dashboardPeriod === 'year' ? 'cette annee' : 'toute la periode'}.</p>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px', fontWeight: 600 }}>
+            Voici un apercu de votre activite commerciale pour{' '}
+            <strong style={{ color: '#fff' }}>
+              {dashboardPeriod === 'today'
+                ? "aujourd'hui"
+                : dashboardPeriod === 'week'
+                  ? 'cette semaine'
+                  : dashboardPeriod === 'month'
+                    ? 'ce mois'
+                    : dashboardPeriod === 'year'
+                      ? 'cette annee'
+                      : 'toute la periode'}
+            </strong>.
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {[{ id: 'today', label: "Aujourd'hui" }, { id: 'week', label: 'Semaine' }, { id: 'month', label: 'Mois' }, { id: 'year', label: 'Annee' }, { id: 'all', label: 'Tout' }].map(period => (
@@ -1769,11 +1792,50 @@ const App = () => {
         </div>
       </div>
 
-      
+      <div className="pos-workflow-strip">
+        <div className="workflow-card">
+          <span className="workflow-label">Client actif</span>
+          <strong>{customer.name}</strong>
+          <small>{customer.balance > 0 ? `Solde ${formatMoney(customer.balance)}` : 'Pret pour une vente comptoir ou compte client'}</small>
+          <div className="workflow-actions">
+            <button className="ghost-action" type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /> Nouveau client</button>
+            <button className="ghost-action" type="button" onClick={() => setPage('Clients')}><Users size={14} /> Portefeuille</button>
+          </div>
+        </div>
+        <div className="workflow-card">
+          <span className="workflow-label">Scan et recherche</span>
+          <strong>{search ? `Recherche: ${search}` : 'Scanner ou taper un produit'}</strong>
+          <small>{status || 'Le lecteur code-barres peut ajouter directement au panier hors champ de saisie.'}</small>
+          <div className="workflow-actions">
+            <button className="ghost-action" type="button" onClick={() => productSearchInputRef.current?.focus()}><Search size={14} /> Focus recherche</button>
+            <button className="ghost-action" type="button" onClick={() => setPage('Produits')}><Package size={14} /> Catalogue</button>
+          </div>
+        </div>
+        <div className="workflow-card">
+          <span className="workflow-label">Workflow ticket</span>
+          <strong>{cart.length ? `${cart.length} ligne(s) dans le panier` : 'Panier vide'}</strong>
+          <small>Brouillon, devis et suspension restent visibles sans descendre jusqu'au pied de page.</small>
+          <div className="workflow-actions">
+            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={14} /> Brouillon</button>
+            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={14} /> Devis</button>
+            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}><Pause size={14} /> Suspendre</button>
+          </div>
+        </div>
+        <div className="workflow-card workflow-card-highlight">
+          <span className="workflow-label">Finalisation</span>
+          <strong>{formatMoney(cartTotal)}</strong>
+          <small>{(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) ? 'Remise et prix peuvent etre ajustes avant encaissement.' : 'Encaissement direct avec controles de role appliques.'}</small>
+          <div className="workflow-actions">
+            <button className="ghost-action" type="button" onClick={() => orderDiscountInputRef.current?.focus()}><Percent size={14} /> Remise</button>
+            <button className="primary-action" type="button" disabled={!cart.length} onClick={() => { setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0', storeCredit: '0' }); setPaymentModalOpen(true); }}><CreditCard size={14} /> Encaisser</button>
+          </div>
+        </div>
+      </div>
+
       <div className="pos-grid">
         <aside className="pos-products-panel">
           <div className="pos-search-row" style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', background: '#fff', borderTopLeftRadius: '16px' }}>
-            <label className="product-search"><Search size={16} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
+            <label className="product-search"><Search size={16} /><input ref={productSearchInputRef} value={search} onChange={event => setSearch(event.target.value)} placeholder="Nom du produit / SKU / Code-barres" autoFocus /><button type="button" onClick={() => setPage('Produits')}><Plus size={14} /></button></label>
           </div>
           <div className="pos-tabs">{categories.map(category => <button key={category} className={selectedCategory === category ? 'selected' : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}</div>
           <div className="pos-product-grid">
@@ -1824,7 +1886,7 @@ const App = () => {
           <div className="pos-totals-strip">
             <div><span>Sous-total</span><strong>{formatMoney(cartSubtotal)}</strong></div>
             <div><span>Remise lignes</span><strong>{formatMoney(cartLineDiscount)}</strong></div>
-            <label><Percent size={15} /><span>Remise</span><input value={discountRate} onChange={event => setDiscountRate(Math.max(0, Math.min(100, Number(event.target.value || 0))))} inputMode="decimal" /></label>
+            <label><Percent size={15} /><span>Remise</span><input ref={orderDiscountInputRef} value={discountRate} onChange={event => setDiscountRate(Math.max(0, Math.min(100, Number(event.target.value || 0))))} inputMode="decimal" /></label>
             <div><span>TVA</span><strong>{formatMoney(cartTax)}</strong></div>
             <div className="grand-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div>
           </div>
@@ -2514,6 +2576,10 @@ const App = () => {
         </div>
         {rows.map(contact => {
           const tier = getCustomerTier(contact.rewardPoints || 0);
+          const relatedSales = sales.filter(sale => sale.customerId === contact.id || sale.customer === contact.name);
+          const openCredits = relatedSales.filter(sale => sale.status === 'Credit');
+          const invoiceableSales = relatedSales.filter(sale => sale.status === 'Payee' && !sale.invoiceId);
+          const openCreditTotal = openCredits.reduce((sum, sale) => sum + getSaleDueAmount(sale), 0);
           return (
             <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }} key={contact.id}>
               <span>
@@ -2527,13 +2593,20 @@ const App = () => {
               <span>{contact.phone}</span>
               <span style={{ color: contact.balance > 0 ? '#ef4444' : 'inherit', fontWeight: contact.balance > 0 ? 700 : 400 }}>{formatMoney(contact.balance)}</span>
               {kind === 'Client' ? 
-                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                   <strong style={{ color: '#3b82f6' }}>{contact.rewardPoints || 0} pts</strong>
-                  <small style={{ color: '#10b981', fontWeight: 600 }}>Crédit: {formatMoney(contact.storeCredit || 0)}</small>
+                  <small style={{ color: '#10b981', fontWeight: 600 }}>Credit magasin: {formatMoney(contact.storeCredit || 0)}</small>
+                  <small style={{ color: openCredits.length > 0 ? '#ef4444' : '#64748b', fontWeight: 600 }}>
+                    {openCredits.length > 0 ? `${openCredits.length} ticket(s) en attente - ${formatMoney(openCreditTotal)}` : 'Aucun credit ouvert'}
+                  </small>
+                  <small style={{ color: '#7c3aed', fontWeight: 600 }}>
+                    {invoiceableSales.length > 0 ? `${invoiceableSales.length} ticket(s) a facturer` : 'Pas de ticket a facturer'}
+                  </small>
                 </span> 
                 : <span>{contact.lastActivity}</span>}
               <span style={{ display: 'flex', gap: '0.5rem' }}>
-                {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Régler</button>}
+                {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>R�gler</button>}
+                {kind === 'Client' && <button className="row-action" onClick={() => openCustomerInvoiceFlow(contact)} style={{ color: '#7c3aed', background: '#f3e8ff', border: 'none' }}>Facturer</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setTopupContact(contact); setTopupAmount(''); }} style={{ color: '#3b82f6', background: '#eff6ff', border: 'none' }}>Recharger</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setMessageContact(contact); setMessageContent(''); }} style={{ color: '#8b5cf6', background: '#ede9fe', border: 'none' }}><Mail size={14} /></button>}
               </span>
@@ -2937,6 +3010,71 @@ const App = () => {
       } catch(e) { setStatus('Erreur creation facture'); }
     };
 
+    const openManualInvoiceForCustomer = (contact: Contact) => {
+      setManualInvoiceCustomer(contact.id);
+      setManualInvoiceNotes('');
+      setManualInvoiceLines([{ description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20', productId: '' }]);
+      setManualInvoiceModalOpen(true);
+    };
+
+    const openCustomerInvoiceFlow = (contact: Contact) => {
+      const invoiceableSales = sales.filter(sale =>
+        sale.status === 'Payee' &&
+        !sale.invoiceId &&
+        (sale.customerId === contact.id || sale.customer === contact.name)
+      );
+
+      if (invoiceableSales.length > 0) {
+        setInvoiceCustomer(contact.id);
+        setSelectedTickets(invoiceableSales.map(sale => sale.id));
+        setTicketInvoiceModalOpen(true);
+        return;
+      }
+
+      openManualInvoiceForCustomer(contact);
+    };
+
+    const openSalesInvoiceFlow = () => {
+      const selectedSales = sales.filter(sale => selectedTickets.includes(sale.id));
+      const invoiceableSales = selectedSales.filter(sale => sale.status === 'Payee' && !sale.invoiceId && sale.customerId);
+      const customerIds = Array.from(new Set(invoiceableSales.map(sale => sale.customerId)));
+
+      if (invoiceableSales.length === 0) {
+        setStatus('Selectionnez au moins un ticket paye non encore facture.');
+        return;
+      }
+
+      if (customerIds.length !== 1) {
+        setStatus('Les tickets selectionnes doivent appartenir au meme client pour generer une seule facture.');
+        return;
+      }
+
+      setInvoiceCustomer(customerIds[0] || null);
+      setSelectedTickets(invoiceableSales.map(sale => sale.id));
+      setTicketInvoiceModalOpen(true);
+    };
+
+    const applyProductTemplateToManualInvoiceLine = (index: number, rawValue: string) => {
+      const value = rawValue.trim();
+      const matchedProduct = products.find(product =>
+        product.name.toLowerCase() == value.toLowerCase() ||
+        product.sku.toLowerCase() == value.toLowerCase() ||
+        (product.barcode || '').toLowerCase() == value.toLowerCase()
+      );
+
+      setManualInvoiceLines(current => current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        if (!matchedProduct) return { ...item, description: rawValue, productId: '' };
+        return {
+          ...item,
+          description: matchedProduct.name,
+          unitPrice: String(matchedProduct.salePrice || item.unitPrice || '0'),
+          tvaRate: String(matchedProduct.tvaRate || companySettings.defaultTva || item.tvaRate || '20'),
+          productId: String(matchedProduct.id),
+        };
+      }));
+    };
+
     const handleCreateManualInvoice = async () => {
       const validLines = manualInvoiceLines
         .map(line => ({
@@ -2944,6 +3082,7 @@ const App = () => {
           quantity: Number(line.quantity || 0),
           unitPrice: Number(line.unitPrice || 0),
           tvaRate: Number(line.tvaRate || 0),
+          productId: Number(line.productId || 0) || undefined,
         }))
         .filter(line => line.description && line.quantity > 0);
       if (!manualInvoiceCustomer || validLines.length === 0) {
@@ -2966,7 +3105,7 @@ const App = () => {
           setStatus('Facture libre creee avec succes');
           setManualInvoiceNotes('');
           setManualInvoiceCustomer('');
-          setManualInvoiceLines([{ description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20' }]);
+          setManualInvoiceLines([{ description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20', productId: '' }]);
           setManualInvoiceModalOpen(false);
           loadInvoices();
         } else {
@@ -2975,6 +3114,61 @@ const App = () => {
         }
       } catch (e) {
         setStatus('Erreur creation facture libre');
+      }
+    };
+
+    const handleInvoiceStatusChange = async (invoiceId: number, nextStatus: 'DRAFT' | 'SENT' | 'PAID' | 'PARTIAL' | 'CANCELLED') => {
+      try {
+        const res = await apiFetch(`/api/invoices/${invoiceId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: nextStatus })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          syncInvoiceInState(data.invoice);
+          setStatus(`Statut facture mis a jour: ${invoiceStatusLabel(nextStatus)}`);
+        } else {
+          const err = await res.json().catch(() => null);
+          setStatus(err?.message || 'Erreur mise a jour statut facture');
+        }
+      } catch {
+        setStatus('Erreur mise a jour statut facture');
+      }
+    };
+
+    const handleRecordInvoicePayment = async () => {
+      if (!invoicePaymentTarget) return;
+      const amount = Number(invoicePaymentForm.amount || 0);
+      if (amount <= 0) {
+        setStatus('Montant paiement facture invalide');
+        return;
+      }
+
+      try {
+        const res = await apiFetch(`/api/invoices/${invoicePaymentTarget.id}/payments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount,
+            method: invoicePaymentForm.method,
+            note: invoicePaymentForm.note,
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          syncInvoiceInState(data.invoice);
+          setStatus(`Paiement facture enregistre: ${formatMoney(amount)}`);
+          setInvoicePaymentTarget(null);
+          setInvoicePaymentForm({ amount: '', method: 'CASH', note: '' });
+        } else {
+          const err = await res.json().catch(() => null);
+          setStatus(err?.message || 'Erreur enregistrement paiement facture');
+        }
+      } catch {
+        setStatus('Erreur enregistrement paiement facture');
       }
     };
 
@@ -3023,22 +3217,39 @@ const App = () => {
               <div className="search-box" style={{ flex: 1, maxWidth: '320px' }}><Search size={17} /><input value={invoiceSearch} onChange={event => setInvoiceSearch(event.target.value)} placeholder="Rechercher numero ou client..." /></div>
             </div>
             <div className="table-head">
-              <span>Facture</span><span>Client</span><span>Source</span><span>Total</span><span>Actions</span>
+              <span>Facture</span><span>Client</span><span>Source</span><span>Statut</span><span>Total</span><span>Reste</span><span>Actions</span>
             </div>
             {filteredInvoices.map(inv => {
-              let source = `${inv.sales?.length || 0} ticket(s)`;
-              try {
-                const meta = inv.notes ? JSON.parse(inv.notes) : null;
-                if (meta?.mode === 'MANUAL') source = 'Facture libre';
-              } catch {}
+              const meta = parseInvoiceMeta(inv.notes);
+              const source = meta.mode === 'MANUAL' ? 'Facture libre' : `${inv.sales?.length || 0} ticket(s)`;
+              const paidAmount = getInvoicePaidAmount(inv);
+              const dueAmount = getInvoiceDueAmount(inv);
               return (
                 <div className="table-row" key={inv.id}>
                   <span><strong>{inv.number}</strong><small>{new Date(inv.createdAt).toLocaleDateString('fr-FR')}</small></span>
                   <span>{inv.customer?.name || 'Inconnu'}</span>
                   <span>{source}</span>
-                  <span><strong>{formatMoney(Number(inv.total))}</strong></span>
+                  <span>
+                    <select
+                      value={inv.status || 'SENT'}
+                      onChange={event => handleInvoiceStatusChange(inv.id, event.target.value as 'DRAFT' | 'SENT' | 'PAID' | 'PARTIAL' | 'CANCELLED')}
+                      style={{ minWidth: '150px', padding: '0.55rem 0.75rem', borderRadius: '10px', border: `1px solid ${invoiceStatusTone(inv.status || 'SENT').border}`, background: invoiceStatusTone(inv.status || 'SENT').bg, color: invoiceStatusTone(inv.status || 'SENT').text, fontWeight: 700 }}
+                    >
+                      <option value="DRAFT">Brouillon</option>
+                      <option value="SENT">Validee</option>
+                      <option value="PARTIAL">Partiellement payee</option>
+                      <option value="PAID">Payee</option>
+                      <option value="CANCELLED">Annulee</option>
+                    </select>
+                    <small>{meta.payments.length} paiement(s)</small>
+                  </span>
+                  <span><strong>{formatMoney(Number(inv.total))}</strong><small>Regle: {formatMoney(paidAmount)}</small></span>
+                  <span><strong style={{ color: dueAmount > 0 ? '#c2410c' : '#16a34a' }}>{formatMoney(dueAmount)}</strong></span>
                   <span className="list-actions">
-                    <button className="row-action" onClick={() => setSelectedFacture(inv)}>Imprimer</button>
+                    <button className="row-action" onClick={() => setSelectedFacture(inv)}>Voir</button>
+                    <button className="row-action" onClick={() => downloadInvoiceDocument(inv, companySettings)}><Download size={14} /> Export</button>
+                    <button className="row-action" onClick={async () => { try { const result = await shareInvoiceDocument(inv); setStatus(result === 'shared' ? 'Facture partagee' : result === 'copied' ? 'Resume facture copie' : 'Partage facture non disponible sur cet appareil'); } catch { setStatus('Partage facture annule ou indisponible'); } }}><Mail size={14} /> Partager</button>
+                    <button className="row-action" onClick={() => { setInvoicePaymentTarget(inv); setInvoicePaymentForm({ amount: String(getInvoiceDueAmount(inv) || ''), method: 'CASH', note: '' }); }}>Encaisser</button>
                   </span>
                 </div>
               );
@@ -3096,7 +3307,21 @@ const App = () => {
                   <div style={{ maxHeight: '380px', overflowY: 'auto', display: 'grid', gap: '0.75rem', paddingRight: '0.25rem' }}>
                     {manualInvoiceLines.map((line, index) => (
                       <div key={index} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.85rem', display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) 90px 120px 90px auto', gap: '0.65rem', alignItems: 'end', background: '#f8fafc' }}>
-                        <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Description</span><input value={line.description} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, description: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                        <label>
+                          <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Description / produit</span>
+                          <input
+                            value={line.description}
+                            list={`invoice-product-options-${index}`}
+                            onChange={e => applyProductTemplateToManualInvoiceLine(index, e.target.value)}
+                            placeholder="Produit du catalogue ou texte libre"
+                            style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }}
+                          />
+                          <datalist id={`invoice-product-options-${index}`}>
+                            {products.filter(product => product.isActive).slice(0, 120).map(product => (
+                              <option key={`${index}-${product.id}`} value={product.name}>{`${product.sku} - ${formatMoney(product.salePrice)}`}</option>
+                            ))}
+                          </datalist>
+                        </label>
                         <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>Qte</span><input value={line.quantity} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, quantity: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
                         <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>PU</span><input value={line.unitPrice} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, unitPrice: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
                         <label><span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '4px' }}>TVA %</span><input value={line.tvaRate} onChange={e => setManualInvoiceLines(current => current.map((item, i) => i === index ? { ...item, tvaRate: e.target.value } : item))} style={{ width: '100%', padding: '0.7rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
@@ -3105,7 +3330,7 @@ const App = () => {
                     ))}
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                    <button className="ghost-action" type="button" onClick={() => setManualInvoiceLines(current => [...current, { description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20' }])}><Plus size={16} /> Ajouter une ligne</button>
+                    <button className="ghost-action" type="button" onClick={() => setManualInvoiceLines(current => [...current, { description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20', productId: '' }])}><Plus size={16} /> Ajouter une ligne</button>
                     <div style={{ color: '#64748b', fontSize: '0.85rem' }}>{manualInvoiceLines.length} ligne(s)</div>
                   </div>
                   <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '6px' }}>Note interne / commentaire</span><textarea value={manualInvoiceNotes} onChange={e => setManualInvoiceNotes(e.target.value)} style={{ width: '100%', height: '96px', resize: 'none', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
@@ -3122,13 +3347,22 @@ const App = () => {
     };
   const renderSales = () => {
     const filteredSales = sales.filter(s => (!s.locationId || s.locationId === currentLocationId) && (!saleSearch || s.ticket.toLowerCase().includes(saleSearch.toLowerCase()) || s.customer.toLowerCase().includes(saleSearch.toLowerCase())));
+    const invoiceableSales = filteredSales.filter(sale => sale.status === 'Payee' && !sale.invoiceId && sale.customerId);
+    const selectedInvoiceableSales = invoiceableSales.filter(sale => selectedTickets.includes(sale.id));
+    const selectedCustomerIds = Array.from(new Set(selectedInvoiceableSales.map(sale => sale.customerId)));
+    const hasMixedSelection = selectedCustomerIds.length > 1;
     return <section className="panel table-section flush-top">
       <div style={{ padding: '1.5rem 1.5rem 0' }}>
         <PageHeader 
           icon={TrendingUp}
           title="Historique des Ventes" 
           subtitle="Tickets, factures et devis" 
-          action={<button className="primary-action" onClick={() => setPage('POS')}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvelle vente</button>} 
+          action={
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button className="ghost-action" disabled={!selectedInvoiceableSales.length || hasMixedSelection} onClick={openSalesInvoiceFlow}><FileText size={16} /> Facturer la selection ({selectedInvoiceableSales.length})</button>
+              <button className="primary-action" onClick={() => setPage('POS')}><Plus size={16} style={{ marginRight: '8px' }} /> Nouvelle vente</button>
+            </div>
+          } 
         />
       </div>
       <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
@@ -3142,9 +3376,17 @@ const App = () => {
             <span className="toolbar-stat-value">{formatMoney(filteredSales.reduce((sum, s) => sum + s.total, 0))}</span>
             <span className="toolbar-stat-label">Total Ventes</span>
           </div>
+          <div className="toolbar-stat-item">
+            <span className="toolbar-stat-value">{selectedInvoiceableSales.length}</span>
+            <span className="toolbar-stat-label">Selection facturable</span>
+          </div>
         </div>
       </div>
-      <RecordTable sales={filteredSales} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} />
+      {hasMixedSelection && <div style={{ margin: '0 1.5rem 1rem', padding: '0.85rem 1rem', borderRadius: '10px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '0.9rem', fontWeight: 600 }}>Les tickets selectionnes appartiennent a plusieurs clients. Gardez une seule selection client pour generer une facture.</div>}
+      <RecordTable sales={filteredSales} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} selectedSaleIds={selectedTickets} onToggleSaleSelection={(sale) => {
+        if (!(sale.status === 'Payee' && !sale.invoiceId && sale.customerId)) return;
+        setSelectedTickets(current => current.includes(sale.id) ? current.filter(id => id !== sale.id) : [...current, sale.id]);
+      }} isSaleSelectable={(sale) => sale.status === 'Payee' && !sale.invoiceId && !!sale.customerId} />
     </section>;
   };
 
@@ -4041,46 +4283,60 @@ const App = () => {
             <div className="settings-templates-grid">
               <div className="product-form-panel" style={{ padding: '2rem' }}>
                 <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
-                  <div><p>A4</p><h2>Modèle de Facture</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Configuration des factures.</span></div>
+                  <div><p>Facturation</p><h2>Pilotage des factures</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Parametres utiles pour les factures clients, sans les cacher dans un simple bloc template.</span></div>
                 </div>
-                <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-                  <label><span>Titre du document</span><input value={companySettings.invoiceHeader} onChange={e => setCompanySettings(s => ({...s, invoiceHeader: e.target.value}))} placeholder="Ex: FACTURE" /></label>
-                  <div style={{ gridColumn: '1 / -1', border: '1px solid #dbe3ee', borderRadius: '12px', padding: '1rem', background: '#f8fafc', display: 'grid', gap: '0.9rem' }}>
+                <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem' }}>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem' }}><span style={{ display: 'block', color: '#64748b', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Mode facture</span><strong style={{ color: '#0f172a' }}>{companySettings.invoiceTicketDisplay === 'DETAILED' ? 'Tickets detailles' : 'Tickets resumes'}</strong><small style={{ display: 'block', color: '#64748b', marginTop: '0.35rem' }}>Vue par defaut sur les factures issues des tickets</small></div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem' }}><span style={{ display: 'block', color: '#64748b', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Reference ticket</span><strong style={{ color: '#0f172a' }}>{companySettings.invoiceShowTicketReferences ? 'Visible' : 'Masquee'}</strong><small style={{ display: 'block', color: '#64748b', marginTop: '0.35rem' }}>Montre le ticket source sur une facture detaillee</small></div>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1rem' }}><span style={{ display: 'block', color: '#64748b', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Date ticket</span><strong style={{ color: '#0f172a' }}>{companySettings.invoiceShowTicketDates ? 'Visible' : 'Masquee'}</strong><small style={{ display: 'block', color: '#64748b', marginTop: '0.35rem' }}>Affiche la date source si l equipe la veut</small></div>
+                  </div>
+                  <div style={{ border: '1px solid #dbe3ee', borderRadius: '14px', padding: '1rem', background: '#f8fafc', display: 'grid', gap: '1rem' }}>
                     <div>
-                      <strong style={{ display: 'block', color: '#0f172a', marginBottom: '0.35rem' }}>Affichage des tickets dans les factures</strong>
-                      <span style={{ color: '#64748b', fontSize: '0.85rem' }}>Choisissez si la facture regroupe les lignes de tous les tickets ou affiche chaque ticket en detail.</span>
+                      <strong style={{ display: 'block', color: '#0f172a', marginBottom: '0.35rem' }}>Vue facture par defaut</strong>
+                      <span style={{ color: '#64748b', fontSize: '0.85rem' }}>Choisissez la lecture la plus pratique pour vos comptables: regrouper les lignes ou garder chaque ticket detaille.</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem' }}>
-                      <label><span>Mode par defaut</span><select value={companySettings.invoiceTicketDisplay} onChange={e => setCompanySettings(s => ({...s, invoiceTicketDisplay: e.target.value as 'SUMMARY' | 'DETAILED'}))}><option value="SUMMARY">Tickets resumes</option><option value="DETAILED">Tickets detailles</option></select></label>
-                      <label style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}><span style={{ marginBottom: '0.5rem' }}>Reference ticket</span><button type="button" className={companySettings.invoiceShowTicketReferences ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketReferences: !s.invoiceShowTicketReferences}))}>{companySettings.invoiceShowTicketReferences ? 'Afficher' : 'Masquer'}</button></label>
-                      <label style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}><span style={{ marginBottom: '0.5rem' }}>Date ticket</span><button type="button" className={companySettings.invoiceShowTicketDates ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketDates: !s.invoiceShowTicketDates}))}>{companySettings.invoiceShowTicketDates ? 'Afficher' : 'Masquer'}</button></label>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <button type="button" className={companySettings.invoiceTicketDisplay === 'SUMMARY' ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceTicketDisplay: 'SUMMARY'}))}>Tickets resumes</button>
+                      <button type="button" className={companySettings.invoiceTicketDisplay === 'DETAILED' ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceTicketDisplay: 'DETAILED'}))}>Tickets detailles</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
+                      <button type="button" className={companySettings.invoiceShowTicketReferences ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketReferences: !s.invoiceShowTicketReferences}))}>{companySettings.invoiceShowTicketReferences ? 'Masquer references ticket' : 'Afficher references ticket'}</button>
+                      <button type="button" className={companySettings.invoiceShowTicketDates ? 'primary-action' : 'ghost-action'} onClick={() => setCompanySettings(s => ({...s, invoiceShowTicketDates: !s.invoiceShowTicketDates}))}>{companySettings.invoiceShowTicketDates ? 'Masquer dates ticket' : 'Afficher dates ticket'}</button>
                     </div>
                   </div>
-                  <label><span>Conditions de vente / Pied de page</span><textarea value={companySettings.invoiceFooter} onChange={e => setCompanySettings(s => ({...s, invoiceFooter: e.target.value}))} style={{ height: '80px', resize: 'none', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee', fontFamily: 'inherit' }} /></label>
-                  <label><span>CSS Personnalisé (Avancé)</span><textarea value={companySettings.customInvoiceCss} onChange={e => setCompanySettings(s => ({...s, customInvoiceCss: e.target.value}))} style={{ height: '80px', fontFamily: 'monospace', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee' }} placeholder=".invoice-table { border: 1px solid black; }" /></label>
+                </div>
+                <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1.25rem' }}>
+                  <label><span>Titre du document</span><input value={companySettings.invoiceHeader} onChange={e => setCompanySettings(s => ({...s, invoiceHeader: e.target.value}))} placeholder="Ex: FACTURE" /></label>
+                  <label><span>Conditions de vente / Pied de page</span><textarea value={companySettings.invoiceFooter} onChange={e => setCompanySettings(s => ({...s, invoiceFooter: e.target.value}))} style={{ height: '88px', resize: 'none', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee', fontFamily: 'inherit' }} /></label>
+                  <label><span>CSS personnalise (avance)</span><textarea value={companySettings.customInvoiceCss} onChange={e => setCompanySettings(s => ({...s, customInvoiceCss: e.target.value}))} style={{ height: '88px', fontFamily: 'monospace', padding: '0.75rem', borderRadius: '8px', border: '1px solid #dbe3ee' }} placeholder=".invoice-table { border: 1px solid black; }" /></label>
                 </div>
               </div>
               <div className="live-receipt-preview">
-                <div style={{ background: '#fff', width: '100%', padding: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.7rem', borderRadius: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: `2px solid ${companySettings.primaryColor}`, paddingBottom: '1rem', marginBottom: '1rem' }}>
+                <div style={{ background: '#fff', width: '100%', padding: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.72rem', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: `2px solid ${companySettings.primaryColor}`, paddingBottom: '1rem', marginBottom: '1rem', gap: '1rem' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {companySettings.logoUrl && <img src={companySettings.logoUrl} style={{ maxWidth: '100px', maxHeight: '40px', objectFit: 'contain' }} />}
-                      <div><h1 style={{ margin: 0, color: companySettings.primaryColor, fontSize: '1.2rem', textTransform: 'uppercase' }}>{companySettings.invoiceHeader || 'FACTURE'}</h1><span style={{ color: '#64748b' }}>NÂ° FAC-2026-001</span></div>
+                      <div><h1 style={{ margin: 0, color: companySettings.primaryColor, fontSize: '1.2rem', textTransform: 'uppercase' }}>{companySettings.invoiceHeader || 'FACTURE'}</h1><span style={{ color: '#64748b' }}>No FAC-2026-001</span></div>
                     </div>
                     <div style={{ textAlign: 'right' }}><strong>{companySettings.companyName}</strong><br />{companySettings.address}<br />{companySettings.phone}</div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.6rem', marginBottom: '1rem' }}>
+                    <div style={{ padding: '0.6rem', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}><span style={{ color: '#64748b' }}>Mode</span><strong style={{ display: 'block' }}>{companySettings.invoiceTicketDisplay === 'DETAILED' ? 'Detaille' : 'Resume'}</strong></div>
+                    <div style={{ padding: '0.6rem', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}><span style={{ color: '#64748b' }}>Ref ticket</span><strong style={{ display: 'block' }}>{companySettings.invoiceShowTicketReferences ? 'Oui' : 'Non'}</strong></div>
+                    <div style={{ padding: '0.6rem', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}><span style={{ color: '#64748b' }}>Date ticket</span><strong style={{ display: 'block' }}>{companySettings.invoiceShowTicketDates ? 'Oui' : 'Non'}</strong></div>
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderBottom: '1px solid #e2e8f0', paddingBottom: '0.25rem', marginBottom: '0.5rem' }}><span>Description</span><span>Total</span></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>1x Service</span><span>1500.00 {companySettings.currency}</span></div>
                   </div>
-                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '2rem', textAlign: 'center', color: '#64748b' }}>
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem', marginTop: '1.5rem', textAlign: 'center', color: '#64748b' }}>
                     <div style={{ marginBottom: '0.5rem' }}>RC: {companySettings.rc} | ICE: {companySettings.ice} | IF: {companySettings.if} | Patente: {companySettings.patente}</div>
                     <div style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{companySettings.invoiceFooter}</div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
         )}
 
         {settingsTab === 'locations' && (
@@ -4479,6 +4735,30 @@ const App = () => {
         }} />}
         {invoiceSale && <InvoicePanel sale={invoiceSale} settings={companySettings} onClose={() => setInvoiceSale(null)} />}
         {selectedFacture && <FacturePanel facture={selectedFacture} settings={companySettings} onClose={() => setSelectedFacture(null)} />}
+        {invoicePaymentTarget && (
+          <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(event) => { if (event.target === event.currentTarget) setInvoicePaymentTarget(null); }}>
+            <section className="receipt-panel" style={{ maxWidth: '560px', width: '94%' }}>
+              <div className="receipt-header"><div><p>Facturation</p><h2>Encaisser une facture</h2></div><button onClick={() => setInvoicePaymentTarget(null)}><XCircle size={18} /></button></div>
+              <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem' }}>
+                <div style={{ padding: '0.95rem 1rem', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                  <strong style={{ display: 'block', color: '#0f172a' }}>{invoicePaymentTarget.number}</strong>
+                  <span style={{ color: '#64748b', fontSize: '0.9rem' }}>{invoicePaymentTarget.customer?.name || 'Client inconnu'}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                    <span style={{ color: '#64748b' }}>Total: <strong style={{ color: '#0f172a' }}>{formatMoney(Number(invoicePaymentTarget.total || 0))}</strong></span>
+                    <span style={{ color: '#64748b' }}>Reste: <strong style={{ color: '#c2410c' }}>{formatMoney(getInvoiceDueAmount(invoicePaymentTarget))}</strong></span>
+                  </div>
+                </div>
+                <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Montant</span><input value={invoicePaymentForm.amount} onChange={event => setInvoicePaymentForm(current => ({ ...current, amount: event.target.value }))} style={{ width: '100%', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+                <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Mode de paiement</span><select value={invoicePaymentForm.method} onChange={event => setInvoicePaymentForm(current => ({ ...current, method: event.target.value }))} style={{ width: '100%', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }}><option value="CASH">Especes</option><option value="CARD">Carte</option><option value="TRANSFER">Virement</option><option value="CHECK">Cheque</option><option value="OTHER">Autre</option></select></label>
+                <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Note</span><textarea value={invoicePaymentForm.note} onChange={event => setInvoicePaymentForm(current => ({ ...current, note: event.target.value }))} style={{ width: '100%', height: '92px', resize: 'none', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }} /></label>
+              </div>
+              <div className="receipt-actions no-print">
+                <button type="button" className="ghost-action" onClick={() => setInvoicePaymentTarget(null)}><XCircle size={18} /> Fermer</button>
+                <button type="button" className="primary-action" onClick={handleRecordInvoicePayment}><CreditCard size={18} /> Enregistrer le paiement</button>
+              </div>
+            </section>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -4488,9 +4768,9 @@ const Metric = ({ title, value, detail, tone, icon: Icon }: { title: string; val
   <div className={`metric-card ${tone}`}><div><span>{title}</span><strong>{value}</strong><small>{detail}</small></div><Icon size={38} /></div>
 );
 
-const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSettleSale }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void; onOpenInvoice?: (sale: SaleRecord) => void; onResumeSale?: (sale: SaleRecord) => void; onSettleSale?: (sale: SaleRecord) => void }) => (
+const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSettleSale, selectedSaleIds, onToggleSaleSelection, isSaleSelectable }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void; onOpenInvoice?: (sale: SaleRecord) => void; onResumeSale?: (sale: SaleRecord) => void; onSettleSale?: (sale: SaleRecord) => void; selectedSaleIds?: number[]; onToggleSaleSelection?: (sale: SaleRecord) => void; isSaleSelectable?: (sale: SaleRecord) => boolean }) => (
   <div className="data-table sales-table">
-    <div className="data-head"><span>Ticket</span><span>Client</span><span>Total</span><span>Reste</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
+    <div className="data-head"><span style={{ width: '38px' }}></span><span>Ticket</span><span>Client</span><span>Total</span><span>Reste</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
     {sales.map(sale => {
       const isDraftLike = ['Suspendue', 'Brouillon', 'Devis'].includes(sale.status);
       const isPayable = sale.status === 'Payee' || sale.status === 'Credit';
@@ -4498,6 +4778,11 @@ const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSett
       const dueAmount = Math.max(0, sale.total - paidAmount);
       return (
         <div className="data-row" key={sale.id}>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            {onToggleSaleSelection && isSaleSelectable ? (
+              <input type="checkbox" checked={selectedSaleIds?.includes(sale.id) || false} disabled={!isSaleSelectable(sale)} onChange={() => onToggleSaleSelection(sale)} style={{ width: '16px', height: '16px', cursor: isSaleSelectable(sale) ? 'pointer' : 'not-allowed' }} />
+            ) : null}
+          </span>
           <span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span>
           <span>{sale.customer}<small>{sale.items} article(s)</small></span>
           <span>{formatMoney(sale.total)}</span>
@@ -4826,18 +5111,14 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode') === 'customer';
-
-createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);
-
-
 const parseInvoiceMeta = (notes?: string | null) => {
   if (!notes) {
     return {
       mode: 'FROM_TICKETS' as 'FROM_TICKETS' | 'MANUAL',
       displayMode: 'SUMMARY' as 'SUMMARY' | 'DETAILED',
       manualLines: [] as { description: string; quantity: number; unitPrice: number; tvaRate?: number }[],
-      userNote: ''
+      userNote: '',
+      payments: [] as { id: string; amount: number; method: string; paidAt: string; note?: string }[]
     };
   }
 
@@ -4848,15 +5129,234 @@ const parseInvoiceMeta = (notes?: string | null) => {
       displayMode: parsed?.displayMode === 'DETAILED' ? 'DETAILED' as const : 'SUMMARY' as const,
       manualLines: Array.isArray(parsed?.manualLines) ? parsed.manualLines : [],
       userNote: typeof parsed?.userNote === 'string' ? parsed.userNote : '',
+      payments: Array.isArray(parsed?.payments) ? parsed.payments : [],
     };
   } catch {
     return {
       mode: 'FROM_TICKETS' as const,
       displayMode: 'SUMMARY' as const,
       manualLines: [],
-      userNote: notes || ''
+      userNote: notes || '',
+      payments: [],
     };
   }
+};
+
+const invoiceStatusLabel = (status?: string) => ({
+  DRAFT: 'Brouillon',
+  SENT: 'Validee',
+  PARTIAL: 'Partiellement payee',
+  PAID: 'Payee',
+  CANCELLED: 'Annulee',
+}[status || 'SENT'] || 'Validee');
+
+const invoiceStatusTone = (status?: string) => ({
+  DRAFT: { bg: '#eef2ff', text: '#4338ca', border: '#c7d2fe' },
+  SENT: { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' },
+  PARTIAL: { bg: '#fff7ed', text: '#c2410c', border: '#fdba74' },
+  PAID: { bg: '#ecfdf5', text: '#15803d', border: '#86efac' },
+  CANCELLED: { bg: '#fef2f2', text: '#b91c1c', border: '#fca5a5' },
+}[status || 'SENT'] || { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' });
+
+const invoicePaymentMethodLabel = (method?: string) => ({
+  CASH: 'Especes',
+  CARD: 'Carte',
+  TRANSFER: 'Virement',
+  CHECK: 'Cheque',
+  OTHER: 'Autre',
+}[method || 'CASH'] || 'Especes');
+
+const getInvoicePaidAmount = (invoice: any) => parseInvoiceMeta(invoice?.notes).payments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+const getInvoiceDueAmount = (invoice: any) => Math.max(0, Number(invoice?.total || 0) - getInvoicePaidAmount(invoice));
+
+const getInvoiceManualLines = (facture: any) => {
+  if (Array.isArray(facture?.lines) && facture.lines.length > 0) {
+    return facture.lines.map((line: any) => ({
+      description: line.description || line.product?.name || '',
+      quantity: Number(line.quantity) || 0,
+      unitPrice: Number(line.unitPrice) || 0,
+      tvaRate: Number(line.tvaRate) || 0,
+    }));
+  }
+
+  const meta = parseInvoiceMeta(facture?.notes);
+  return (meta.manualLines || []).map((line: any) => ({
+    description: line.description || '',
+    quantity: Number(line.quantity) || 0,
+    unitPrice: Number(line.unitPrice) || 0,
+    tvaRate: Number(line.tvaRate) || 0,
+  }));
+};
+
+const buildInvoiceExportHtml = (facture: any, settings: any) => {
+  const meta = parseInvoiceMeta(facture.notes);
+  const statusLabel = invoiceStatusLabel(facture.status);
+  const paidAmount = getInvoicePaidAmount(facture);
+  const dueAmount = getInvoiceDueAmount(facture);
+  const sourceLabel = meta.mode === 'MANUAL' ? 'Facture libre' : `${facture.sales?.length || 0} ticket(s)`;
+  const manualLines = getInvoiceManualLines(facture);
+  const ticketItems = (facture.sales || []).flatMap((sale: any) => sale.items || []);
+  const consolidatedTicketItems = Object.values(ticketItems.reduce((acc: any, item: any) => {
+    const key = `${item.productId}-${item.variationId || ''}`;
+    if (!acc[key]) acc[key] = { name: item.name, quantity: 0, unitPrice: item.unitPrice };
+    acc[key].quantity += item.quantity;
+    return acc;
+  }, {} as Record<string, { name: string; quantity: number; unitPrice: number }>));
+
+  const rows = meta.mode === 'MANUAL'
+    ? manualLines.map((line: any) => ({
+        description: line.description,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        total: line.unitPrice * line.quantity * (1 + (line.tvaRate || 0) / 100),
+      }))
+    : (consolidatedTicketItems as any[]).map((line: any) => ({
+        description: line.name,
+        quantity: line.quantity,
+        unitPrice: Number(line.unitPrice || 0),
+        total: Number(line.unitPrice || 0) * Number(line.quantity || 0),
+      }));
+
+  const footer = (settings.invoiceFooter || '').split('\n').filter(Boolean).map((line: string) => `<div>${line}</div>`).join('');
+  const paymentRows = (meta.payments || []).map((payment: any) => `
+    <tr>
+      <td>${invoicePaymentMethodLabel(payment.method)}</td>
+      <td>${new Date(payment.paidAt).toLocaleString('fr-FR')}</td>
+      <td style="text-align:right;">${formatMoney(Number(payment.amount || 0))}</td>
+    </tr>
+  `).join('');
+  const lineRows = rows.map((row: any) => `
+    <tr>
+      <td>${row.description}</td>
+      <td style="text-align:right;">${row.quantity}</td>
+      <td style="text-align:right;">${formatMoney(row.unitPrice)}</td>
+      <td style="text-align:right;">${formatMoney(row.total)}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>${facture.number}</title>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+    .page { max-width: 920px; margin: 32px auto; background: #fff; padding: 32px; border-radius: 18px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }
+    .header { display: flex; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 2px solid ${settings.primaryColor || '#2563eb'}; }
+    .title { color: ${settings.primaryColor || '#2563eb'}; font-size: 28px; font-weight: 800; margin: 0; }
+    .muted { color: #64748b; }
+    .meta-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+    .meta-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
+    .meta-card strong { display: block; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+    th { text-align: left; color: #475569; }
+    .totals { margin-top: 20px; margin-left: auto; width: 320px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 8px 0; }
+    .grand { font-size: 18px; font-weight: 800; border-top: 1px solid #cbd5e1; margin-top: 8px; padding-top: 12px; }
+    .payments { margin-top: 24px; }
+    .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; color: #64748b; font-size: 13px; }
+    .toolbar { display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 16px; }
+    button { border: none; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
+    .print { background: ${settings.primaryColor || '#2563eb'}; color: #fff; }
+    .close { background: #e2e8f0; color: #0f172a; }
+    @media print { body { background: #fff; } .page { margin: 0; box-shadow: none; border-radius: 0; max-width: none; } .toolbar { display: none; } }
+    ${settings.customInvoiceCss || ''}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="toolbar">
+      <button class="print" onclick="window.print()">Imprimer</button>
+      <button class="close" onclick="window.close()">Fermer</button>
+    </div>
+    <div class="header">
+      <div>
+        <div class="title">${settings.invoiceHeader || 'FACTURE'}</div>
+        <div class="muted">No ${facture.number}</div>
+        <div class="muted">${settings.companyName || ''}</div>
+        <div class="muted">${settings.address || ''}</div>
+        <div class="muted">${settings.phone || ''}</div>
+      </div>
+      <div style="text-align:right;">
+        <div><strong>Client</strong></div>
+        <div>${facture.customer?.name || 'Client inconnu'}</div>
+        <div class="muted">${sourceLabel}</div>
+        <div class="muted">Statut: ${statusLabel}</div>
+      </div>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-card"><span class="muted">Date</span><strong>${new Date(facture.createdAt).toLocaleDateString('fr-FR')}</strong></div>
+      <div class="meta-card"><span class="muted">Source</span><strong>${sourceLabel}</strong></div>
+      <div class="meta-card"><span class="muted">Deja regle</span><strong>${formatMoney(paidAmount)}</strong></div>
+      <div class="meta-card"><span class="muted">Reste a regler</span><strong>${formatMoney(dueAmount)}</strong></div>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Description</th><th style="text-align:right;">Qte</th><th style="text-align:right;">PU</th><th style="text-align:right;">Total</th></tr>
+      </thead>
+      <tbody>${lineRows || '<tr><td colspan="4">Aucune ligne disponible.</td></tr>'}</tbody>
+    </table>
+    <div class="totals">
+      <div class="totals-row"><span>Total HT</span><strong>${formatMoney(Number(facture.subtotal || (Number(facture.total) - Number(facture.taxTotal))))}</strong></div>
+      <div class="totals-row"><span>TVA</span><strong>${formatMoney(Number(facture.taxTotal || 0))}</strong></div>
+      <div class="totals-row grand"><span>Total TTC</span><strong>${formatMoney(Number(facture.total || 0))}</strong></div>
+    </div>
+    ${paymentRows ? `<div class="payments"><h3>Historique des paiements</h3><table><thead><tr><th>Methode</th><th>Date</th><th style="text-align:right;">Montant</th></tr></thead><tbody>${paymentRows}</tbody></table></div>` : ''}
+    <div class="footer">${footer}</div>
+  </div>
+</body>
+</html>`;
+};
+
+const openInvoiceDocument = (facture: any, settings: any, mode: 'print' | 'view' = 'view') => {
+  const html = buildInvoiceExportHtml(facture, settings);
+  const win = window.open('', '_blank', 'width=980,height=900');
+  if (!win) return;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  if (mode === 'print') {
+    win.focus();
+    win.print();
+  }
+};
+
+const downloadInvoiceDocument = (facture: any, settings: any) => {
+  const html = buildInvoiceExportHtml(facture, settings);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${facture.number}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const shareInvoiceDocument = async (facture: any) => {
+  const shareText = [
+    `${facture.number} - ${facture.customer?.name || 'Client inconnu'}`,
+    `Total: ${formatMoney(Number(facture.total || 0))}`,
+    `Reste: ${formatMoney(getInvoiceDueAmount(facture))}`,
+    `Statut: ${invoiceStatusLabel(facture.status)}`
+  ].join('\n');
+
+  if (navigator.share) {
+    await navigator.share({
+      title: facture.number,
+      text: shareText,
+    });
+    return 'shared';
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(shareText);
+    return 'copied';
+  }
+
+  return 'unsupported';
 };
 
 const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: any; onClose: () => void }) => {
@@ -4876,14 +5376,12 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
     return acc;
   }, {}));
 
-  const manualLines = (meta.manualLines || []).map((line: any) => ({
-    description: line.description || '',
-    quantity: Number(line.quantity) || 0,
-    unitPrice: Number(line.unitPrice) || 0,
-    tvaRate: Number(line.tvaRate) || 0,
-  }));
+  const manualLines = getInvoiceManualLines(facture);
 
   const sourceLabel = meta.mode === 'MANUAL' ? 'Facture libre' : `${facture.sales?.length || 0} ticket(s)`;
+  const paidAmount = getInvoicePaidAmount(facture);
+  const dueAmount = getInvoiceDueAmount(facture);
+  const statusTone = invoiceStatusTone(facture.status);
 
   return (
   <div className="receipt-backdrop print-a4" role="dialog" aria-modal="true">
@@ -4920,6 +5418,16 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
             <span>Source</span>
             <strong>{sourceLabel}</strong>
           </div>
+          <div className="invoice-meta-col">
+            <span>Statut</span>
+            <strong style={{ color: statusTone.text }}>{invoiceStatusLabel(facture.status)}</strong>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.85rem', marginBottom: '1rem' }}>
+          <div style={{ padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#f8fafc' }}><span style={{ display: 'block', color: '#64748b', fontSize: '0.8rem' }}>Total facture</span><strong style={{ color: '#0f172a' }}>{formatMoney(Number(facture.total || 0))}</strong></div>
+          <div style={{ padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid #bbf7d0', background: '#ecfdf5' }}><span style={{ display: 'block', color: '#15803d', fontSize: '0.8rem' }}>Deja regle</span><strong style={{ color: '#15803d' }}>{formatMoney(paidAmount)}</strong></div>
+          <div style={{ padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid #fdba74', background: '#fff7ed' }}><span style={{ display: 'block', color: '#9a3412', fontSize: '0.8rem' }}>Reste a regler</span><strong style={{ color: '#c2410c' }}>{formatMoney(dueAmount)}</strong></div>
         </div>
 
         {meta.userNote && (
@@ -5006,12 +5514,32 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
           </div>
         </div>
 
+        {meta.payments.length > 0 && (
+          <div style={{ marginTop: '1.25rem', marginBottom: '1rem' }}>
+            <strong style={{ display: 'block', marginBottom: '0.65rem', color: '#0f172a' }}>Historique des paiements</strong>
+            <div style={{ display: 'grid', gap: '0.6rem' }}>
+              {meta.payments.map((payment: any) => (
+                <div key={payment.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.8rem 0.95rem', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff' }}>
+                  <div>
+                    <strong style={{ display: 'block', color: '#0f172a' }}>{invoicePaymentMethodLabel(payment.method)}</strong>
+                    <small style={{ color: '#64748b' }}>{new Date(payment.paidAt).toLocaleString('fr-FR')}</small>
+                    {payment.note ? <small style={{ display: 'block', color: '#64748b', marginTop: '0.2rem' }}>{payment.note}</small> : null}
+                  </div>
+                  <strong style={{ color: '#15803d' }}>{formatMoney(Number(payment.amount || 0))}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="invoice-footer">
           {settings.invoiceFooter?.split('\n').map((line: string, i: number) => <p key={i}>{line}</p>)}
         </div>
       </div>
       <div className="receipt-actions no-print">
-        <button type="button" className="primary-action" onClick={() => window.print()}><FileText size={18} /> Imprimer</button>
+        <button type="button" className="ghost-action" onClick={() => openInvoiceDocument(facture, settings, 'view')}><FileText size={18} /> Ouvrir</button>
+        <button type="button" className="ghost-action" onClick={() => downloadInvoiceDocument(facture, settings)}><Download size={18} /> Exporter</button>
+        <button type="button" className="primary-action" onClick={() => openInvoiceDocument(facture, settings, 'print')}><FileText size={18} /> Imprimer</button>
         <button type="button" className="ghost-action" onClick={onClose}><XCircle size={18} /> Fermer</button>
       </div>
     </section>
@@ -5029,3 +5557,15 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
 
 
 
+
+
+
+
+
+
+
+
+
+const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode') === 'customer';
+
+createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);

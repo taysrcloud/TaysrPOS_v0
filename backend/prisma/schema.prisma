@@ -542,9 +542,31 @@ model Invoice {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  customer Contact? @relation(fields: [customerId], references: [id])
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Contact?      @relation(fields: [customerId], references: [id])
   sales    Sale[]
+  lines    InvoiceLine[]
+}
+
+model InvoiceLine {
+  id          Int      @id @default(autoincrement())
+  invoiceId   Int
+  productId   Int?
+  description String
+  quantity    Decimal  @db.Decimal(12, 3)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  tvaRate     Decimal  @default(20) @db.Decimal(5, 2)
+  lineTotal   Decimal  @db.Decimal(12, 2)
+  sortOrder   Int      @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([invoiceId, sortOrder])
+  @@index([productId])
 }
 
 model ProductVariation {
