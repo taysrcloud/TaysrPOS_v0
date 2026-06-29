@@ -80,6 +80,9 @@ This v0 app is not a direct port. It keeps the useful business flows from that s
 - [x] Added a product-assisted fast path in `Facture libre` so choosing a known catalogue item can prefill description, sale price, and TVA.
 - [x] Replaced new manual-facture storage with a proper `InvoiceLine` Prisma model path, while keeping a legacy metadata fallback so older factures still render.
 - [x] Added a clearer POS workflow strip so customer, scan/search, draft/devis/suspend, remise, and encaissement actions stay visible together for cashiers.
+- [x] Reworked the recent-transactions workspace so suspended tickets, drafts, devis, and finalized tickets are easier to scan, reopen, and settle from one modal.
+- [x] Aligned the Docker-served POS runtime so the image can serve the built frontend and API from the same local port.
+- [x] Added Docker runtime bootstrapping for Prisma and container-safe POS DB wiring so local image startup is closer to one-command.
 - [ ] Local frontend typecheck could not be rerun in this workspace after Docker-only dependency cleanup because `tsc` is not installed locally anymore; verify next inside the container/runtime.
 
 ### Phase F: POS Layout Swap
@@ -110,6 +113,7 @@ These are the next best tasks to take in parallel if needed.
 
 ### 1. Browser Validation Pass
 - [ ] Create a fresh POS tenant from the Super Admin UI.
+- [ ] Validate the Docker image locally end to end on the unified POS port after rebuild.
 - [ ] Confirm the success panel shows the resolved credentials and sync status correctly.
 - [ ] Log into POS from the real frontend using the generated tenant login.
 - [ ] Run Prisma generate/migrate for the new `InvoiceLine` model in the runtime, then validate both legacy and new manual factures render correctly.
@@ -162,7 +166,8 @@ These are the next best tasks to take in parallel if needed.
   - quantity / discount / override actions
   - suspend / draft / quote / finalize
 - [ ] Finish live browser validation of split payment, credit sale, and partial payment flows.
-- [ ] Improve recent transactions drawer and recovery of suspended carts.
+- [x] Improve recent transactions drawer and recovery of suspended carts.
+- [ ] Add richer resume actions from recent sales, including quote -> sale and suspend -> finalize shortcuts directly in the side panel.
 - [ ] Add stronger cashier-oriented keyboard flow.
 - [ ] Add optional direct facture issue after finalizing a sale.
 
@@ -241,6 +246,8 @@ Each time a meaningful block is finished:
 1. Add it to the matching completed phase here.
 2. Mark what was verified, not only what was coded.
 3. Move the next best items into the targeted steps section so another worker can pick them up immediately.
+
+
 
 
 

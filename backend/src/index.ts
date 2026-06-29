@@ -1,6 +1,9 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import { existsSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import productRoutes from './routes/product.routes.js';
 import saleRoutes from './routes/sale.routes.js';
 
@@ -66,6 +69,18 @@ app.get('/api/catalog/modules', (_req, res) => {
   });
 });
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+const frontendIndexPath = path.join(frontendDistPath, 'index.html');
+
+if (existsSync(frontendIndexPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get(/^(?!\/api|\/oauth|\/connector\/api).*/, (_req, res) => {
+    res.sendFile(frontendIndexPath);
+  });
+}
+
 app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!error) return next();
   if (error.type === 'entity.too.large') {
@@ -75,7 +90,7 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
   return res.status(500).json({ message: 'Server error' });
 });
 
-const port = Number(process.env.PORT || 4500);
+const port = Number(process.env.PORT || 4400);
 app.listen(port, () => {
   console.log(`TaysrPOS v0 API listening on ${port}`);
 });

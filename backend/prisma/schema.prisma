@@ -267,6 +267,7 @@ model Product {
   stockMovements  StockMovement[]
   saleItems       SaleItem[]
   purchaseItems   PurchaseItem[]
+  invoiceLines    InvoiceLine[]
   modifierOptions ModifierOption[]
 
   @@unique([companyId, sku])
@@ -602,3 +603,5 @@ model Attendance {
   clockOut  DateTime?
   duration  Float?
 }
+
+

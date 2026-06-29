@@ -713,9 +713,9 @@ const App = () => {
   };
 
   const syncInvoiceInState = (invoice: any) => {
-    setInvoices(current => current.map(item => item.id === invoice.id ? invoice : item));
-    setSelectedFacture(current => current?.id === invoice.id ? invoice : current);
-    setInvoicePaymentTarget(current => current?.id === invoice.id ? invoice : current);
+    setInvoices((current: any[]) => current.map(item => item.id === invoice.id ? invoice : item));
+    setSelectedFacture((current: any) => current?.id === invoice.id ? invoice : current);
+    setInvoicePaymentTarget((current: any) => current?.id === invoice.id ? invoice : current);
   };
 
   const loadSales = async () => {
@@ -1360,6 +1360,20 @@ const App = () => {
   };
 
   const getSaleDueAmount = (sale: SaleRecord) => Math.max(0, sale.total - getSalePaidAmount(sale));
+  const transactionTabs = [
+    { id: 'Finalisees', label: 'Finalisees', statuses: ['Payee', 'Credit'] as SaleRecord['status'][] },
+    { id: 'Suspendues', label: 'Suspendues', statuses: ['Suspendue'] as SaleRecord['status'][] },
+    { id: 'Brouillons', label: 'Brouillons', statuses: ['Brouillon'] as SaleRecord['status'][] },
+    { id: 'Devis', label: 'Devis', statuses: ['Devis'] as SaleRecord['status'][] },
+  ] as const;
+  const currentTransactions = sales.filter(sale => {
+    const activeTab = transactionTabs.find(tab => tab.id === transactionsTab);
+    return activeTab ? activeTab.statuses.includes(sale.status) : false;
+  });
+  const currentTransactionsTotal = currentTransactions.reduce((sum, sale) => sum + sale.total, 0);
+  const currentTransactionsDue = currentTransactions.reduce((sum, sale) => sum + getSaleDueAmount(sale), 0);
+  const latestSuspendedSale = sales.find(sale => sale.status === 'Suspendue');
+  const latestDraftLikeSale = sales.find(sale => ['Suspendue', 'Brouillon', 'Devis'].includes(sale.status));
 
   const openSaleSettlement = (sale: SaleRecord) => {
     const due = getSaleDueAmount(sale);
@@ -1814,11 +1828,12 @@ const App = () => {
         <div className="workflow-card">
           <span className="workflow-label">Workflow ticket</span>
           <strong>{cart.length ? `${cart.length} ligne(s) dans le panier` : 'Panier vide'}</strong>
-          <small>Brouillon, devis et suspension restent visibles sans descendre jusqu'au pied de page.</small>
+          <small>{latestDraftLikeSale ? 'Dernier ticket a reprendre: ' + latestDraftLikeSale.ticket + ' - ' + latestDraftLikeSale.customer : 'Brouillon, devis et suspension restent visibles sans descendre jusqu au pied de page.'}</small>
           <div className="workflow-actions">
             <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={14} /> Brouillon</button>
             <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={14} /> Devis</button>
             <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}><Pause size={14} /> Suspendre</button>
+            <button className="ghost-action" type="button" onClick={() => { setTransactionsTab('Suspendues'); setTransactionsModalOpen(true); }}><Clock size={14} /> Historique</button>
           </div>
         </div>
         <div className="workflow-card workflow-card-highlight">
@@ -1844,7 +1859,13 @@ const App = () => {
               <strong>{product.name}</strong><span>{product.category}</span><em>{formatMoney(product.salePrice)}</em><small>{product.trackStock ? `${product.stock} stock` : 'Service'}</small>
             </button>)}
           </div>
-          {showRecent && <div className="recent-box"><div className="recent-title"><Clock size={15} /> Transactions recentes</div>{sales.filter(s => !s.locationId || s.locationId === currentLocationId).slice(0, 4).map(sale => <button key={sale.id}><span>{sale.ticket}</span><strong>{formatMoney(sale.total)}</strong><small>{sale.status}</small></button>)}</div>}
+          {showRecent && <div className="recent-box"><div className="recent-title"><Clock size={15} /> Transactions recentes</div>{sales.filter(s => !s.locationId || s.locationId === currentLocationId).slice(0, 4).map(sale => <button key={sale.id} onClick={() => {
+            if (sale.status === 'Payee' || sale.status === 'Credit') {
+              setReceiptSale(sale);
+              return;
+            }
+            resumeSale(sale);
+          }}><span>{sale.ticket}</span><strong>{formatMoney(sale.total)}</strong><small>{sale.status}</small></button>)}</div>}
         </aside>
 
         <div className="pos-sale-panel">
@@ -2217,50 +2238,84 @@ const App = () => {
 
       {transactionsModalOpen && (
         <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setTransactionsModalOpen(false); }}>
-          <div style={{ position: 'relative', width: '100%', maxWidth: '900px', margin: 'auto', height: '85vh' }}>
-            <div className="product-form-panel" style={{ padding: '2rem', height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div className="panel-title"><div><p>Historique</p><h2>Transactions récentes</h2></div><button type="button" onClick={() => setTransactionsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
-              <div style={{ display: 'flex', gap: '1rem', borderBottom: '2px solid #f1f5f9', paddingBottom: '0.5rem', marginTop: '1rem' }}>
-                {(['Finalisees', 'Suspendues', 'Brouillons', 'Devis'] as const).map(tab => (
-                  <button key={tab} style={{ padding: '0.5rem 1rem', background: transactionsTab === tab ? '#eff6ff' : 'none', border: 'none', borderRadius: '8px', color: transactionsTab === tab ? '#2563eb' : '#64748b', fontWeight: transactionsTab === tab ? '700' : '600', cursor: 'pointer' }} onClick={() => setTransactionsTab(tab)}>{tab}</button>
-                ))}
+          <div className="transactions-modal-shell">
+            <div className="product-form-panel transactions-panel">
+              <div className="panel-title"><div><p>Historique</p><h2>Transactions recentes</h2></div><button type="button" onClick={() => setTransactionsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
+              <div className="transactions-summary-grid">
+                <div className="transactions-summary-card">
+                  <span>Vue active</span>
+                  <strong>{transactionsTab}</strong>
+                  <small>{currentTransactions.length} ticket(s)</small>
+                </div>
+                <div className="transactions-summary-card">
+                  <span>Montant total</span>
+                  <strong>{formatMoney(currentTransactionsTotal)}</strong>
+                  <small>{transactionsTab === 'Finalisees' ? 'Total de la selection visible' : 'Valeur a reprendre ou convertir'}</small>
+                </div>
+                <div className="transactions-summary-card">
+                  <span>Reste a regler</span>
+                  <strong>{formatMoney(currentTransactionsDue)}</strong>
+                  <small>Les tickets credit remontent ici en priorite</small>
+                </div>
+                <div className="transactions-summary-card transactions-summary-card-highlight">
+                  <span>Raccourci caisse</span>
+                  <strong>{latestSuspendedSale ? latestSuspendedSale.ticket : 'Aucun suspendu'}</strong>
+                  <small>{latestSuspendedSale ? `Client ${latestSuspendedSale.customer}` : 'Le prochain ticket suspendu apparaitra ici'}</small>
+                </div>
               </div>
-            <div style={{ padding: '1rem', flex: 1, overflowY: 'auto' }}>
-              <div className="cart-table">
-                <div className="cart-head"><span>Ticket</span><span>Client</span><span>Note</span><span>Total</span><span>Reste</span><span>Statut</span><span /></div>
-                {sales.filter(s => {
-                  if (transactionsTab === 'Finalisees') return s.status === 'Payee' || s.status === 'Credit';
-                  if (transactionsTab === 'Suspendues') return s.status === 'Suspendue';
-                  if (transactionsTab === 'Brouillons') return s.status === 'Brouillon';
-                  return s.status === 'Devis';
-                }).map(sale => (
-                  <div className="cart-row" key={sale.id}>
-                    <span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span>
-                    <span>{sale.customer}</span>
-                    <span>{sale.referenceNote || '-'}</span>
-                    <span>{formatMoney(sale.total)}</span>
-                    <span>{sale.status === 'Credit' ? formatMoney(getSaleDueAmount(sale)) : '-'}</span>
-                    <span style={{ color: sale.status === 'Payee' ? '#10b981' : sale.status === 'Credit' ? '#f59e0b' : '#64748b' }}>{sale.status}</span>
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      {transactionsTab === 'Finalisees' ? (
-                        <>
-                          <button className="ghost-action" onClick={() => { setReceiptSale(sale); setTransactionsModalOpen(false); }}><ReceiptText size={15} /> Recu</button>
-                          <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Facture (A4)</button>
-                          {sale.status === 'Credit' && <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => { openSaleSettlement(sale); setTransactionsModalOpen(false); }}><Banknote size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Encaisser</button>}
-                        </>
-                      ) : (
-                        <>
-                          <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => resumeSale(sale)}><RotateCcw size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Reprendre</button>
-                          <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Devis (A4)</button>
-                        </>
-                      )}
+              <div className="transactions-tab-row">
+                {transactionTabs.map(tab => {
+                  const tabCount = sales.filter(sale => tab.statuses.includes(sale.status)).length;
+                  return (
+                    <button key={tab.id} className={transactionsTab === tab.id ? 'selected' : ''} onClick={() => setTransactionsTab(tab.id)}>
+                      <span>{tab.label}</span>
+                      <strong>{tabCount}</strong>
+                    </button>
+                  );
+                })}
+                {latestSuspendedSale && (
+                  <button className="transactions-quick-resume" onClick={() => resumeSale(latestSuspendedSale)}>
+                    <RotateCcw size={15} /> Reprendre le dernier suspendu
+                  </button>
+                )}
+              </div>
+              <div className="transactions-table-wrap">
+                <div className="cart-table">
+                  <div className="cart-head"><span>Ticket</span><span>Client</span><span>Note</span><span>Total</span><span>Reste</span><span>Statut</span><span /></div>
+                  {currentTransactions.length ? currentTransactions.map(sale => (
+                    <div className="cart-row" key={sale.id}>
+                      <span><strong>{sale.ticket}</strong><small>{sale.createdAt}</small></span>
+                      <span>{sale.customer}</span>
+                      <span>{sale.referenceNote || '-'}</span>
+                      <span>{formatMoney(sale.total)}</span>
+                      <span>{sale.status === 'Credit' ? formatMoney(getSaleDueAmount(sale)) : '-'}</span>
+                      <span style={{ color: sale.status === 'Payee' ? '#10b981' : sale.status === 'Credit' ? '#f59e0b' : '#64748b' }}>{sale.status}</span>
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        {transactionsTab === 'Finalisees' ? (
+                          <>
+                            <button className="ghost-action" onClick={() => { setReceiptSale(sale); setTransactionsModalOpen(false); }}><ReceiptText size={15} /> Recu</button>
+                            <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Facture (A4)</button>
+                            {sale.status === 'Credit' && <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => { openSaleSettlement(sale); setTransactionsModalOpen(false); }}><Banknote size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Encaisser</button>}
+                          </>
+                        ) : (
+                          <>
+                            <button className="primary-action" style={{ padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={() => resumeSale(sale)}><RotateCcw size={15} style={{ marginRight: '0.25rem', verticalAlign: 'text-bottom' }} /> Reprendre</button>
+                            <button className="ghost-action" onClick={() => { setInvoiceSale(sale); setTransactionsModalOpen(false); }}><FileText size={15} /> Devis (A4)</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )) : (
+                    <div className="transactions-empty-state">
+                      <Clock size={22} />
+                      <strong>Aucun ticket dans cette vue</strong>
+                      <small>Les brouillons, devis et tickets suspendus apparaitront ici pour reprise rapide.</small>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
         </div>
       )}
 
@@ -4337,6 +4392,7 @@ const App = () => {
                 </div>
               </div>
             </div>
+          </div>
         )}
 
         {settingsTab === 'locations' && (
@@ -5569,3 +5625,5 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
 const isCustomerDisplay = new URLSearchParams(window.location.search).get('mode') === 'customer';
 
 createRoot(document.getElementById('root')!).render(isCustomerDisplay ? <CustomerDisplay /> : <ErrorBoundary><App /></ErrorBoundary>);
+
+
