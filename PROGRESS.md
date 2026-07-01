@@ -83,8 +83,26 @@ This v0 app is not a direct port. It keeps the useful business flows from that s
 - [x] Reworked the recent-transactions workspace so suspended tickets, drafts, devis, and finalized tickets are easier to scan, reopen, and settle from one modal.
 - [x] Aligned the Docker-served POS runtime so the image can serve the built frontend and API from the same local port.
 - [x] Added Docker runtime bootstrapping for Prisma and container-safe POS DB wiring so local image startup is closer to one-command.
-- [ ] Local frontend typecheck could not be rerun in this workspace after Docker-only dependency cleanup because `tsc` is not installed locally anymore; verify next inside the container/runtime.
+- [x] Verified the local POS API health endpoint and seeded admin login against PostgreSQL.
+- [x] Verified the auth API returns `restaurantEnabled: false` for the retail demo tenant after backend restart.
+- [x] Verified backend and frontend TypeScript checks pass together with `npm run typecheck`.
+- [x] Verified the production frontend build completes with Vite 8.
+- [ ] Repeat the final rendered Products/sidebar pass after the browser-control connection is available; the earlier rendered pass exposed the Restaurant visibility regression, and the corrected API contract is verified.
+- [x] Local backend and frontend typechecks now run successfully again after dependency cleanup.
 
+### Phase H: Product Management And Tenant Module Guardrails
+- [x] Replaced the hard-coded POS frontend API address with same-origin production routing and a local port `4400` fallback.
+- [x] Added tenant-scoped product editing for Admin and Manager roles.
+- [x] Product edits now update catalogue fields, prices, TVA, photo, SKU/barcode, and base stock without crossing company boundaries.
+- [x] Base-stock edits create explicit `MODIFICATION-PRODUIT` stock movements.
+- [x] Added EAN-13-style barcode generation and kept automatic/manual SKU behavior.
+- [x] Added safe product duplication with cleared barcode and opening stock.
+- [x] Replaced placeholder product-list controls with working Sell, Edit, Duplicate, and Open Stock actions.
+- [x] Added product-list summaries for references, low-stock alerts, and purchase stock value.
+- [x] Removed the duplicated product search/filter toolbar and added a proper empty state.
+- [x] Fixed standalone login against the current `passwordHash` Prisma contract.
+- [x] Stopped hard-coding Restaurant as active: login now carries the tenant company setting, and retail tenants receive only the POS module.
+- [x] PIN unlock preserves the authenticated tenant module set.
 ### Phase F: POS Layout Swap
 - [x] Swapped POS layout to Products left, Cart right (matching UltimatePOS).
 - [x] Moved search bar and category tabs into the products panel.
@@ -174,12 +192,12 @@ These are the next best tasks to take in parallel if needed.
 ### 5. Products Phase - UltimatePOS Inspired But Cleaner
 - [ ] Finish fast product creation for retail users with fewer noisy fields up front.
 - [ ] Add product image upload and product gallery polish.
-- [ ] Add barcode / SKU generation helpers.
-- [ ] Tighten category / brand / unit / TVA / opening stock UX.
-- [ ] Add purchase price, sale price, margin hints, and stock opening quantity in one compact flow.
+- [x] Add barcode / SKU generation helpers.
+- [x] Tighten category / brand / unit / TVA / opening stock UX.
+- [x] Add purchase price, sale price, margin hints, and stock opening quantity in one compact flow.
 - [ ] Add variable products / declinaisons pass with cleaner editing UX.
-- [ ] Modernize the product list actions, filters, bulk actions, and column controls.
-- [ ] Add low-stock visibility, stock value, and movement shortcuts from the product list.
+- [ ] Finish product list modernization with bulk actions and column visibility; row actions, filters, summaries, and empty state are complete.
+- [x] Add low-stock visibility, stock value, and movement shortcuts from the product list.
 
 ### 6. Sales, Quotes, And After-Sale Workflow
 - [ ] Recheck suspend / draft / quotation / final sale paths.
@@ -216,7 +234,7 @@ These are the next best tasks to take in parallel if needed.
 - [ ] Add hardware settings grouping so printer/scanner/cash drawer config is easier to understand.
 
 ### 10. Restaurant As Optional Module Only
-- [ ] Keep restaurant hidden unless enabled by Super Admin.
+- [x] Keep restaurant hidden unless enabled by Super Admin.
 - [ ] Recheck table screen, kitchen queue, and waiter flow only for enabled tenants.
 - [ ] Make sure retail tenants never see restaurant noise in the default shell.
 - [ ] Keep restaurant permissions separate from base retail users.
@@ -235,7 +253,7 @@ These are the next best tasks to take in parallel if needed.
 
 ### 13. Technical Cleanup
 - [x] Fixed the backend syntax break in `backend/src/routes/sale.routes.ts` so the POS API boots again.
-- [ ] Add backend typecheck to the normal working loop after sale routes are repaired.
+- [x] Add backend typecheck to the normal working loop after sale routes are repaired.
 - [ ] Add a short test note for POS in docs / README pointing to shared testing guidance.
 - [ ] Continue updating this file at the end of each meaningful phase with what was coded and what was truly verified.
 
@@ -254,3 +272,102 @@ Each time a meaningful block is finished:
 
 
 
+
+## Next Focus After This Phase
+
+- Rework the fast-create product modal again around the most common retail fields first, then move the slower/optional fields behind a lighter advanced section.
+- Add product image/gallery polish in both product list and POS sell surface so catalogue photos become genuinely useful, not only stored.
+- Do the next live validation pass in-browser on the refreshed product flow:
+  - edit an existing variable product
+  - deactivate and reactivate rows
+  - bulk deactivate products from the list
+  - confirm inactive products cannot be sold
+
+
+### 2026-06-30 Product List + Variations Pass
+- [x] Existing variable products can now be edited instead of only recreated.
+- [x] Variation rows now expose active/inactive state, barcode, sale price, purchase price, and stock directly in the modal.
+- [x] Product list now supports filtered multi-selection with bulk activate/deactivate actions.
+- [x] Product list now supports lightweight column visibility toggles and inactive badges.
+- [x] Backend create/update flow now persists variation activation state consistently.
+- [x] Verified with `npm run typecheck`.
+- [x] Verified with `npm run build --workspace frontend`.
+
+Next targeted steps from here:
+- Rework the fast-create product modal around the most common retail fields first, with slower options tucked behind a lighter advanced section.
+- Add product image/gallery polish in both catalogue and POS selling surfaces.
+- Do a live browser pass on the refreshed product flow: edit a variable product, bulk deactivate products, and confirm inactive products cannot be sold.
+
+### 2026-06-30 Fast Product Create Pass
+- [x] Product creation now starts with a retail-first quick surface: name, sale price, TVA, stock, category, barcode, and SKU.
+- [x] Slower catalogue fields now sit behind an advanced section instead of crowding the default flow.
+- [x] New-product opening now defaults to the lighter create view, while product editing opens with advanced settings visible.
+- [x] Variable-product editing remains available inside the same modal after the fast-create cleanup.
+
+### 2026-06-30 Product Image + Catalogue Polish Pass
+- [x] Product advanced settings now explain where product photos are used and allow removing the current image without resetting the rest of the form.
+- [x] Product side preview now gives a clearer catalogue / POS readiness summary instead of only showing a raw image block.
+- [x] POS product cards now show cleaner category/photo chips so catalogue images are useful during selling, not just stored in the record.
+- [x] Product list rows now expose photo state and faster visual badges directly in the main cell, with a photo count added to the toolbar summary.
+- [x] Verified with `npm run typecheck`.
+- [x] Verified with `npm run build --workspace frontend`.
+
+Next targeted steps from here:
+- Do the live browser pass on the refreshed product flow: upload/edit photos, edit a variable product, bulk deactivate products, and confirm inactive products cannot be sold from POS.
+- Recheck whether product photos should appear on detailed invoices / printable sales documents, not only catalogue surfaces.
+- Move to the stock workflow pass after the live product validation, especially opening quantity, stock movements, and inventory count UX.
+
+### 2026-06-30 Variable Sale Flow Hardening Pass
+- [x] POS cart add flow now blocks inactive products and inactive declinaisons with explicit status feedback instead of relying only on button state.
+- [x] POS sale payload now sends `variationId` and line notes, so variable products travel correctly from the cart into saved sales.
+- [x] Backend sale creation now validates active declinaisons, prices variable lines from the selected variation, and decrements stock on the matching variation stock row.
+- [x] Normalized sale lines now carry product image and note data, which lets A4 invoice views render richer line detail from the same sale source.
+- [x] Detailed invoice views now show product thumbnails and line notes when available instead of flattening every line to plain text only.
+- [x] Verified with `npm run typecheck`.
+- [x] Verified with `npm run build --workspace frontend`.
+
+Next targeted steps from here:
+- Do the live browser pass on the product and POS flow: create/edit a variable product, sell one active declinaison, confirm an inactive declinaison is blocked, and verify the resulting invoice view.
+- Recheck stock movement visibility in the stock pages for variation-based sales so accountants can actually see which declinaison moved.
+- After the live validation, move into the stock workflow pass itself: opening quantity adjustments, inventory count, and reconciliation UX.
+
+### 2026-06-30 Stock Movement Visibility Pass
+- [x] Stock page now loads real inventory movements from the API instead of showing only the local manual-adjustment placeholder list.
+- [x] Inventory movement API now supports location scoping and returns a cleaner mapped payload with product, depot, reference, note, and variation hint fields.
+- [x] Stock history view now reads as a movement ledger: date, type, product, quantity, depot, and reference/note instead of a vague adjustments-only table.
+- [x] Variation-based POS sales now surface their declinaison hint in stock history when that information is available from movement notes.
+- [x] Manual stock adjustments now reload movement history immediately after save so the stock page stays trustworthy.
+- [x] Verified with `npm run typecheck`.
+- [x] Verified with `npm run build --workspace frontend`.
+
+Next targeted steps from here:
+- Do the live browser pass on product + POS + stock together: sell a declinaison, open stock history, and confirm the movement row is understandable for a real operator.
+- Strengthen the stock workspace itself after that validation: variation-aware inventory count, opening quantity corrections, and clearer reconciliation actions.
+- Revisit transfer workflow so inter-depot moves read as a complete two-sided story in the ledger, not just raw technical rows.
+
+### 2026-07-01 Register Gate + POS Layout Stabilization Pass
+- [x] Pulled the latest upstream edits into `TaysrOptic` and `TaysrInvoice` before continuing local POS work, so the workspace is back in sync with GitHub where those repos were behind.
+- [x] Fixed the register-session selection bug in POS: the frontend no longer treats any company-open session as the current cashier session, and the register sessions API now returns `userId` so the UI can scope correctly.
+- [x] Verified the closed-register path live: after closing the active admin session, opening POS now lands on the `Caisse fermee` prompt instead of dropping straight into the selling screen.
+- [x] Reworked the POS workspace sizing so the screen behaves like a bounded application surface: command bar, workflow cards, product grid, cart, totals, and footer actions now stay inside the viewport instead of pushing the bottom actions out of sight.
+- [x] Fixed the POS panel grid definitions so both product-side and cart-side sections line up with their actual children instead of creating implicit rows that made the layout drift.
+- [x] Removed the phantom two-column wrapper from the POS search rows, which was causing the search field and quick-add button to stretch and misalign.
+- [x] Tightened workflow-card density and footer wrapping so the POS surface reads closer to the newer Taysr shell instead of oversized legacy blocks.
+- [x] Corrected the visible POS shell branding from `ERP` to `POS` in the tenant sidebar to stop the cross-app branding bleed noted in `MAP.md`.
+- [x] Normalized the most visible register-screen mojibake strings to ASCII-safe French so the closed-register modal no longer shows broken accented text.
+- [x] Verified with `npm run typecheck`.
+- [x] Verified with `npm run build --workspace frontend`.
+- [x] Verified in the in-app browser on `http://127.0.0.1:5400` with the local backend on `http://127.0.0.1:4400`.
+
+Next targeted steps from here:
+- Reopen a fresh register session and do one more live POS pass with real products in cart, so we validate the stabilized layout under a non-empty sale.
+- Remove remaining restaurant leakage from the retail demo tenant shell and sidebar when `restaurantEnabled` is false, because the live local admin still exposes table and cuisine controls.
+- Continue with the next MAP-aligned POS cleanup: split the giant register surface into smaller components so register logic, workflow cards, and footer actions can evolve without destabilizing each other.
+
+### 2026-07-01 POS Encoding Recovery Pass
+- repaired app-wide mojibake in `frontend/src/main.tsx` using a controlled cp1252-to-utf8 recovery pass instead of manual one-off label edits
+- fixed the one JSX placeholder line that broke during recovery (`scalePrefix` example input)
+- cleaned the last surviving kitchen-note artifact in the kitchen board view
+- re-ran `npm run typecheck` and `npm run build --workspace frontend` successfully after the recovery
+- live-checked the running app shell and dashboard text in browser; broken `?...` style strings are no longer present in the rendered snapshot
+- next targeted step: do a UI wording pass to restore proper French accents consistently where we intentionally kept temporary ASCII-safe labels during earlier stabilization

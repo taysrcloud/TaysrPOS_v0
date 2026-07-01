@@ -18,6 +18,7 @@ router.get('/sessions', requireAuth, async (req: any, res, next) => {
 
     const mapped = sessions.map(s => ({
       id: s.id,
+      userId: s.userId,
       openedAt: s.openedAt.toISOString().replace('T', ' ').substring(0, 16),
       closedAt: s.closedAt ? s.closedAt.toISOString().replace('T', ' ').substring(0, 16) : null,
       cashierName: s.user.fullName,
@@ -36,6 +37,7 @@ router.get('/sessions', requireAuth, async (req: any, res, next) => {
 });
 
 router.post('/open', requireAuth, async (req: any, res, next) => {
+  console.log("HELLO FROM OPEN ROUTE!");
   try {
     const parsed = z.object({
       initialCash: z.coerce.number().min(0),
@@ -43,7 +45,7 @@ router.post('/open', requireAuth, async (req: any, res, next) => {
     }).parse(req.body);
 
     const companyId = req.user.companyId;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const activeSession = await prisma.cashRegisterSession.findFirst({
       where: {
@@ -70,6 +72,7 @@ router.post('/open', requireAuth, async (req: any, res, next) => {
 
     res.json({ success: true, session });
   } catch (err) {
+    console.error("DEBUG /open err:", err);
     next(err);
   }
 });

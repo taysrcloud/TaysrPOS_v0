@@ -71,13 +71,16 @@ const normalizeSale = (sale: any) => ({
   createdAt: sale.createdAt ? new Date(sale.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Maintenant',
   lines: sale.items?.map((item: any) => ({
     productId: item.productId,
-    name: item.product?.name || 'Produit',
-    sku: item.product?.sku || '',
+    variationId: item.variationId || undefined,
+    name: item.variation?.name ? `${item.product?.name || 'Produit'} (${item.variation.name})` : item.product?.name || 'Produit',
+    sku: item.variation?.sku || item.product?.sku || '',
+    imageUrl: item.product?.imageUrl || null,
     quantity: asNumber(item.quantity),
     unitPrice: asNumber(item.unitPrice),
     discount: asNumber(item.discount),
     tvaRate: asNumber(item.tvaRate),
     lineTotal: asNumber(item.lineTotal),
+    note: item.notes || undefined,
   })) || [],
 });
 
@@ -88,7 +91,7 @@ router.get('/', requireAuth, async (req: any, res: any) => {
     const locationId = req.query.locationId ? parseInt(req.query.locationId) : undefined;
     const sales = await prisma.sale.findMany({
       where: { companyId: company.id, ...(locationId ? { locationId } : {}) },
-      include: { customer: true, payments: true, items: { include: { product: true } } },
+      include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 80,
     });
@@ -128,11 +131,19 @@ router.post('/', async (req, res) => {
     const productMap = new Map(products.map(product => [product.id, product]));
     const rawLines = data.items.map(item => {
       const product = productMap.get(item.productId)!;
-      const unitPrice = asNumber(product.salePrice);
+      const variation = item.variationId
+        ? product.variations.find(variant => variant.id === item.variationId && variant.isActive)
+        : null;
+
+      if (item.variationId && !variation) {
+        throw new Error('VARIATION_NOT_FOUND');
+      }
+
+      const unitPrice = variation?.salePrice != null ? asNumber(variation.salePrice) : asNumber(product.salePrice);
       const tvaRate = asNumber(product.tvaRate);
       const lineNet = Math.max(0, (unitPrice - item.discount) * item.quantity);
       const lineTax = lineNet * tvaRate / 100;
-      return { item, product, unitPrice, tvaRate, lineNet, lineTax, lineTotal: lineNet + lineTax };
+      return { item, product, variation, unitPrice, tvaRate, lineNet, lineTax, lineTotal: lineNet + lineTax };
     });
     const subtotal = rawLines.reduce((sum, line) => sum + line.unitPrice * line.item.quantity, 0);
     const lineDiscount = rawLines.reduce((sum, line) => sum + line.item.discount * line.item.quantity, 0);
@@ -169,11 +180,13 @@ router.post('/', async (req, res) => {
           items: {
             create: rawLines.map(line => ({
               productId: line.product.id,
+              variationId: line.item.variationId,
               quantity: line.item.quantity,
               unitPrice: line.unitPrice,
               discount: line.item.discount,
               tvaRate: line.tvaRate,
               lineTotal: line.lineTotal,
+              notes: line.item.note,
             })),
           },
         },
@@ -191,9 +204,9 @@ router.post('/', async (req, res) => {
         for (const line of rawLines) {
           if (!line.product.trackStock || line.product.type === ProductType.SERVICE) continue;
           await tx.productStock.upsert({
-            where: { productId_warehouseId: { productId: line.product.id, warehouseId: warehouse.id } } as any,
+            where: { productId_warehouseId_variationId: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId ?? null } } as any,
             update: { quantity: { decrement: line.item.quantity } },
-            create: { productId: line.product.id, warehouseId: warehouse.id, quantity: -line.item.quantity },
+            create: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId, quantity: -line.item.quantity },
           });
           await tx.stockMovement.create({
             data: {
@@ -202,7 +215,7 @@ router.post('/', async (req, res) => {
               type: 'OUT',
               quantity: line.item.quantity,
               reference: created.ticketNumber,
-              notes: 'Vente POS',
+              notes: line.variation ? `Vente POS - ${line.variation.name}` : 'Vente POS',
             },
           });
         }
@@ -210,13 +223,14 @@ router.post('/', async (req, res) => {
 
       return tx.sale.findUnique({
         where: { id: created.id },
-        include: { customer: true, payments: true, items: { include: { product: true } } },
+        include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
       });
     });
 
     res.status(201).json(normalizeSale(sale));
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ message: 'Ticket invalide', errors: error.issues });
+    if (error?.message === 'VARIATION_NOT_FOUND') return res.status(400).json({ message: 'Une declinaison du panier est inactive ou introuvable' });
     const parsed = saleSchema.safeParse(req.body);
     if (parsed.success) {
       const data = parsed.data;
@@ -247,13 +261,16 @@ router.post('/', async (req, res) => {
         createdAt: 'Maintenant',
         lines: rawLines.map(line => ({
           productId: line.item.productId,
+          variationId: line.item.variationId,
           name: line.product.name,
           sku: line.product.sku,
+          imageUrl: null,
           quantity: line.item.quantity,
           unitPrice: line.product.salePrice,
           discount: line.item.discount,
           tvaRate: line.product.tvaRate,
           lineTotal: line.lineTotal,
+          note: line.item.note,
         })),
         source: 'demo',
       });

@@ -55,7 +55,7 @@ const provisionSchema = z.object({
 });
 
 router.post('/provision-tenant', async (req, res) => {
-  const expectedSecret = process.env.TAYSRPOS_PROVISIONING_SECRET || 'secret';
+  const expectedSecret = process.env.TAYSR_PROVISIONING_SECRET || 'secret';
   const receivedSecret = req.header('X-Platform-Secret');
   if (!receivedSecret || receivedSecret !== expectedSecret) {
     return res.status(403).json({ message: 'Forbidden' });

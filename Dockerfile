@@ -17,4 +17,4 @@ RUN cd frontend && npm run build
 
 EXPOSE 4400
 
-CMD ["sh", "-c", "cd /app/backend && npx prisma db push --accept-data-loss --schema prisma/schema.prisma && cd /app && node --import tsx backend/src/index.ts"]
+CMD ["sh", "-c", "cd /app && node --import tsx backend/src/index.ts"]

@@ -79,7 +79,7 @@ router.post('/login', async (req, res) => {
         return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
       }
 
-      const isValid = await bcrypt.compare(password, (tenantUser as any).passwordHash || tenantUser.password);
+      const isValid = await bcrypt.compare(password, (tenantUser as any).passwordHash);
       if (!isValid) {
         return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect' });
       }
@@ -102,7 +102,7 @@ router.post('/login', async (req, res) => {
     res.json({
       token,
       user: { id: tenantUser.id, fullName: tenantUser.fullName, role: tenantUser.role, username: tenantUser.username, accountId: targetAccountId },
-      company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId },
+      company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId, restaurantEnabled: tenantUser.company.restaurantEnabled },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

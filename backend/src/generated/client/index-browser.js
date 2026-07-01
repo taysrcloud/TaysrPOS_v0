@@ -431,6 +431,21 @@ exports.Prisma.InvoiceScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.InvoiceLineScalarFieldEnum = {
+  id: 'id',
+  invoiceId: 'invoiceId',
+  productId: 'productId',
+  description: 'description',
+  quantity: 'quantity',
+  unitPrice: 'unitPrice',
+  tvaRate: 'tvaRate',
+  lineTotal: 'lineTotal',
+  sortOrder: 'sortOrder',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.ProductVariationScalarFieldEnum = {
   id: 'id',
   productId: 'productId',
@@ -441,6 +456,15 @@ exports.Prisma.ProductVariationScalarFieldEnum = {
   purchasePrice: 'purchasePrice',
   salePrice: 'salePrice',
   isActive: 'isActive'
+};
+
+exports.Prisma.AttendanceScalarFieldEnum = {
+  id: 'id',
+  companyId: 'companyId',
+  userId: 'userId',
+  clockIn: 'clockIn',
+  clockOut: 'clockOut',
+  duration: 'duration'
 };
 
 exports.Prisma.SortOrder = {
@@ -579,7 +603,9 @@ exports.Prisma.ModelName = {
   Expense: 'Expense',
   CashMovement: 'CashMovement',
   Invoice: 'Invoice',
-  ProductVariation: 'ProductVariation'
+  InvoiceLine: 'InvoiceLine',
+  ProductVariation: 'ProductVariation',
+  Attendance: 'Attendance'
 };
 
 /**

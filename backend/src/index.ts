@@ -1,4 +1,4 @@
-import cors from 'cors';
+﻿import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import { existsSync } from 'fs';
@@ -94,3 +94,5 @@ const port = Number(process.env.PORT || 4400);
 app.listen(port, () => {
   console.log(`TaysrPOS v0 API listening on ${port}`);
 });
+
+

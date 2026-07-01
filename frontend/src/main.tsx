@@ -233,6 +233,7 @@ type LoginAccountOption = {
 
 type RegisterHistory = {
   id: number;
+  userId?: number;
   openedAt: string;
   closedAt: string;
   cashierName: string;
@@ -275,7 +276,7 @@ type Location = {
 
 
 
-const apiBase = 'http://127.0.0.1:4500';
+const apiBase = 'http://127.0.0.1:4400';
 
 const apiFetch = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('taysrPOS_token');
@@ -655,7 +656,7 @@ const App = () => {
   const [kitchenFilter, setKitchenFilter] = useState<'all' | 'drinks' | 'food'>('all');
   const [tableGroups, setTableGroups] = useState<any[]>([]);
   const [companySettings, setCompanySettings] = useState({
-    companyName: 'TaysrERP Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
+    companyName: 'TaysrPOS Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
     rc: '239', ice: '001454366000046', patente: '54509281', if: '4967057', inpe: '165002114',
     defaultTva: '20', pricesIncludeTva: true,
     invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance', invoiceTicketDisplay: 'SUMMARY' as 'SUMMARY' | 'DETAILED', invoiceShowTicketReferences: true, invoiceShowTicketDates: true,
@@ -919,6 +920,7 @@ const App = () => {
   useEffect(() => {
     const scopedOpenSession = registerLogs.find((session: any) => {
       if (session.status !== 'Ouverte') return false;
+      if (currentUser?.id && session.userId && session.userId !== currentUser.id) return false;
       if (!currentLocationId) return true;
       return !session.locationId || session.locationId === currentLocationId;
     });
@@ -932,9 +934,9 @@ const App = () => {
       });
     } else {
       setRegisterStatus('CLOSED');
-      setRegisterDetails(current => ({ ...current, openedId: 0 }));
+      setRegisterDetails(current => ({ ...current, openedAt: '', initialCash: 0, openedId: 0 }));
     }
-  }, [registerLogs, currentLocationId]);
+  }, [currentUser?.id, registerLogs, currentLocationId]);
 
   useEffect(() => {
     const timeout = window.setTimeout(loadProducts, 180);
@@ -1721,9 +1723,9 @@ const App = () => {
       {selectedVariableProduct && (
         <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setSelectedVariableProduct(null); }}>
           <section className="receipt-panel" style={{ maxWidth: '500px', width: '95%' }}>
-            <div className="receipt-header"><div><p>Déclinaisons</p><h2>{selectedVariableProduct.name}</h2></div><button onClick={() => setSelectedVariableProduct(null)}><XCircle size={18} /></button></div>
+            <div className="receipt-header"><div><p>Declinaisons</p><h2>{selectedVariableProduct.name}</h2></div><button onClick={() => setSelectedVariableProduct(null)}><XCircle size={18} /></button></div>
             <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem' }}>
-              <p style={{ color: '#64748b', margin: 0 }}>Sélectionnez la variation à ajouter au panier :</p>
+              <p style={{ color: '#64748b', margin: 0 }}>Selectionnez la variation a ajouter au panier :</p>
               <div style={{ display: 'grid', gap: '0.75rem' }}>
                 {selectedVariableProduct.variations?.map(variation => (
                   <button key={variation.id} className="ghost-action" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#f8fafc', textAlign: 'left', width: '100%' }} onClick={() => addToCart(selectedVariableProduct, variation)}>
@@ -1746,8 +1748,8 @@ const App = () => {
             <div style={{ background: '#e0e7ff', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: '#4f46e5' }}>
               <Lock size={32} />
             </div>
-            <h2>Caisse fermée</h2>
-            <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>Vous devez ouvrir la caisse pour commencer à encaisser.</p>
+            <h2>Caisse fermee</h2>
+            <p style={{ color: '#64748b', marginBottom: '1.5rem' }}>Vous devez ouvrir la caisse pour commencer a encaisser.</p>
             <div className="form-grid" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'left' }}>
               <label><span>Fond de caisse initial (MAD)</span><input value={openRegisterForm.initialCash} onChange={e => setOpenRegisterForm({ initialCash: e.target.value })} inputMode="decimal" autoFocus /></label>
               <button className="primary-action" style={{ marginTop: '0.5rem' }} onClick={async () => {
@@ -1762,7 +1764,7 @@ const App = () => {
                   const session = (await response.json()).session;
                   setRegisterDetails({ openedAt: new Date().toLocaleString('fr-FR'), initialCash: amount, openedId: session.id });
                   setRegisterStatus('OPEN');
-                  setStatus('Caisse ouverte avec succès');
+                  setStatus('Caisse ouverte avec succes');
                 } catch {
                   setStatus('Erreur: Impossible d\'ouvrir la caisse');
                 }
@@ -1783,7 +1785,7 @@ const App = () => {
           <div className="pos-location" style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: '8px' }}>
             <strong>Table</strong>
             <select value={selectedTable} onChange={e => setSelectedTable(e.target.value)}>
-              <option value="">À emporter</option>
+              <option value="">A emporter</option>
               {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>Table {n}</option>)}
             </select>
           </div>
@@ -1798,7 +1800,7 @@ const App = () => {
           <button title="Details POS" onClick={() => setZReportModalOpen(true)}><Store size={15} /></button>
           <button title="Annuler" onClick={clearCart}><XCircle size={15} /></button>
           <button title="Calculatrice" onClick={() => { setCalcDisplay('0'); setCalcPrev(null); setCalcOp(null); setCalcOpen(true); }}><Calculator size={15} /></button>
-          <button title="Écran Client" onClick={() => window.open('?mode=customer', '_blank', 'width=1024,height=768')}><Monitor size={15} /></button>
+          <button title="Ecran Client" onClick={() => window.open('?mode=customer', '_blank', 'width=1024,height=768')}><Monitor size={15} /></button>
           <button title={isFullscreen ? 'Quitter plein ecran' : 'Plein ecran'} onClick={() => {
             if (!document.fullscreenElement) { document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {}); }
             else { document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {}); }
@@ -1828,7 +1830,7 @@ const App = () => {
         <div className="workflow-card">
           <span className="workflow-label">Workflow ticket</span>
           <strong>{cart.length ? `${cart.length} ligne(s) dans le panier` : 'Panier vide'}</strong>
-          <small>{latestDraftLikeSale ? 'Dernier ticket a reprendre: ' + latestDraftLikeSale.ticket + ' - ' + latestDraftLikeSale.customer : 'Brouillon, devis et suspension restent visibles sans descendre jusqu au pied de page.'}</small>
+          <small>{latestDraftLikeSale ? 'Dernier ticket a reprendre : ' + latestDraftLikeSale.ticket + ' - ' + latestDraftLikeSale.customer : 'Brouillon, devis et suspension restent visibles sans descendre jusqu au pied de page.'}</small>
           <div className="workflow-actions">
             <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={14} /> Brouillon</button>
             <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={14} /> Devis</button>
@@ -1878,7 +1880,7 @@ const App = () => {
             </select>
             <small className="credit-info">
               Solde {formatMoney(customer.balance)}
-              {customer.creditLimit > 0 ? ` â€¢ Plafond ${formatMoney(customer.creditLimit)}` : ''}
+              {customer.creditLimit > 0 ? ` * Plafond ${formatMoney(customer.creditLimit)}` : ''}
             </small>
           </div>
           <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
@@ -2425,8 +2427,8 @@ const App = () => {
               <strong>{calcDisplay}</strong>
             </div>
             <div className="calc-grid">
-              {['C', '±', '%', '÷', '7', '8', '9', '×', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '', '='].map((key, i) => key ? (
-                <button key={i} className={['÷','×','-','+'].includes(key) ? 'calc-op' : key === '=' ? 'calc-eq' : key === 'C' ? 'calc-clear' : ''} onClick={() => calcPress(key)}>{key}</button>
+              {['C', 'e', '%', 'e', '7', '8', '9', 'e', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '', '='].map((key, i) => key ? (
+                <button key={i} className={['e','e','-','+'].includes(key) ? 'calc-op' : key === '=' ? 'calc-eq' : key === 'C' ? 'calc-clear' : ''} onClick={() => calcPress(key)}>{key}</button>
               ) : <span key={i} />)}
             </div>
           </div>
@@ -2440,17 +2442,17 @@ const App = () => {
 
   const calcPress = (key: string) => {
     if (key === 'C') { setCalcDisplay('0'); setCalcPrev(null); setCalcOp(null); return; }
-    if (key === '±') { setCalcDisplay(d => String(-Number(d))); return; }
+    if (key === 'e') { setCalcDisplay(d => String(-Number(d))); return; }
     if (key === '%') { setCalcDisplay(d => String(Number(d) / 100)); return; }
-    if (['+', '-', '×', '÷'].includes(key)) { setCalcPrev(Number(calcDisplay)); setCalcOp(key); setCalcDisplay('0'); return; }
+    if (['+', '-', 'e', 'e'].includes(key)) { setCalcPrev(Number(calcDisplay)); setCalcOp(key); setCalcDisplay('0'); return; }
     if (key === '=') {
       if (calcPrev === null || !calcOp) return;
       const b = Number(calcDisplay);
       let result = 0;
       if (calcOp === '+') result = calcPrev + b;
       else if (calcOp === '-') result = calcPrev - b;
-      else if (calcOp === '×') result = calcPrev * b;
-      else if (calcOp === '÷') result = b !== 0 ? calcPrev / b : 0;
+      else if (calcOp === 'e') result = calcPrev * b;
+      else if (calcOp === 'e') result = b !== 0 ? calcPrev / b : 0;
       setCalcDisplay(String(parseFloat(result.toFixed(8))));
       setCalcPrev(null); setCalcOp(null);
       return;
@@ -2537,7 +2539,7 @@ const App = () => {
               
               {form.variationOptions && form.variationOptions.length > 0 && (
                 <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#e0f2fe', borderRadius: '8px', fontSize: '0.9rem', color: '#0369a1' }}>
-                  <strong>Options définies :</strong> {form.variationOptions.join(' × ')}
+                  <strong>Options définies :</strong> {form.variationOptions.join(' e ')}
                 </div>
               )}
 
@@ -2660,7 +2662,7 @@ const App = () => {
                 </span> 
                 : <span>{contact.lastActivity}</span>}
               <span style={{ display: 'flex', gap: '0.5rem' }}>
-                {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>R�gler</button>}
+                {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Regler</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => openCustomerInvoiceFlow(contact)} style={{ color: '#7c3aed', background: '#f3e8ff', border: 'none' }}>Facturer</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setTopupContact(contact); setTopupAmount(''); }} style={{ color: '#3b82f6', background: '#eff6ff', border: 'none' }}>Recharger</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setMessageContact(contact); setMessageContent(''); }} style={{ color: '#8b5cf6', background: '#ede9fe', border: 'none' }}><Mail size={14} /></button>}
@@ -3052,7 +3054,7 @@ const App = () => {
           body: JSON.stringify({ customerId: invoiceCustomer, saleIds: selectedTickets, mode: 'FROM_TICKETS', displayMode: companySettings.invoiceTicketDisplay })
         });
         if (res.ok) {
-          setStatus('Facture creee avec succes');
+          setStatus('Facture creavec succes');
           setSelectedTickets([]);
           setInvoiceCustomer(null);
           setTicketInvoiceModalOpen(false);
@@ -3157,7 +3159,7 @@ const App = () => {
           })
         });
         if (res.ok) {
-          setStatus('Facture libre creee avec succes');
+          setStatus('Facture libre creavec succes');
           setManualInvoiceNotes('');
           setManualInvoiceCustomer('');
           setManualInvoiceLines([{ description: '', quantity: '1', unitPrice: '0', tvaRate: companySettings.defaultTva || '20', productId: '' }]);
@@ -3962,7 +3964,7 @@ const App = () => {
                           }}>{line.quantity}</strong>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: '1.1rem', color: '#f8fafc', fontWeight: 600, lineHeight: 1.2 }}>{line.name}</div>
-                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>âš ï¸ {line.note}</em>}
+                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>âeeï{line.note}</em>}
                           </div>
                         </div>
                       ))}
@@ -4465,7 +4467,7 @@ const App = () => {
               <div className="field-cluster" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                 <label>
                   <span>Préfixe de la balance</span>
-                  <input type="text" value={companySettings.scalePrefix} onChange={e => setCompanySettings(s => ({...s, scalePrefix: e.target.value}))} placeholder="ex: 20" />
+                  <input type="text" value={companySettings.scalePrefix} onChange={e => setCompanySettings(s => ({...s, scalePrefix: e.target.value}))} placeholder="Ex: 20" />
                 </label>
                 <label>
                   <span>Longueur du code (SKU)</span>
@@ -4638,17 +4640,17 @@ const App = () => {
               taysr<span style={{ color: '#9333ea' }}>.</span>
             </div>
             <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#cbd5e1', letterSpacing: '0.05em', marginTop: '-4px' }}>
-              ERP
+              POS
             </div>
           </div>
-          <p>Le système de gestion nouvelle génération. Connectez-vous pour accéder à votre espace de travail, gérer vos ventes, votre stock et analyser vos performances en temps réel.</p>
+          <p>Le systeme de gestion nouvelle generation. Connectez-vous pour acceder a votre espace de travail, gerer vos ventes, votre stock et analyser vos performances en temps reel.</p>
         </div>
         <div className="auth-form-container">
           <div className="auth-form-box" style={{ maxWidth: '400px' }}>
             {(!isLocked || !currentUser) ? (
               <form onSubmit={handleLogin}>
                 <h2>Connexion</h2>
-                <p>Connectez-vous à l'aide de votre identifiant et mot de passe.</p>
+                <p>Connectez-vous a l'aide de votre identifiant et mot de passe.</p>
                 <div className="form-group" style={{ marginTop: '1.5rem', textAlign: 'left' }}>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>Email ou identifiant</label>
                   <input type="text" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setLoginAccounts([]); setSelectedLoginAccountId(''); }} required placeholder="admin@taysr.ma ou identifiant" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
@@ -4674,12 +4676,12 @@ const App = () => {
               </form>
             ) : (
               <>
-                <h2>Écran verrouillé</h2>
+                <h2>Ecran verrouille</h2>
                 <p>Entrez le code PIN pour {currentUser.fullName}</p>
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', margin: '20px 0' }}>
                   {[0,1,2,3].map(i => (
                     <div key={i} style={{ width: '40px', height: '40px', borderBottom: '3px solid ' + (pinEntry.length > i ? '#6366f1' : '#cbd5e1'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 'bold' }}>
-                      {pinEntry.length > i ? 'â€¢' : ''}
+                      {pinEntry.length > i ? '*' : ''}
                     </div>
                   ))}
                 </div>
@@ -4691,7 +4693,7 @@ const App = () => {
                   <button onClick={() => setPinEntry(p => p.length < 4 ? p + '0' : p)} style={{ padding: '15px', fontSize: '20px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}>0</button>
                   <button onClick={() => setPinEntry(p => p.slice(0, -1))} style={{ padding: '15px', fontSize: '14px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#ef4444' }}>Effacer</button>
                 </div>
-                <button className="primary-action" style={{ width: '100%', marginTop: '20px', padding: '12px' }} onClick={handlePinUnlock} disabled={pinEntry.length !== 4}>Déverrouiller</button>
+                <button className="primary-action" style={{ width: '100%', marginTop: '20px', padding: '12px' }} onClick={handlePinUnlock} disabled={pinEntry.length !== 4}>Deverrouiller</button>
               </>
             )}
           </div>
@@ -4709,7 +4711,7 @@ const App = () => {
             <div className="brand-line">
               <strong>taysr<span>.</span></strong>
             </div>
-            <em>ERP</em>
+            <em>POS</em>
           </div>
         </div>
         <div style={{ padding: '0 1rem', marginBottom: '1rem' }}>
@@ -4719,7 +4721,7 @@ const App = () => {
             style={{ width: '100%', padding: '0.6rem', background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', borderRadius: '8px', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
           >
             {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>🏢 {loc.name}</option>
+              <option key={loc.id} value={loc.id}>{loc.name}</option>
             ))}
           </select>
         </div>
@@ -4882,7 +4884,7 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
           </div>
           <div className="invoice-title">
             <h2>{isQuotation ? 'DEVIS' : 'FACTURE'}</h2>
-            <p>N� {sale.ticket}</p>
+            <p>No {sale.ticket}</p>
           </div>
         </div>
 
@@ -5453,7 +5455,7 @@ const FacturePanel = ({ facture, settings, onClose }: { facture: any; settings: 
           </div>
           <div className="invoice-title">
             <h2>{meta.mode === 'MANUAL' ? 'FACTURE' : 'FACTURE GLOBALE'}</h2>
-            <p>N� {facture.number}</p>
+            <p>No {facture.number}</p>
             <div className="no-print" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
               <button type="button" className={`ghost-action ${mode === 'SUMMARY' ? 'selected' : ''}`} onClick={() => setMode('SUMMARY')} style={{ padding: '0.25rem 0.5rem', border: mode === 'SUMMARY' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Resumee</button>
               <button type="button" className={`ghost-action ${mode === 'DETAILED' ? 'selected' : ''}`} onClick={() => setMode('DETAILED')} style={{ padding: '0.25rem 0.5rem', border: mode === 'DETAILED' ? '1px solid #cbd5e1' : 'none', borderRadius: '4px' }}>Detaillee</button>

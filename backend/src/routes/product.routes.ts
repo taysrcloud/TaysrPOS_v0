@@ -44,7 +44,9 @@ const productSchema = z.object({
   isVariable: z.coerce.boolean().default(false),
   variationOptions: z.array(z.string()).optional().nullable(),
   variations: z.array(z.object({
-    name: z.string(),
+    id: z.coerce.number().int().positive().optional(),
+    name: z.string().trim().min(1),
+    isActive: z.coerce.boolean().default(true),
     attributes: z.record(z.string(), z.string()).optional().nullable(),
     sku: z.string().optional().nullable(),
     barcode: z.string().optional().nullable(),
@@ -222,6 +224,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
               barcode: v.barcode || null,
               salePrice: v.salePrice,
               purchasePrice: v.purchasePrice,
+              isActive: v.isActive,
             }
           });
 
@@ -274,4 +277,189 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
   }
 });
 
+router.patch('/bulk', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any, res: any) => {
+  try {
+    const data = z.object({
+      ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
+      action: z.enum(['ACTIVATE', 'DEACTIVATE']),
+    }).parse(req.body);
+    const ids = [...new Set(data.ids)];
+    const isActive = data.action === 'ACTIVATE';
+    const result = await prisma.product.updateMany({
+      where: { companyId: req.user.companyId, id: { in: ids } },
+      data: { isActive },
+    });
+
+    res.json({ updated: result.count, ids, isActive });
+  } catch (error) {
+    if (error instanceof z.ZodError) return res.status(400).json({ message: 'Selection de produits invalide', errors: error.issues });
+    console.error('Product bulk update error:', error);
+    res.status(500).json({ message: 'Erreur lors de la mise a jour des produits' });
+  }
+});
+router.put('/:id', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any, res: any) => {
+  try {
+    const companyId = req.user.companyId;
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ message: 'Produit invalide' });
+    }
+
+    const existing = await prisma.product.findFirst({
+      where: { id: productId, companyId },
+      include: { stocks: true, variations: { include: { stocks: true } } },
+    });
+    if (!existing) return res.status(404).json({ message: 'Produit introuvable' });
+
+    const data = productSchema.parse(req.body);
+    let defaultUnit = await prisma.unit.findFirst({ where: { companyId } });
+    if (!defaultUnit) defaultUnit = await prisma.unit.create({ data: { companyId, name: 'Piece', shortName: 'pcs' } });
+    let warehouse = await prisma.warehouse.findFirst({ where: { companyId, isMain: true } });
+    if (!warehouse) warehouse = await prisma.warehouse.create({ data: { companyId, name: 'Magasin principal', isMain: true } });
+
+    const category = await prisma.category.upsert({
+      where: { companyId_name: { companyId, name: data.categoryName } },
+      update: {},
+      create: { companyId, name: data.categoryName },
+    });
+    const brand = data.brandName
+      ? await prisma.brand.upsert({
+          where: { companyId_name: { companyId, name: data.brandName } },
+          update: {},
+          create: { companyId, name: data.brandName },
+        })
+      : null;
+    const unitShortName = data.unitName || defaultUnit.shortName;
+    const unit = await prisma.unit.upsert({
+      where: { companyId_shortName: { companyId, shortName: unitShortName } },
+      update: {},
+      create: { companyId, name: unitShortName, shortName: unitShortName },
+    });
+
+    const updated = await prisma.$transaction(async tx => {
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          categoryId: category.id,
+          brandId: brand?.id || null,
+          unitId: unit.id,
+          name: data.name,
+          sku: data.sku || data.barcode || existing.sku,
+          barcode: data.barcode || null,
+          imageUrl: data.imageUrl || null,
+          type: data.type as ProductType,
+          salePrice: data.salePrice,
+          purchasePrice: data.purchasePrice,
+          tvaRate: data.tvaRate,
+          trackStock: data.trackStock,
+          lowStockAlert: data.lowStockAlert,
+          isKitchenItem: data.type === 'MENU_ITEM' ? data.isKitchenItem : false,
+          isVariable: data.isVariable,
+          variationOptions: data.variationOptions || undefined,
+        },
+      });
+
+      const recordStockDifference = async (variationId: number | null, nextQuantity: number, reference: string) => {
+        const stock = await tx.productStock.findFirst({
+          where: { productId, warehouseId: warehouse!.id, variationId },
+        });
+        const previousQuantity = stock ? asNumber(stock.quantity) : 0;
+        const difference = nextQuantity - previousQuantity;
+
+        if (stock) {
+          await tx.productStock.update({ where: { id: stock.id }, data: { quantity: nextQuantity } });
+        } else if (data.trackStock) {
+          await tx.productStock.create({ data: { productId, warehouseId: warehouse!.id, variationId, quantity: nextQuantity } });
+        }
+
+        if (difference !== 0) {
+          await tx.stockMovement.create({
+            data: {
+              productId,
+              warehouseId: warehouse!.id,
+              type: difference > 0 ? 'IN' : 'OUT',
+              quantity: Math.abs(difference),
+              reference,
+              notes: variationId ? `Variation ${variationId}` : null,
+            },
+          });
+        }
+      };
+
+      if (data.isVariable) {
+        const submittedIds = (data.variations || []).flatMap(variation => variation.id ? [variation.id] : []);
+        await tx.productVariation.updateMany({
+          where: { productId, ...(submittedIds.length ? { id: { notIn: submittedIds } } : {}) },
+          data: { isActive: false },
+        });
+
+        for (let index = 0; index < (data.variations || []).length; index += 1) {
+          const variationData = data.variations![index];
+          const ownedVariation = variationData.id
+            ? existing.variations.find(variation => variation.id === variationData.id)
+            : null;
+          if (variationData.id && !ownedVariation) throw new Error('Variation invalide pour ce produit');
+
+          const variation = ownedVariation
+            ? await tx.productVariation.update({
+                where: { id: ownedVariation.id },
+                data: {
+                  name: variationData.name,
+                  attributes: variationData.attributes || undefined,
+                  sku: variationData.sku || `${data.sku || existing.sku}-${index + 1}`,
+                  barcode: variationData.barcode || null,
+                  salePrice: variationData.salePrice,
+                  purchasePrice: variationData.purchasePrice,
+                  isActive: variationData.isActive,
+                },
+              })
+            : await tx.productVariation.create({
+                data: {
+                  productId,
+                  name: variationData.name,
+                  attributes: variationData.attributes || undefined,
+                  sku: variationData.sku || `${data.sku || existing.sku}-${index + 1}`,
+                  barcode: variationData.barcode || null,
+                  salePrice: variationData.salePrice,
+                  purchasePrice: variationData.purchasePrice,
+                  isActive: variationData.isActive,
+                },
+              });
+
+          await recordStockDifference(variation.id, data.trackStock ? variationData.stock : 0, 'MODIFICATION-VARIANTE');
+        }
+
+        const baseStock = await tx.productStock.findFirst({
+          where: { productId, warehouseId: warehouse!.id, variationId: null },
+        });
+        if (baseStock && asNumber(baseStock.quantity) !== 0) {
+          await recordStockDifference(null, 0, 'CONVERSION-PRODUIT-VARIABLE');
+        }
+      } else {
+        if (existing.isVariable) {
+          await tx.productVariation.updateMany({ where: { productId }, data: { isActive: false } });
+        }
+        await recordStockDifference(null, data.trackStock ? data.initialStock : 0, 'MODIFICATION-PRODUIT');
+      }
+
+      return tx.product.findUnique({
+        where: { id: productId },
+        include: {
+          category: true,
+          brand: true,
+          unit: true,
+          stocks: { include: { warehouse: true } },
+          variations: { include: { stocks: { include: { warehouse: true } } } },
+        },
+      });
+    });
+
+    res.json(normalizeProduct(updated));
+  } catch (error: any) {
+    if (error instanceof z.ZodError) return res.status(400).json({ message: 'Produit invalide', errors: error.issues });
+    if (error?.code === 'P2002') return res.status(409).json({ message: 'SKU ou code-barres deja utilise' });
+    console.error('Product update error:', error);
+    res.status(500).json({ message: 'Erreur lors de la modification du produit' });
+  }
+});
 export default router;

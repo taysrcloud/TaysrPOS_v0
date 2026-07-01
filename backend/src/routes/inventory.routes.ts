@@ -89,13 +89,34 @@ router.get('/movements', requireAuth, async (req, res, next) => {
   try {
     const company = await prisma.company.findFirst();
     if (!company) return res.status(400).json({ error: 'No company found' });
+    const locationId = req.query.locationId ? Number(req.query.locationId) : undefined;
     const movements = await prisma.stockMovement.findMany({
-      where: { warehouse: { companyId: company.id } },
+      where: {
+        warehouse: {
+          companyId: company.id,
+          ...(locationId ? { locationId } : {}),
+        }
+      },
       include: { product: true, warehouse: true },
       orderBy: { createdAt: 'desc' },
-      take: 100
+      take: 150
     });
-    res.json({ movements });
+
+    const mapped = movements.map((movement) => ({
+      id: movement.id,
+      productId: movement.productId,
+      productName: movement.product?.name || 'Produit',
+      sku: movement.product?.sku || '',
+      warehouseName: movement.warehouse?.name || 'Depot',
+      date: movement.createdAt,
+      type: movement.type,
+      quantity: Number(movement.quantity || 0),
+      reference: movement.reference || '',
+      note: movement.notes || '',
+      variationLabel: movement.notes?.startsWith('Vente POS - ') ? movement.notes.replace('Vente POS - ', '') : movement.notes?.startsWith('Variation ') ? movement.notes : '',
+    }));
+
+    res.json({ movements: mapped });
   } catch (err) {
     next(err);
   }
