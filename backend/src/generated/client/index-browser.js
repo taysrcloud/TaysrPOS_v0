@@ -365,6 +365,7 @@ exports.Prisma.PurchaseScalarFieldEnum = {
   subtotal: 'subtotal',
   taxTotal: 'taxTotal',
   total: 'total',
+  status: 'status',
   createdAt: 'createdAt'
 };
 

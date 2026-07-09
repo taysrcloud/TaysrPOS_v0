@@ -127,7 +127,8 @@ router.get('/movements', requireAuth, async (req: any, res, next) => {
       amount: Number(m.amount),
       note: m.note || '',
       time: m.createdAt.toISOString().replace('T', ' ').substring(0, 16),
-      locationId: m.locationId
+      locationId: m.locationId,
+      sessionId: m.sessionId
     }));
 
     res.json({ movements: mapped });

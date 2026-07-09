@@ -7,7 +7,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5400",
+    "dev": "vite --host 0.0.0.0 --port 5400 --configLoader native",
     "build": "tsc -b && vite build --config vite.config.ts --configLoader native",
     "typecheck": "tsc -b --pretty false"
   },

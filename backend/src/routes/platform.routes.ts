@@ -122,7 +122,7 @@ router.post('/provision-tenant', async (req, res) => {
       },
     });
 
-    const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : null;
+    const passwordHash = data.password || null;
     const existingUser = await prisma.user.findFirst({
       where: {
         companyId: company.id,

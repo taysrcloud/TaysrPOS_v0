@@ -43,7 +43,7 @@ const statusLabel = (sale: any) => {
   if (sale.status === SaleStatus.DRAFT && sale.note === 'DEVIS') return 'Devis';
   if (sale.status === SaleStatus.DRAFT) return 'Brouillon';
   if (sale.paymentStatus === PaymentStatus.UNPAID) return 'Credit';
-  return 'Payee';
+  return 'Payée';
 };
 
 const methodLabel = (sale: any) => {
@@ -246,7 +246,7 @@ router.post('/', async (req, res) => {
       const discountTotal = lineDiscount + orderDiscount;
       const taxTotal = rawLines.reduce((sum, line) => sum + line.lineTax, 0);
       const total = Math.max(0, subtotal - discountTotal + taxTotal);
-      const status = data.status === 'SUSPENDED' ? 'Suspendue' : data.status === 'QUOTE' ? 'Devis' : data.status === 'DRAFT' ? 'Brouillon' : data.method === 'CREDIT' ? 'Credit' : 'Payee';
+      const status = data.status === 'SUSPENDED' ? 'Suspendue' : data.status === 'QUOTE' ? 'Devis' : data.status === 'DRAFT' ? 'Brouillon' : data.method === 'CREDIT' ? 'Credit' : 'Payée';
       return res.status(201).json({
         id: Date.now(),
         ticket: (data.status === 'QUOTE' ? 'DEV' : data.status === 'SUSPENDED' ? 'SUS' : 'TCK') + '-' + Date.now().toString().slice(-5),
@@ -277,6 +277,109 @@ router.post('/', async (req, res) => {
     }
     console.error('Sale create error:', error);
     res.status(500).json({ message: 'Erreur lors de la validation du ticket' });
+  }
+});
+
+// Finalize a draft/quote/suspended sale directly (convert to FINAL with payment)
+router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user.companyId;
+    const { method = 'CASH', customerId: newCustomerId } = req.body;
+
+    const sale = await prisma.sale.findUnique({
+      where: { id: Number(id) },
+      include: {
+        items: { include: { product: true, variation: true } },
+        customer: true,
+      },
+    });
+    if (!sale || sale.companyId !== companyId) return res.status(404).json({ message: 'Vente introuvable' });
+    if (sale.status === SaleStatus.FINAL) return res.status(400).json({ message: 'Cette vente est déjà finalisée' });
+
+    const paymentMethod: PaymentMethod = method === 'CARD' ? PaymentMethod.CARD : method === 'CREDIT' ? PaymentMethod.CREDIT : PaymentMethod.CASH;
+    const isCredit = paymentMethod === PaymentMethod.CREDIT;
+    const total = Number(sale.total);
+
+    const company = await prisma.company.findFirst({ where: { id: companyId } });
+    const warehouse = company ? await prisma.warehouse.findFirst({ where: { companyId } }) : null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // Update sale to FINAL
+      const finalized = await tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          status: SaleStatus.FINAL,
+          paymentStatus: isCredit ? PaymentStatus.UNPAID : PaymentStatus.PAID,
+          note: null,  // clear DEVIS note
+          finalizedAt: new Date(),
+          ...(newCustomerId ? { customerId: newCustomerId } : {}),
+        },
+        include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
+      });
+
+      // Create payment record unless credit
+      if (!isCredit) {
+        await tx.payment.create({
+          data: { saleId: sale.id, method: paymentMethod, amount: total },
+        });
+      }
+
+      // Update customer balance for credit sales
+      if (isCredit && (finalized.customerId || newCustomerId)) {
+        await tx.contact.update({
+          where: { id: finalized.customerId || newCustomerId },
+          data: { balance: { increment: total } },
+        });
+      }
+
+      // Decrement stock for tracked products
+      if (warehouse) {
+        for (const item of sale.items) {
+          if (!item.product.trackStock || item.product.type === ProductType.SERVICE) continue;
+          await tx.productStock.upsert({
+            where: { productId_warehouseId_variationId: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId ?? null } } as any,
+            update: { quantity: { decrement: Number(item.quantity) } },
+            create: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId, quantity: -Number(item.quantity) },
+          });
+          await tx.stockMovement.create({
+            data: {
+              productId: item.productId,
+              warehouseId: warehouse.id,
+              type: 'OUT',
+              quantity: Number(item.quantity),
+              reference: finalized.ticketNumber || `TCK-${sale.id}`,
+              notes: item.variation ? `Vente POS (converti) - ${item.variation.name}` : 'Vente POS (converti depuis devis)',
+            },
+          });
+        }
+      }
+
+      return tx.sale.findUnique({
+        where: { id: sale.id },
+        include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
+      });
+    });
+
+    res.json({ success: true, sale: normalizeSale(updated) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:id', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user.companyId;
+    const sale = await prisma.sale.findUnique({ where: { id: Number(id) } });
+    if (!sale || sale.companyId !== companyId) return res.status(404).json({ message: 'Sale not found' });
+    if (sale.status === 'FINAL') return res.status(400).json({ message: 'Cannot delete finalized sale' });
+    
+    await prisma.saleItem.deleteMany({ where: { saleId: sale.id } });
+    await prisma.sale.delete({ where: { id: sale.id } });
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -478,6 +581,71 @@ router.post('/merge', requireAuth, async (req: any, res: any, next) => {
     });
 
     res.json({ success: true, primarySale: normalizeSale(result) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const saleId = Number(req.params.id);
+    const company = await prisma.company.findFirst();
+    if (!company) return res.status(400).json({ message: 'Company not found' });
+
+    const sale = await prisma.sale.findUnique({
+      where: { id: saleId },
+      include: { items: { include: { product: true } } }
+    });
+
+    if (!sale) return res.status(404).json({ message: 'Sale not found' });
+    if (sale.status === 'RETURNED') return res.status(400).json({ message: 'Sale is already returned' });
+
+    let warehouse = await prisma.warehouse.findFirst({
+      where: { companyId: company.id, locationId: sale.locationId }
+    });
+    if (!warehouse) {
+      warehouse = await prisma.warehouse.findFirst({ where: { companyId: company.id } });
+    }
+
+    const updatedSale = await prisma.$transaction(async (tx) => {
+      if (warehouse) {
+        for (const item of sale.items) {
+          if (!item.product.trackStock || item.product.type === 'SERVICE') continue;
+          await tx.stockMovement.create({
+            data: {
+              productId: item.productId,
+              warehouseId: warehouse.id,
+              type: 'IN',
+              quantity: item.quantity,
+              reference: sale.ticketNumber,
+              notes: 'Retour Vente'
+            }
+          });
+          await tx.productStock.updateMany({
+            where: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId },
+            data: { quantity: { increment: item.quantity } }
+          });
+        }
+      }
+
+      // Handle customer balance if it was a credit sale
+      const payments = await tx.payment.findMany({ where: { saleId: sale.id } });
+      const wasCredit = payments.some(p => p.method === 'CREDIT') || (sale.status === 'FINAL' && payments.length === 0);
+      if (wasCredit && sale.customerId) {
+        await tx.contact.update({
+          where: { id: sale.customerId },
+          data: { balance: { decrement: sale.total } }
+        });
+      }
+
+      return await tx.sale.update({
+        where: { id: sale.id },
+        data: { status: 'RETURNED' },
+        include: { items: { include: { product: true, variation: true } }, customer: true, payments: true }
+      });
+    });
+
+    res.json(normalizeSale(updatedSale));
   } catch (error) {
     next(error);
   }

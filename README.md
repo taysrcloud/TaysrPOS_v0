@@ -58,3 +58,6 @@ The first v0 scope includes:
 - Sales, payments, returns
 - Moroccan company identifiers and MAD defaults
 
+## Testing
+
+For automated testing guidance and suite-wide test standards, please refer to the shared testing guidelines in the `TaysrSuite/docs` directory. The POS frontend currently relies on manual DOM inspection for critical paths, while backend routes are designed for straightforward integration testing using Jest/Supertest.

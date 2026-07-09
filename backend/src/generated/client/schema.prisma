@@ -459,6 +459,7 @@ model Purchase {
   subtotal   Decimal  @default(0) @db.Decimal(12, 2)
   taxTotal   Decimal  @default(0) @db.Decimal(12, 2)
   total      Decimal  @default(0) @db.Decimal(12, 2)
+  status     String   @default("RECEIVED")
   createdAt  DateTime @default(now())
 
   company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)

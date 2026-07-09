@@ -45,7 +45,8 @@ import {
   Shield,
   Download,
   ArrowRightLeft,
-  Mail
+  Mail,
+  Wallet
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -150,6 +151,7 @@ type Contact = {
 };
 
 type ProductForm = {
+  id?: number;
   name: string;
   salePrice: string;
   categoryName: string;
@@ -167,7 +169,7 @@ type ProductForm = {
   isKitchenItem: boolean;
   isVariable: boolean;
   variationOptions?: string[];
-  variations: { name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; attributes?: Record<string, string>; }[];
+  variations: { id?: number; name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; attributes?: Record<string, string>; isActive?: boolean; }[];
 };
 
 type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
@@ -657,6 +659,7 @@ const App = () => {
   const [tableGroups, setTableGroups] = useState<any[]>([]);
   const [companySettings, setCompanySettings] = useState({
     companyName: 'TaysrPOS Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
+    restaurantEnabled: false,
     rc: '239', ice: '001454366000046', patente: '54509281', if: '4967057', inpe: '165002114',
     defaultTva: '20', pricesIncludeTva: true,
     invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance', invoiceTicketDisplay: 'SUMMARY' as 'SUMMARY' | 'DETAILED', invoiceShowTicketReferences: true, invoiceShowTicketDates: true,
@@ -670,10 +673,12 @@ const App = () => {
     // Scale Barcode Parsing
     scaleEnabled: false, scalePrefix: '20', scaleType: 'WEIGHT' as 'WEIGHT' | 'PRICE', scaleSkuLength: 4
   });
-  // Later this will come from Super Admin provisioning / tenant feature flags.
-  const enabledModules = useMemo<EnabledModule[]>(() => ['POS', 'RESTAURANT'], []);
-
-  const restaurantEnabled = enabledModules.includes('RESTAURANT');
+  const restaurantEnabled = companySettings?.restaurantEnabled || false;
+  const enabledModules = useMemo<EnabledModule[]>(() => {
+    const modules: EnabledModule[] = ['POS'];
+    if (restaurantEnabled) modules.push('RESTAURANT');
+    return modules;
+  }, [restaurantEnabled]);
   const visibleTypes = useMemo<ProductType[]>(() => restaurantEnabled
     ? ['RETAIL', 'MENU_ITEM', 'INGREDIENT', 'SERVICE']
     : ['RETAIL', 'SERVICE', 'BUNDLE'], [restaurantEnabled]);
@@ -1809,44 +1814,51 @@ const App = () => {
       </div>
 
       <div className="pos-workflow-strip">
-        <div className="workflow-card">
-          <span className="workflow-label">Client actif</span>
+        <div className="wf-chip wf-chip-customer">
+          <Users size={13} />
           <strong>{customer.name}</strong>
-          <small>{customer.balance > 0 ? `Solde ${formatMoney(customer.balance)}` : 'Pret pour une vente comptoir ou compte client'}</small>
-          <div className="workflow-actions">
-            <button className="ghost-action" type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /> Nouveau client</button>
-            <button className="ghost-action" type="button" onClick={() => setPage('Clients')}><Users size={14} /> Portefeuille</button>
-          </div>
+          {customer.balance > 0 && <small>{formatMoney(customer.balance)}</small>}
+          <button className="wf-chip-btn" type="button" onClick={() => setCustomerModalOpen(true)} title="Nouveau client"><Plus size={12} /></button>
+          <button className="wf-chip-btn" type="button" onClick={() => setPage('Clients')} title="Portefeuille"><Wallet size={12} /></button>
         </div>
-        <div className="workflow-card">
-          <span className="workflow-label">Scan et recherche</span>
-          <strong>{search ? `Recherche: ${search}` : 'Scanner ou taper un produit'}</strong>
-          <small>{status || 'Le lecteur code-barres peut ajouter directement au panier hors champ de saisie.'}</small>
-          <div className="workflow-actions">
-            <button className="ghost-action" type="button" onClick={() => productSearchInputRef.current?.focus()}><Search size={14} /> Focus recherche</button>
-            <button className="ghost-action" type="button" onClick={() => setPage('Produits')}><Package size={14} /> Catalogue</button>
+        <button className="wf-chip wf-chip-search" type="button" onClick={() => productSearchInputRef.current?.focus()}>
+          <Search size={13} />
+          <span>{search ? search : 'Recherche produit'}</span>
+        </button>
+        <button className="wf-chip" type="button" onClick={() => setPage('Produits')}>
+          <Package size={13} />
+          <span>Catalogue</span>
+        </button>
+        <div className="wf-divider" />
+        <button className="wf-chip" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}>
+          <FileText size={13} />
+          <span>Brouillon</span>
+        </button>
+        <button className="wf-chip" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}>
+          <FileText size={13} />
+          <span>Devis</span>
+        </button>
+        <button className="wf-chip" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}>
+          <Pause size={13} />
+          <span>Suspendre</span>
+        </button>
+        <button className="wf-chip" type="button" onClick={() => { setTransactionsTab('Suspendues'); setTransactionsModalOpen(true); }}>
+          <Clock size={13} />
+          <span>Historique</span>
+        </button>
+        <div className="wf-divider" />
+        {(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) && (
+          <button className="wf-chip" type="button" onClick={() => orderDiscountInputRef.current?.focus()}>
+            <Percent size={13} />
+            <span>Remise</span>
+          </button>
+        )}
+        {cart.length > 0 && (
+          <div className="wf-chip wf-chip-count">
+            <span>{cart.length} ligne{cart.length > 1 ? 's' : ''}</span>
           </div>
-        </div>
-        <div className="workflow-card">
-          <span className="workflow-label">Workflow ticket</span>
-          <strong>{cart.length ? `${cart.length} ligne(s) dans le panier` : 'Panier vide'}</strong>
-          <small>{latestDraftLikeSale ? 'Dernier ticket a reprendre : ' + latestDraftLikeSale.ticket + ' - ' + latestDraftLikeSale.customer : 'Brouillon, devis et suspension restent visibles sans descendre jusqu au pied de page.'}</small>
-          <div className="workflow-actions">
-            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={14} /> Brouillon</button>
-            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={14} /> Devis</button>
-            <button className="ghost-action" type="button" disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}><Pause size={14} /> Suspendre</button>
-            <button className="ghost-action" type="button" onClick={() => { setTransactionsTab('Suspendues'); setTransactionsModalOpen(true); }}><Clock size={14} /> Historique</button>
-          </div>
-        </div>
-        <div className="workflow-card workflow-card-highlight">
-          <span className="workflow-label">Finalisation</span>
-          <strong>{formatMoney(cartTotal)}</strong>
-          <small>{(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) ? 'Remise et prix peuvent etre ajustes avant encaissement.' : 'Encaissement direct avec controles de role appliques.'}</small>
-          <div className="workflow-actions">
-            <button className="ghost-action" type="button" onClick={() => orderDiscountInputRef.current?.focus()}><Percent size={14} /> Remise</button>
-            <button className="primary-action" type="button" disabled={!cart.length} onClick={() => { setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0', storeCredit: '0' }); setPaymentModalOpen(true); }}><CreditCard size={14} /> Encaisser</button>
-          </div>
-        </div>
+        )}
+
       </div>
 
       <div className="pos-grid">
@@ -1871,20 +1883,12 @@ const App = () => {
         </aside>
 
         <div className="pos-sale-panel">
-          <div className="pos-search-row" style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', background: '#fff', borderTopRightRadius: '16px' }}>
-            <div className="customer-picker">
-          <Users size={16} />
-          <div className="customer-picker-main">
+          <div className="cart-customer-bar">
+            <Users className="cart-customer-icon" size={16} />
             <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
               {contacts.filter(c => c.type.includes('Client')).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
             </select>
-            <small className="credit-info">
-              Solde {formatMoney(customer.balance)}
-              {customer.creditLimit > 0 ? ` * Plafond ${formatMoney(customer.creditLimit)}` : ''}
-            </small>
-          </div>
-          <button type="button" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
-        </div>
+            <button className="cart-add-customer" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
           </div>
           <div className="cart-table">
             <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
@@ -1906,12 +1910,14 @@ const App = () => {
             })}
           </div>
 
-          <div className="pos-totals-strip">
-            <div><span>Sous-total</span><strong>{formatMoney(cartSubtotal)}</strong></div>
-            <div><span>Remise lignes</span><strong>{formatMoney(cartLineDiscount)}</strong></div>
-            <label><Percent size={15} /><span>Remise</span><input ref={orderDiscountInputRef} value={discountRate} onChange={event => setDiscountRate(Math.max(0, Math.min(100, Number(event.target.value || 0))))} inputMode="decimal" /></label>
-            <div><span>TVA</span><strong>{formatMoney(cartTax)}</strong></div>
-            <div className="grand-total"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div>
+          <div className="cart-totals">
+            <div className="cart-totals-row"><span>Sous-total</span><strong>{formatMoney(cartSubtotal)}</strong></div>
+            <div className="cart-totals-row cart-totals-discount"><span>Remise lignes</span><strong>{formatMoney(cartLineDiscount)}</strong></div>
+            <div className="cart-totals-row">
+              <label className="cart-discount-input"><Percent size={15} /><span>Remise</span><input ref={orderDiscountInputRef} value={discountRate} onChange={event => setDiscountRate(Math.max(0, Math.min(100, Number(event.target.value || 0))))} inputMode="decimal" /></label>
+            </div>
+            <div className="cart-totals-row"><span>TVA</span><strong>{formatMoney(cartTax)}</strong></div>
+            <div className="cart-totals-row cart-totals-grand"><span>Total</span><strong>{formatMoney(cartTotal)}</strong></div>
           </div>
           <div className="pos-footer-actions">
         <button className="danger" onClick={clearCart}><XCircle size={16} /> Annuler</button>

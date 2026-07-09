@@ -28397,6 +28397,7 @@ export namespace Prisma {
     subtotal: Decimal | null
     taxTotal: Decimal | null
     total: Decimal | null
+    status: string | null
     createdAt: Date | null
   }
 
@@ -28408,6 +28409,7 @@ export namespace Prisma {
     subtotal: Decimal | null
     taxTotal: Decimal | null
     total: Decimal | null
+    status: string | null
     createdAt: Date | null
   }
 
@@ -28419,6 +28421,7 @@ export namespace Prisma {
     subtotal: number
     taxTotal: number
     total: number
+    status: number
     createdAt: number
     _all: number
   }
@@ -28450,6 +28453,7 @@ export namespace Prisma {
     subtotal?: true
     taxTotal?: true
     total?: true
+    status?: true
     createdAt?: true
   }
 
@@ -28461,6 +28465,7 @@ export namespace Prisma {
     subtotal?: true
     taxTotal?: true
     total?: true
+    status?: true
     createdAt?: true
   }
 
@@ -28472,6 +28477,7 @@ export namespace Prisma {
     subtotal?: true
     taxTotal?: true
     total?: true
+    status?: true
     createdAt?: true
     _all?: true
   }
@@ -28570,6 +28576,7 @@ export namespace Prisma {
     subtotal: Decimal
     taxTotal: Decimal
     total: Decimal
+    status: string
     createdAt: Date
     _count: PurchaseCountAggregateOutputType | null
     _avg: PurchaseAvgAggregateOutputType | null
@@ -28600,6 +28607,7 @@ export namespace Prisma {
     subtotal?: boolean
     taxTotal?: boolean
     total?: boolean
+    status?: boolean
     createdAt?: boolean
     company?: boolean | CompanyDefaultArgs<ExtArgs>
     supplier?: boolean | Purchase$supplierArgs<ExtArgs>
@@ -28615,6 +28623,7 @@ export namespace Prisma {
     subtotal?: boolean
     taxTotal?: boolean
     total?: boolean
+    status?: boolean
     createdAt?: boolean
     company?: boolean | CompanyDefaultArgs<ExtArgs>
     supplier?: boolean | Purchase$supplierArgs<ExtArgs>
@@ -28628,6 +28637,7 @@ export namespace Prisma {
     subtotal?: boolean
     taxTotal?: boolean
     total?: boolean
+    status?: boolean
     createdAt?: boolean
     company?: boolean | CompanyDefaultArgs<ExtArgs>
     supplier?: boolean | Purchase$supplierArgs<ExtArgs>
@@ -28641,10 +28651,11 @@ export namespace Prisma {
     subtotal?: boolean
     taxTotal?: boolean
     total?: boolean
+    status?: boolean
     createdAt?: boolean
   }
 
-  export type PurchaseOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "companyId" | "supplierId" | "reference" | "subtotal" | "taxTotal" | "total" | "createdAt", ExtArgs["result"]["purchase"]>
+  export type PurchaseOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "companyId" | "supplierId" | "reference" | "subtotal" | "taxTotal" | "total" | "status" | "createdAt", ExtArgs["result"]["purchase"]>
   export type PurchaseInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     company?: boolean | CompanyDefaultArgs<ExtArgs>
     supplier?: boolean | Purchase$supplierArgs<ExtArgs>
@@ -28675,6 +28686,7 @@ export namespace Prisma {
       subtotal: Prisma.Decimal
       taxTotal: Prisma.Decimal
       total: Prisma.Decimal
+      status: string
       createdAt: Date
     }, ExtArgs["result"]["purchase"]>
     composites: {}
@@ -29109,6 +29121,7 @@ export namespace Prisma {
     readonly subtotal: FieldRef<"Purchase", 'Decimal'>
     readonly taxTotal: FieldRef<"Purchase", 'Decimal'>
     readonly total: FieldRef<"Purchase", 'Decimal'>
+    readonly status: FieldRef<"Purchase", 'String'>
     readonly createdAt: FieldRef<"Purchase", 'DateTime'>
   }
     
@@ -39587,6 +39600,7 @@ export namespace Prisma {
     subtotal: 'subtotal',
     taxTotal: 'taxTotal',
     total: 'total',
+    status: 'status',
     createdAt: 'createdAt'
   };
 
@@ -41736,6 +41750,7 @@ export namespace Prisma {
     subtotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     total?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
+    status?: StringFilter<"Purchase"> | string
     createdAt?: DateTimeFilter<"Purchase"> | Date | string
     company?: XOR<CompanyScalarRelationFilter, CompanyWhereInput>
     supplier?: XOR<ContactNullableScalarRelationFilter, ContactWhereInput> | null
@@ -41750,6 +41765,7 @@ export namespace Prisma {
     subtotal?: SortOrder
     taxTotal?: SortOrder
     total?: SortOrder
+    status?: SortOrder
     createdAt?: SortOrder
     company?: CompanyOrderByWithRelationInput
     supplier?: ContactOrderByWithRelationInput
@@ -41767,6 +41783,7 @@ export namespace Prisma {
     subtotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     total?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
+    status?: StringFilter<"Purchase"> | string
     createdAt?: DateTimeFilter<"Purchase"> | Date | string
     company?: XOR<CompanyScalarRelationFilter, CompanyWhereInput>
     supplier?: XOR<ContactNullableScalarRelationFilter, ContactWhereInput> | null
@@ -41781,6 +41798,7 @@ export namespace Prisma {
     subtotal?: SortOrder
     taxTotal?: SortOrder
     total?: SortOrder
+    status?: SortOrder
     createdAt?: SortOrder
     _count?: PurchaseCountOrderByAggregateInput
     _avg?: PurchaseAvgOrderByAggregateInput
@@ -41800,6 +41818,7 @@ export namespace Prisma {
     subtotal?: DecimalWithAggregatesFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalWithAggregatesFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     total?: DecimalWithAggregatesFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
+    status?: StringWithAggregatesFilter<"Purchase"> | string
     createdAt?: DateTimeWithAggregatesFilter<"Purchase"> | Date | string
   }
 
@@ -44236,6 +44255,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     company: CompanyCreateNestedOneWithoutPurchasesInput
     supplier?: ContactCreateNestedOneWithoutPurchasesInput
@@ -44250,6 +44270,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     items?: PurchaseItemUncheckedCreateNestedManyWithoutPurchaseInput
   }
@@ -44259,6 +44280,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     company?: CompanyUpdateOneRequiredWithoutPurchasesNestedInput
     supplier?: ContactUpdateOneWithoutPurchasesNestedInput
@@ -44273,6 +44295,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     items?: PurchaseItemUncheckedUpdateManyWithoutPurchaseNestedInput
   }
@@ -44285,6 +44308,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
   }
 
@@ -44293,6 +44317,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
@@ -44304,6 +44329,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
@@ -46842,6 +46868,7 @@ export namespace Prisma {
     subtotal?: SortOrder
     taxTotal?: SortOrder
     total?: SortOrder
+    status?: SortOrder
     createdAt?: SortOrder
   }
 
@@ -46862,6 +46889,7 @@ export namespace Prisma {
     subtotal?: SortOrder
     taxTotal?: SortOrder
     total?: SortOrder
+    status?: SortOrder
     createdAt?: SortOrder
   }
 
@@ -46873,6 +46901,7 @@ export namespace Prisma {
     subtotal?: SortOrder
     taxTotal?: SortOrder
     total?: SortOrder
+    status?: SortOrder
     createdAt?: SortOrder
   }
 
@@ -51416,6 +51445,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     supplier?: ContactCreateNestedOneWithoutPurchasesInput
     items?: PurchaseItemCreateNestedManyWithoutPurchaseInput
@@ -51428,6 +51458,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     items?: PurchaseItemUncheckedCreateNestedManyWithoutPurchaseInput
   }
@@ -51984,6 +52015,7 @@ export namespace Prisma {
     subtotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
     total?: DecimalFilter<"Purchase"> | Decimal | DecimalJsLike | number | string
+    status?: StringFilter<"Purchase"> | string
     createdAt?: DateTimeFilter<"Purchase"> | Date | string
   }
 
@@ -53249,6 +53281,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     company: CompanyCreateNestedOneWithoutPurchasesInput
     items?: PurchaseItemCreateNestedManyWithoutPurchaseInput
@@ -53261,6 +53294,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     items?: PurchaseItemUncheckedCreateNestedManyWithoutPurchaseInput
   }
@@ -58511,6 +58545,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
     company: CompanyCreateNestedOneWithoutPurchasesInput
     supplier?: ContactCreateNestedOneWithoutPurchasesInput
@@ -58524,6 +58559,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
   }
 
@@ -58616,6 +58652,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     company?: CompanyUpdateOneRequiredWithoutPurchasesNestedInput
     supplier?: ContactUpdateOneWithoutPurchasesNestedInput
@@ -58629,6 +58666,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
@@ -60738,6 +60776,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
   }
 
@@ -61204,6 +61243,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     supplier?: ContactUpdateOneWithoutPurchasesNestedInput
     items?: PurchaseItemUpdateManyWithoutPurchaseNestedInput
@@ -61216,6 +61256,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     items?: PurchaseItemUncheckedUpdateManyWithoutPurchaseNestedInput
   }
@@ -61227,6 +61268,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
@@ -62027,6 +62069,7 @@ export namespace Prisma {
     subtotal?: Decimal | DecimalJsLike | number | string
     taxTotal?: Decimal | DecimalJsLike | number | string
     total?: Decimal | DecimalJsLike | number | string
+    status?: string
     createdAt?: Date | string
   }
 
@@ -62122,6 +62165,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     company?: CompanyUpdateOneRequiredWithoutPurchasesNestedInput
     items?: PurchaseItemUpdateManyWithoutPurchaseNestedInput
@@ -62134,6 +62178,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     items?: PurchaseItemUncheckedUpdateManyWithoutPurchaseNestedInput
   }
@@ -62145,6 +62190,7 @@ export namespace Prisma {
     subtotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     taxTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     total?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    status?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 

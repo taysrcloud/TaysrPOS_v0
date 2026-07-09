@@ -103,15 +103,14 @@ export const CreatePurchaseModal = ({ suppliers, warehouses, products, onClose, 
 
   const total = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.cost)), 0);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (status: 'PENDING' | 'RECEIVED') => {
     if (!supplierId || !warehouseId || items.length === 0 || items.some(i => !i.productId || i.quantity <= 0)) {
       alert("Veuillez remplir correctement tous les champs obligatoires.");
       return;
     }
 
     setLoading(true);
-    await onSubmit({ supplierId, warehouseId, reference, items });
+    await onSubmit({ supplierId, warehouseId, reference, items, status });
     setLoading(false);
   };
 
@@ -123,7 +122,7 @@ export const CreatePurchaseModal = ({ suppliers, warehouses, products, onClose, 
           <button onClick={onClose} className="ghost-action" style={{ padding: '8px' }}><XCircle size={20} /></button>
         </div>
         
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
           <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
             
             <div style={{ background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '8px', padding: '15px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -241,12 +240,15 @@ export const CreatePurchaseModal = ({ suppliers, warehouses, products, onClose, 
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button type="button" onClick={onClose} className="ghost-action" disabled={loading}>Annuler</button>
-              <button type="submit" className="primary-action" disabled={loading || items.length === 0 || !supplierId || !warehouseId}>
-                <Check size={16} style={{ marginRight: '6px' }} /> Valider la Commande
+              <button type="button" onClick={() => handleSubmit('PENDING')} className="secondary-action" disabled={loading || items.length === 0 || !supplierId || !warehouseId}>
+                <Check size={16} style={{ marginRight: '6px' }} /> Enregistrer (Brouillon)
+              </button>
+              <button type="button" onClick={() => handleSubmit('RECEIVED')} className="primary-action" disabled={loading || items.length === 0 || !supplierId || !warehouseId}>
+                <Check size={16} style={{ marginRight: '6px' }} /> Recevoir le Stock
               </button>
             </div>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

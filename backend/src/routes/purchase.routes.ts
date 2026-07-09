@@ -21,7 +21,7 @@ router.get('/', async (req, res, next) => {
       reference: p.reference,
       supplier: p.supplier?.fullName || 'Inconnu',
       total: Number(p.total),
-      status: 'Livrée',
+      status: p.status,
       date: p.createdAt.toISOString().split('T')[0],
       items: p.items.length,
     }));
@@ -37,6 +37,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
     const parsed = z.object({
       supplierId: z.number().optional().nullable(),
       locationId: z.coerce.number().int().positive().optional(),
+      status: z.enum(['PENDING', 'RECEIVED']).default('RECEIVED'),
       items: z.array(z.object({
         productId: z.number(),
         quantity: z.number(),
@@ -57,6 +58,7 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
           supplierId: parsed.supplierId,
           reference: `ACH-${Math.floor(Math.random() * 10000)}`,
           total: parsed.total,
+          status: parsed.status,
           items: {
             create: parsed.items.map(i => ({
               productId: i.productId,
@@ -68,38 +70,112 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
         }
       });
 
-      let warehouse = await tx.warehouse.findFirst({
-        where: parsed.locationId ? { companyId: company!.id, locationId: parsed.locationId } : { companyId: company!.id }
-      });
-
-      if (!warehouse) {
-        warehouse = await tx.warehouse.create({
-          data: { companyId: company!.id, name: 'Magasin principal', isMain: true }
-        });
-      }
-
-      for (const item of parsed.items) {
-        await tx.productStock.upsert({
-          where: { productId_warehouseId: { productId: item.productId, warehouseId: warehouse.id } } as any,
-          update: { quantity: { increment: item.quantity } },
-          create: { productId: item.productId, warehouseId: warehouse.id, quantity: item.quantity },
+      if (parsed.status === 'RECEIVED') {
+        let warehouse = await tx.warehouse.findFirst({
+          where: parsed.locationId ? { companyId: company!.id, locationId: parsed.locationId } : { companyId: company!.id }
         });
 
-        await tx.stockMovement.create({
-          data: {
-            productId: item.productId,
-            warehouseId: warehouse.id,
-            type: 'IN',
-            quantity: item.quantity,
-            reference: created.reference,
-          }
-        });
+        if (!warehouse) {
+          warehouse = await tx.warehouse.create({
+            data: { companyId: company!.id, name: 'Magasin principal', isMain: true }
+          });
+        }
+
+        for (const item of parsed.items) {
+          await tx.productStock.upsert({
+            where: { productId_warehouseId: { productId: item.productId, warehouseId: warehouse.id } } as any,
+            update: { quantity: { increment: item.quantity } },
+            create: { productId: item.productId, warehouseId: warehouse.id, quantity: item.quantity },
+          });
+
+          await tx.stockMovement.create({
+            data: {
+              productId: item.productId,
+              warehouseId: warehouse.id,
+              type: 'IN',
+              quantity: item.quantity,
+              reference: created.reference,
+            }
+          });
+        }
+        
+        if (parsed.supplierId) {
+          await tx.contact.update({
+            where: { id: parsed.supplierId },
+            data: { balance: { increment: parsed.total } }
+          });
+        }
       }
 
       return created;
     });
 
     res.json({ success: true, purchase });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id/receive', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const parsed = z.object({
+      locationId: z.coerce.number().int().positive().optional()
+    }).parse(req.body);
+
+    const purchase = await prisma.purchase.findUnique({
+      where: { id: Number(id) },
+      include: { items: true }
+    });
+
+    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
+    if (purchase.status === 'RECEIVED') return res.status(400).json({ error: 'Purchase is already received' });
+
+    let warehouse = await prisma.warehouse.findFirst({
+      where: parsed.locationId ? { companyId: purchase.companyId, locationId: parsed.locationId } : { companyId: purchase.companyId }
+    });
+
+    if (!warehouse) {
+      warehouse = await prisma.warehouse.create({
+        data: { companyId: purchase.companyId, name: 'Magasin principal', isMain: true }
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Mark as received
+      await tx.purchase.update({
+        where: { id: purchase.id },
+        data: { status: 'RECEIVED' }
+      });
+
+      // Update supplier balance if needed
+      if (purchase.supplierId) {
+        await tx.contact.update({
+          where: { id: purchase.supplierId },
+          data: { balance: { increment: purchase.total } }
+        });
+      }
+
+      for (const item of purchase.items) {
+        await tx.productStock.upsert({
+          where: { productId_warehouseId: { productId: item.productId, warehouseId: warehouse!.id } } as any,
+          update: { quantity: { increment: item.quantity } },
+          create: { productId: item.productId, warehouseId: warehouse!.id, quantity: item.quantity },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            productId: item.productId,
+            warehouseId: warehouse!.id,
+            type: 'IN',
+            quantity: item.quantity,
+            reference: purchase.reference,
+          }
+        });
+      }
+    });
+
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
