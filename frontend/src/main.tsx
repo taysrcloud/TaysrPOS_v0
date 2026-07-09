@@ -567,6 +567,7 @@ const App = () => {
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   const [expenseForm, setExpenseForm] = useState<ExpenseForm>({ reference: '', category: 'Autre', amount: '', date: new Date().toISOString().split('T')[0], note: '', paymentMethod: 'Espèces' });
   const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<number[]>([]);
   const [filter, setFilter] = useState<ProductType | 'ALL'>('ALL');
   const [dashboardLocationFilter, setDashboardLocationFilter] = useState<'ALL' | number>('ALL');
   const [dashboardPeriod, setDashboardPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('month');
@@ -683,13 +684,13 @@ const App = () => {
     ? ['RETAIL', 'MENU_ITEM', 'INGREDIENT', 'SERVICE']
     : ['RETAIL', 'SERVICE', 'BUNDLE'], [restaurantEnabled]);
   const visibleModules = useMemo(() => {
-    let modules = baseModules.filter(([, , module]) => module === 'POS' || enabledModules.includes(module));
+    let modules = baseModules.filter(([, , module]) => module === 'POS' || (restaurantEnabled && module === 'RESTAURANT'));
     if (currentUser) {
       const allowed = rolePermissions[currentUser.role] || [];
       modules = modules.filter(([label]) => allowed.includes(label as string));
     }
     return modules;
-  }, [enabledModules, currentUser, rolePermissions]);
+  }, [restaurantEnabled, currentUser, rolePermissions]);
   const ActiveIcon = pageIcon(page);
 
   const [activeLocation, setActiveLocation] = useState<string | null>(() => localStorage.getItem('taysrPOS_activeLocation'));
@@ -824,8 +825,8 @@ const App = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: contactForm.name,
-          type: 'Client',
+          fullName: contactForm.name,
+          type: 'CUSTOMER',
           phone: contactForm.phone,
           creditLimit: Number(contactForm.creditLimit) || 0,
           balance: 0,
@@ -1165,6 +1166,7 @@ const App = () => {
 
   const salePayload = (method: PaymentMethod, statusName: 'FINAL' | 'DRAFT' | 'SUSPENDED' | 'QUOTE' = 'FINAL') => {
     const payload: any = {
+      customerId: customer.id !== 0 ? customer.id : undefined,
       customerName: customer.name,
       method,
       status: statusName,
@@ -1527,21 +1529,82 @@ const App = () => {
       isKitchenItem: restaurantEnabled && form.type === 'MENU_ITEM' && form.isKitchenItem,
     };
     try {
-      const response = await apiFetch(`/api/products`, {
-        method: 'POST',
+      const response = await apiFetch(form.id ? `/api/products/${form.id}` : `/api/products`, {
+        method: form.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error((await response.json()).message || 'Erreur creation produit');
-      const created = await response.json();
-      setProducts(current => [created, ...current]);
+      if (!response.ok) throw new Error((await response.json()).message || 'Erreur creation/modification produit');
+      const saved = await response.json();
+      if (form.id) {
+        setProducts(current => current.map(p => p.id === saved.id ? saved : p));
+        setStatus('Produit modifié');
+      } else {
+        setProducts(current => [saved, ...current]);
+        setStatus('Produit ajoute');
+      }
       resetProductForm();
-      setStatus('Produit ajoute');
       setProductModalOpen(false);
     } catch (error: any) {
       setStatus(error?.message || 'Erreur de connexion a l\'API');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const editProduct = (product: Product) => {
+    setForm({
+      id: product.id,
+      name: product.name,
+      salePrice: String(product.salePrice),
+      purchasePrice: String(product.purchasePrice),
+      categoryName: product.category,
+      brandName: product.brand || '',
+      unitName: product.unit || '',
+      barcode: product.barcode || '',
+      sku: product.sku || '',
+      imageUrl: product.imageUrl || '',
+      tvaRate: String(product.tvaRate),
+      trackStock: product.trackStock,
+      lowStockAlert: String(product.lowStockAlert),
+      initialStock: String(product.stock),
+      type: product.type,
+      isKitchenItem: product.isKitchenItem,
+      isVariable: product.isVariable,
+      variationOptions: product.variationOptions,
+      variations: (product.variations || []).map(v => ({ ...v, salePrice: String(v.salePrice || ''), purchasePrice: String(v.purchasePrice || ''), stock: String(v.stock || ''), lowStockAlert: '0', barcode: v.barcode || '', sku: v.sku || '' })),
+    });
+    setProductModalOpen(true);
+  };
+
+  const toggleProductStatus = async (id: number, activate: boolean) => {
+    try {
+      const response = await apiFetch('/api/products/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id], action: activate ? 'ACTIVATE' : 'DEACTIVATE' })
+      });
+      if (!response.ok) throw new Error('Erreur API');
+      setProducts(current => current.map(p => p.id === id ? { ...p, isActive: activate } : p));
+      setSelectedProducts(prev => prev.filter(pId => pId !== id));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const bulkUpdateProducts = async (activate: boolean) => {
+    if (selectedProducts.length === 0) return;
+    try {
+      const response = await apiFetch('/api/products/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedProducts, action: activate ? 'ACTIVATE' : 'DEACTIVATE' })
+      });
+      if (!response.ok) throw new Error('Erreur API');
+      setProducts(current => current.map(p => selectedProducts.includes(p.id) ? { ...p, isActive: activate } : p));
+      setSelectedProducts([]);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -1886,7 +1949,7 @@ const App = () => {
           <div className="cart-customer-bar">
             <Users className="cart-customer-icon" size={16} />
             <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
-              {contacts.filter(c => c.type.includes('Client')).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
+              {contacts.filter(c => ['CUSTOMER', 'BOTH'].includes(c.type)).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
             </select>
             <button className="cart-add-customer" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
           </div>
@@ -1934,10 +1997,10 @@ const App = () => {
           }, 0);
         }} style={{ background: '#f59e0b', color: '#fff', border: 'none' }}><ChefHat size={16} /> Cuisine</button>}
         {restaurantEnabled && <button id="btn-cuisine-auto-suspend" style={{display: 'none'}} onClick={() => recordDraft('Suspendue')}></button>}
-        <button disabled={!cart.length} className="primary-action" onClick={() => {
+        <button disabled={!cart.length} className="pay-btn" onClick={() => {
           setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0', storeCredit: '0' });
           setPaymentModalOpen(true);
-        }} style={{ flex: 2, fontSize: '1.1rem' }}>Payer {formatMoney(cartTotal)}</button>
+        }}>Payer {formatMoney(cartTotal)}</button>
         <button className="recent" onClick={() => setTransactionsModalOpen(true)}><Clock size={16} /> Transactions</button>
       </div>
         </div>
@@ -2594,7 +2657,11 @@ const App = () => {
           <div className="filter-row">{(['ALL', ...visibleTypes] as const).map(type => <button className={filter === type ? 'selected' : ''} onClick={() => setFilter(type)} key={type}>{type === 'ALL' ? 'Tous' : typeLabel[type]}</button>)}</div>
         </div>
       </div>
-      <ProductsTable products={visibleProducts} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} visibleTypes={visibleTypes} addToCart={addToCart} />
+      <ProductsTable
+        products={visibleProducts} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} visibleTypes={visibleTypes} addToCart={addToCart}
+        selectedIds={selectedProducts} onSelect={(id) => setSelectedProducts(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])}
+        onSelectAll={(ids) => setSelectedProducts(ids)} onEdit={editProduct} onToggleActive={toggleProductStatus} bulkUpdateProducts={bulkUpdateProducts}
+      />
     </>
   );
 
@@ -3365,7 +3432,7 @@ const App = () => {
                   <p style={{ color: '#64748b', fontSize: '0.92rem', margin: 0 }}>Creez une facture manuelle sans partir d'un ticket de caisse.</p>
                   <select value={manualInvoiceCustomer || ''} onChange={e => setManualInvoiceCustomer(Number(e.target.value))} style={{ width: '100%', padding: '0.85rem', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
                     <option value="">-- Choisir un client --</option>
-                    {contacts.filter(c => c.type.includes('Client')).map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
+                    {contacts.filter(c => ['CUSTOMER', 'BOTH'].includes(c.type)).map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}
                   </select>
                   <div style={{ maxHeight: '380px', overflowY: 'auto', display: 'grid', gap: '0.75rem', paddingRight: '0.25rem' }}>
                     {manualInvoiceLines.map((line, index) => (
@@ -4232,7 +4299,14 @@ const App = () => {
               <label><span>Devise par défaut</span><select value={companySettings.currency} onChange={e => setCompanySettings(s => ({...s, currency: e.target.value}))} style={{ height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px' }}><option value="MAD">MAD (Dirham)</option><option value="EUR">EUR (Euro)</option><option value="USD">USD (Dollar)</option></select></label>
               <label><span>TVA par défaut (%)</span><input type="number" value={companySettings.defaultTva} onChange={e => setCompanySettings(s => ({...s, defaultTva: e.target.value}))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row', marginTop: '10px' }}><input type="checkbox" checked={companySettings.pricesIncludeTva} onChange={e => setCompanySettings(s => ({...s, pricesIncludeTva: e.target.checked}))} style={{ width: 'auto' }} /> <span>Les prix saisis incluent la TVA (TTC)</span></label>
-              <label style={{ marginTop: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', flexDirection: 'row', marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                <input type="checkbox" checked={companySettings.restaurantEnabled} onChange={e => setCompanySettings(s => ({...s, restaurantEnabled: e.target.checked}))} style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} /> 
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.9rem' }}>Activer le module Restaurant</span>
+                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Affiche les modules Tables et Cuisine dans la barre latérale.</span>
+                </div>
+              </label>
+              <label style={{ marginTop: '16px' }}>
                 <span>Verrouillage automatique (minutes)</span>
                 <input type="number" min="0" value={companySettings.autoLockMinutes} onChange={e => setCompanySettings(s => ({...s, autoLockMinutes: Number(e.target.value)}))} style={{ marginTop: '4px' }} />
                 <small style={{display:'block',marginTop:'4px',color:'#64748b'}}>0 pour désactiver</small>
@@ -4630,8 +4704,8 @@ const App = () => {
       if (page === 'Factures') return renderFactures();
     if (page === 'Paiements') return renderPayments();
     if (page === 'Rapports') return renderReports();
-    if (page === 'Tables') return renderTables();
-    if (page === 'Cuisine') return renderKitchen();
+    if (page === 'Tables') return restaurantEnabled ? renderTables() : renderDashboard();
+    if (page === 'Cuisine') return restaurantEnabled ? renderKitchen() : renderDashboard();
     if (page === 'Parametres') return renderSettings();
     if (page === 'Caisses') return renderRegisters();
     return renderDashboard();
@@ -4749,7 +4823,7 @@ const App = () => {
       <main className={page === 'POS' ? 'pos-main' : undefined}>
         {renderPage()}
         {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} serialPort={serialPort} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
-        {purchaseModalOpen && <CreatePurchaseModal suppliers={contacts.filter(c => c.type.includes('Fournisseur'))} warehouses={locations} products={products} formatMoney={formatMoney} onClose={() => setPurchaseModalOpen(false)} onSubmit={async (data) => {
+        {purchaseModalOpen && <CreatePurchaseModal suppliers={contacts.filter(c => ['SUPPLIER', 'BOTH'].includes(c.type))} warehouses={locations} products={products} formatMoney={formatMoney} onClose={() => setPurchaseModalOpen(false)} onSubmit={async (data) => {
           try {
             const finalItems = [];
             for (const item of data.items) {
@@ -5047,26 +5121,43 @@ const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoi
   </div>
 );
 
-const ProductsTable = ({ products, filter, setFilter, search, setSearch, visibleTypes, addToCart }: { products: Product[]; filter: ProductType | 'ALL'; setFilter: (value: ProductType | 'ALL') => void; search: string; setSearch: (value: string) => void; visibleTypes: ProductType[]; addToCart: (product: Product) => void }) => (
+const ProductsTable = ({ products, filter, setFilter, search, setSearch, visibleTypes, addToCart, selectedIds, onSelect, onSelectAll, onEdit, onToggleActive, bulkUpdateProducts }: { products: Product[]; filter: ProductType | 'ALL'; setFilter: (value: ProductType | 'ALL') => void; search: string; setSearch: (value: string) => void; visibleTypes: ProductType[]; addToCart: (product: Product) => void; selectedIds: number[]; onSelect: (id: number) => void; onSelectAll: (ids: number[]) => void; onEdit: (product: Product) => void; onToggleActive: (id: number, activate: boolean) => void; bulkUpdateProducts: (activate: boolean) => void }) => (
   <section className="table-section product-list-section">
+    {selectedIds.length > 0 && (
+      <div style={{ display: 'flex', gap: '1rem', padding: '1rem 2rem', background: '#eff6ff', borderBottom: '1px solid #bfdbfe', alignItems: 'center' }}>
+        <strong style={{ color: '#1e3a8a', fontSize: '0.9rem' }}>{selectedIds.length} produit(s) sélectionné(s)</strong>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button type="button" className="ghost-action" style={{ color: '#10b981', background: '#d1fae5', border: 'none' }} onClick={() => bulkUpdateProducts(true)}>Activer sélection</button>
+          <button type="button" className="ghost-action" style={{ color: '#ef4444', background: '#fee2e2', border: 'none' }} onClick={() => bulkUpdateProducts(false)}>Désactiver sélection</button>
+        </div>
+      </div>
+    )}
     <div className="table-toolbar product-list-toolbar">
       <div className="search-box"><Search size={17} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher produit, SKU, code-barres..." /></div>
       <div className="filter-row">{(['ALL', ...visibleTypes] as const).map(type => <button className={filter === type ? 'selected' : ''} onClick={() => setFilter(type)} key={type}>{type === 'ALL' ? 'Tous' : typeLabel[type]}</button>)}</div>
     </div>
     <div className="product-table modern-product-table">
-      <div className="table-head"><span>Produit</span><span>Catalogue</span><span>Prix</span><span>Stock</span><span>Actions</span></div>
-      {products.map(product => <div className="table-row" key={product.id}>
+      <div className="table-head">
+        <span style={{ width: '40px', textAlign: 'center' }}><input type="checkbox" checked={products.length > 0 && selectedIds.length === products.length} onChange={(e) => onSelectAll(e.target.checked ? products.map(p => p.id) : [])} /></span>
+        <span>Produit</span><span>Catalogue</span><span>Prix</span><span>Stock</span><span>Actions</span>
+      </div>
+      {products.map(product => <div className={`table-row ${!product.isActive ? 'deactivated' : ''}`} key={product.id} style={{ opacity: product.isActive ? 1 : 0.6 }}>
+        <span style={{ width: '40px', textAlign: 'center' }}><input type="checkbox" checked={selectedIds.includes(product.id)} onChange={() => onSelect(product.id)} /></span>
         <span className="product-cell">
-          <span className="product-thumb">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={18} />}</span>
+          <span className="product-thumb" style={{ filter: product.isActive ? 'none' : 'grayscale(1)' }}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={18} />}</span>
           <span>
-            <strong>{product.name} {product.isVariable && <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#3b82f6', color: 'white', borderRadius: '4px', marginLeft: '6px', verticalAlign: 'middle' }}>Variable ({product.variations?.length || 0})</span>}</strong>
+            <strong>{product.name} {!product.isActive && <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#ef4444', color: 'white', borderRadius: '4px', marginLeft: '6px' }}>Inactif</span>} {product.isVariable && <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#3b82f6', color: 'white', borderRadius: '4px', marginLeft: '6px', verticalAlign: 'middle' }}>Variable ({product.variations?.length || 0})</span>}</strong>
             <small>{product.sku}{product.barcode ? ` / ${product.barcode}` : ''}</small>
           </span>
         </span>
         <span>{product.category}<small>{product.brand || 'Sans marque'} / {product.unit || 'pcs'} / {typeLabel[product.type]}</small></span>
         <span>{product.isVariable ? '-' : formatMoney(product.salePrice)}<small>{product.isVariable ? 'Prix multiples' : `Achat ${formatMoney(product.purchasePrice)} / TVA ${product.tvaRate}%`}</small></span>
         <span><b className={!product.isVariable && product.trackStock && product.stock <= product.lowStockAlert ? 'stock-warn' : 'stock-ok'}>{product.isVariable ? '-' : (product.trackStock ? product.stock : '-')}</b><small>{product.isVariable ? 'Stock par variation' : (product.trackStock ? `Alerte ${product.lowStockAlert}` : 'Non suivi')}</small></span>
-        <span className="list-actions"><button className="row-action" onClick={() => addToCart(product)}>Vendre</button><button className="ghost-action">Stock</button></span>
+        <span className="list-actions">
+          <button className="row-action" onClick={() => addToCart(product)} disabled={!product.isActive}>Vendre</button>
+          <button className="ghost-action" onClick={() => onEdit(product)}><Edit2 size={14} style={{ marginRight: '4px' }} /> Modifier</button>
+          <button className="ghost-action" style={{ color: product.isActive ? '#ef4444' : '#10b981' }} onClick={() => onToggleActive(product.id, !product.isActive)}>{product.isActive ? 'Désactiver' : 'Activer'}</button>
+        </span>
       </div>)}
     </div>
   </section>

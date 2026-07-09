@@ -13,6 +13,7 @@ const demoCatalog = new Map([
 ]);
 
 const saleSchema = z.object({
+  customerId: z.coerce.number().int().positive().optional().nullable(),
   customerName: z.string().trim().optional().default('Client comptoir'),
   method: z.enum(['CASH', 'CARD', 'CREDIT', 'MULTI']).default('CASH'),
   status: z.enum(['FINAL', 'DRAFT', 'SUSPENDED', 'QUOTE']).default('FINAL'),
@@ -157,9 +158,12 @@ router.post('/', async (req, res) => {
 
     const sale = await prisma.$transaction(async (tx) => {
       const customerName = data.customerName || 'Client comptoir';
-      const customer = customerName === 'Client comptoir'
-        ? null
-        : await tx.contact.create({ data: { companyId: company.id, type: 'CUSTOMER', fullName: customerName } });
+      let customer = null;
+      if (data.customerId) {
+        customer = await tx.contact.findUnique({ where: { id: data.customerId } });
+      } else if (customerName !== 'Client comptoir') {
+        customer = await tx.contact.create({ data: { companyId: company.id, type: 'CUSTOMER', fullName: customerName } });
+      }
 
       const created = await tx.sale.create({
         data: {
