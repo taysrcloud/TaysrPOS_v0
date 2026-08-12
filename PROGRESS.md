@@ -1,5 +1,43 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-12 - Full ERP parity migration: Phase 0 + Phase 1 (partial)
+
+Full plan: `/data/data/com.termux/files/home/.claude/plans/jolly-percolating-robin.md`. Direction change
+recorded in TRACE.md and as override notes in `docs/BLUEPRINT.md`/`docs/PRODUCT_DECISIONS.md`.
+
+**Phase 0 (repo hygiene) - done and committed** (`c100464`):
+- [x] Committed the 2026-07-16 tenant-isolation pass that had sat uncommitted since 2026-07-09.
+- [x] Untracked `backend/src/generated/client` (build artifact) and gitignored it.
+- [x] Fixed corrupted backtick escapes in this file's 2026-07-09 entry.
+- [x] Verified: `contact.routes.ts` genuinely has 2 endpoints (matches this file's own "create/list only"
+      targeted step, contradicts the Phase 7 checklist above claiming a full customer dossier + supplier
+      ledger) - treat every `[x]` above as unverified against code until re-checked.
+
+**Phase 1 (nav/route registry) - done, revised scope**:
+- [x] Corrected a false claim in this project's own docs: the 2026-07-09 entry below
+      ("Extracted `SettingsPage`, `RestaurantTablesPage`, `ExpensesPage`... `PageHeader`") did not
+      actually happen. `frontend/src/components/` was empty; `main.tsx` was still one 5,969-line `App`
+      component with 115 `useState` hooks and no separate page files.
+- [x] Extracted `PageHeader` and `productImage` into `frontend/src/components/` (zero-dependency,
+      no behavior change).
+- [x] Replaced the `renderPage()` if-chain with a `pageRenderers: Record<PageKey, ...>` registry, so
+      new pages (all of Tracks A-J) register one entry instead of growing an if-chain. `baseModules`
+      already served this role for the sidebar (label/icon/role filtering) - now both dispatch and nav
+      are registry-driven.
+- [x] Added `frontend/src/context/PosContext.tsx` and extracted the two smallest pages
+      (`RegistersPage`, `PaymentsPage`, ~43 lines each) into `frontend/src/pages/` as proof of the
+      extraction pattern, using named context fields (not prop interfaces) so a wrong reference is a
+      compile error, not a silent prop swap.
+- [ ] **Deferred, not done:** mass extraction of the remaining 13 pages. `renderReports` (~370 lines,
+      has its own nested `renderTabNav` sub-renderer) and `renderKitchen` (~160 lines) are next in line
+      but were not attempted this session - they're a meaningfully bigger jump in complexity than the
+      two done. **`renderRegister` (the POS cart, ~730 lines) is explicitly deferred until a session
+      with browser access** - TRACE.md already flags register logic as critical/easy to regress, and
+      this environment has no display and can't install `puppeteer` ("platform not supported").
+- Verified with: `tsc -b --pretty false` (clean) and `vite build` (clean, output size unchanged) after
+  every step. **Not verified in-browser** - no display/puppeteer available in this environment. Manual
+  click-through of all pages is still required before Phase 1 is considered fully done.
+
 ## Current Active Phases
 
 ### 1. Data Models & API Alignment (Core)

@@ -54,6 +54,11 @@ import {
   AreaChart, Area, ComposedChart, LineChart, Line, PieChart, Pie, Cell
 } from 'recharts';
 import { CreatePurchaseModal } from './purchase-modals';
+import { PageHeader } from './components/PageHeader';
+import { productImage } from './components/productImage';
+import { PosContext, type PosContextValue } from './context/PosContext';
+import { RegistersPage } from './pages/RegistersPage';
+import { PaymentsPage } from './pages/PaymentsPage';
 import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
@@ -175,7 +180,7 @@ type ProductForm = {
 
 type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
 type SaleLine = { productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; note?: string; };
-type SaleRecord = {
+export type SaleRecord = {
   invoiceId?: number;
   userId?: number;
   cashierName?: string;
@@ -235,7 +240,7 @@ type LoginAccountOption = {
   companyName: string;
 };
 
-type RegisterHistory = {
+export type RegisterHistory = {
   id: number;
   userId?: number;
   openedAt: string;
@@ -317,8 +322,6 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
   return res;
 };
 
-const productImage = (label: string, bg = '#dbeafe') => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs><rect width="320" height="220" rx="28" fill="url(#g)"/><rect x="94" y="38" width="132" height="148" rx="24" fill="#fff" stroke="#cbd5e1"/><circle cx="160" cy="88" r="28" fill="${bg}"/><rect x="118" y="130" width="84" height="12" rx="6" fill="#cbd5e1"/><rect x="130" y="150" width="60" height="10" rx="5" fill="#e2e8f0"/><text x="160" y="206" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#0f172a">${label}</text></svg>`)}`;
-
 const baseModules = [
   ['Tableau de bord', LayoutDashboard, 'POS'],
   ['Clients & Fournisseurs', Users, 'POS'],
@@ -372,7 +375,7 @@ const emptyForm: ProductForm = {
   variations: [],
 };
 
-const formatMoney = (value: number) => `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
+export const formatMoney = (value: number) => `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 
 const typeLabel: Record<ProductType, string> = {
   RETAIL: 'Article retail',
@@ -471,19 +474,6 @@ const pageIcon = (page: PageKey) => {
   const found = baseModules.find(([label]) => label === page);
   return found?.[1] || LayoutDashboard;
 };
-
-const PageHeader = ({ title, subtitle, action, icon: Icon }: { title: string; subtitle?: string; action?: React.ReactNode; icon?: any }) => (
-  <div className="modern-page-header">
-    <div className="header-content">
-      {Icon && <div className="header-icon-container"><Icon size={24} strokeWidth={2.5} /></div>}
-      <div>
-        <h1 className="modern-page-title">{title}</h1>
-        {subtitle && <p className="modern-page-subtitle">{subtitle}</p>}
-      </div>
-    </div>
-    {action && <div className="modern-page-actions">{action}</div>}
-  </div>
-);
 
 const App = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => readStoredUser());
@@ -3665,48 +3655,7 @@ const App = () => {
     </section>;
   };
 
-  const renderPayments = () => {
-    const rows = sales
-      .filter(sale => paymentFilter === 'ALL' || sale.status === paymentFilter)
-      .sort((left, right) => {
-        const leftDue = getSaleDueAmount(left);
-        const rightDue = getSaleDueAmount(right);
-        if (left.status === 'Credit' && right.status !== 'Credit') return -1;
-        if (right.status === 'Credit' && left.status !== 'Credit') return 1;
-        if (rightDue !== leftDue) return rightDue - leftDue;
-        return right.id - left.id;
-      });
-    const outstandingTotal = rows.reduce((sum, sale) => sum + getSaleDueAmount(sale), 0);
-    const creditCount = rows.filter(sale => sale.status === 'Credit').length;
-    return <section className="panel table-section flush-top">
-      <div style={{ padding: '1.5rem 1.5rem 0' }}>
-        <PageHeader 
-          icon={Banknote}
-          title="Paiements" 
-          subtitle="Encaissements et crédits" 
-          action={<strong style={{ fontSize: '1.2rem', color: '#16a34a' }}>Total: {formatMoney(rows.reduce((sum, sale) => sum + sale.total, 0))}</strong>} 
-        />
-      </div>
-      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
-        <div className="filter-row inline">{(['ALL', 'Payee', 'Credit'] as const).map(value => <button key={value} className={paymentFilter === value ? 'selected' : ''} onClick={() => setPaymentFilter(value)}>{value === 'ALL' ? 'Tous' : value}</button>)}</div>
-        <div className="table-toolbar-stats">
-          <div className="toolbar-stat-item">
-            <span className="toolbar-stat-value">{rows.length}</span>
-            <span className="toolbar-stat-label">Transactions</span>
-          </div>
-          <div className="toolbar-stat-item">
-            <span className="toolbar-stat-value">{creditCount}</span>
-            <span className="toolbar-stat-label">Credits ouverts</span>
-          </div>
-          <div className="toolbar-stat-item">
-            <span className="toolbar-stat-value">{formatMoney(outstandingTotal)}</span>
-            <span className="toolbar-stat-label">Reste a encaisser</span>
-          </div>
-        </div>
-      </div>
-      <RecordTable sales={rows} onOpenReceipt={setReceiptSale} onOpenInvoice={setInvoiceSale} onResumeSale={resumeSale} onSettleSale={openSaleSettlement} />
-    </section>;
-  };
+  // renderPayments extracted to src/pages/PaymentsPage.tsx (Phase 1 registry work).
 
   const renderReports = () => {
     const filterByPeriod = (list: SaleRecord[]) => {
@@ -4795,66 +4744,36 @@ const App = () => {
     </section>
   );
 
-  const renderRegisters = () => {
-    const localLogs = registerLogs.filter(log => !log.locationId || log.locationId === currentLocationId);
-    return (
-    <section className="panel table-section flush-top">
-      <div style={{ padding: '1.5rem 1.5rem 0' }}>
-        <PageHeader 
-          icon={Lock}
-          title="Historique des Caisses" 
-          subtitle="Suivi des ouvertures et clôtures de caisse" 
-        />
-      </div>
-      <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 1.5rem 1.5rem' }}>
-        <div className="table-toolbar-stats">
-          <div className="toolbar-stat-item">
-            <span className="toolbar-stat-value">{localLogs.length}</span>
-            <span className="toolbar-stat-label">Sessions</span>
-          </div>
-        </div>
-      </div>
-      <div className="data-table">
-        <div className="data-head" style={{ gridTemplateColumns: '1fr 1.5fr 1.5fr 1fr 1fr 1fr 1fr' }}>
-          <span>ID</span><span>Ouverture</span><span>Clôture</span><span>Caissier</span><span>Attendu</span><span>Déclaré</span><span>Écart</span>
-        </div>
-        {localLogs.map(log => (
-          <div className="data-row" style={{ gridTemplateColumns: '1fr 1.5fr 1.5fr 1fr 1fr 1fr 1fr' }} key={log.id}>
-            <span>#{log.id}</span>
-            <span>{log.openedAt}</span>
-            <span>{log.closedAt}</span>
-            <span>{log.cashierName}</span>
-            <span>{formatMoney(log.expectedCash)}</span>
-            <span>{formatMoney(log.actualCash)}</span>
-            <span className={log.difference === 0 ? 'badge ok' : log.difference > 0 ? 'badge ok' : 'badge warn'}>
-              {formatMoney(log.difference)}
-            </span>
-          </div>
-        ))}
-        {localLogs.length === 0 && (
-          <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Aucun historique disponible.</div>
-        )}
-      </div>
-    </section>
-  )};
+  // renderRegisters extracted to src/pages/RegistersPage.tsx (Phase 1 registry work).
 
-  const renderPage = () => {
-    if (page === 'Tableau de bord') return renderDashboard();
-    if (page === 'POS') return renderRegister();
-    if (page === 'Produits') return renderProducts();
-    if (page === 'Clients & Fournisseurs') return renderContacts();
-    if (page === 'Stock') return renderStock();
-    if (page === 'Achats') return renderPurchases();
-    if (page === 'Depenses') return renderExpenses();
-    if (page === 'Ventes') return renderSales();
-      if (page === 'Factures') return renderFactures();
-    if (page === 'Paiements') return renderPayments();
-    if (page === 'Rapports') return renderReports();
-    if (page === 'Tables') return restaurantEnabled ? renderTables() : renderDashboard();
-    if (page === 'Cuisine') return restaurantEnabled ? renderKitchen() : renderDashboard();
-    if (page === 'Parametres') return renderSettings();
-    if (page === 'Caisses') return renderRegisters();
-    return renderDashboard();
+  // Page dispatch registry: new pages/tracks add one entry here instead of
+  // growing an if-chain. Keyed by PageKey so a missing/typo'd key is a
+  // compile error. Restaurant-only pages fall back to the dashboard when the
+  // module isn't enabled, matching the previous inline ternaries exactly.
+  const pageRenderers: Record<PageKey, () => React.ReactNode> = {
+    'Tableau de bord': renderDashboard,
+    'POS': renderRegister,
+    'Produits': renderProducts,
+    'Clients & Fournisseurs': renderContacts,
+    'Stock': renderStock,
+    'Achats': renderPurchases,
+    'Depenses': renderExpenses,
+    'Ventes': renderSales,
+    'Factures': renderFactures,
+    'Paiements': () => <PaymentsPage />,
+    'Rapports': renderReports,
+    'Tables': () => (restaurantEnabled ? renderTables() : renderDashboard()),
+    'Cuisine': () => (restaurantEnabled ? renderKitchen() : renderDashboard()),
+    'Parametres': renderSettings,
+    'Caisses': () => <RegistersPage />,
+  };
+  const renderPage = () => (pageRenderers[page] ?? renderDashboard)();
+
+  // Fields extracted pages need via usePos(). Grows as more pages extract.
+  const posContextValue: PosContextValue = {
+    sales, paymentFilter, setPaymentFilter, getSaleDueAmount,
+    setReceiptSale, setInvoiceSale, resumeSale, openSaleSettlement,
+    registerLogs, currentLocationId,
   };
 
   if (authChecking) {
@@ -4933,6 +4852,7 @@ const App = () => {
   }
 
   return (
+    <PosContext.Provider value={posContextValue}>
     <div className="app-shell">
       {(!isFullscreen || page !== 'POS') && (
       <aside className="sidebar">
@@ -5140,6 +5060,7 @@ const App = () => {
         )}
       </main>
     </div>
+    </PosContext.Provider>
   );
 };
 
@@ -5147,7 +5068,7 @@ const Metric = ({ title, value, detail, tone, icon: Icon }: { title: string; val
   <div className={`metric-card ${tone}`}><div><span>{title}</span><strong>{value}</strong><small>{detail}</small></div><Icon size={38} /></div>
 );
 
-const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSettleSale, selectedSaleIds, onToggleSaleSelection, isSaleSelectable }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void; onOpenInvoice?: (sale: SaleRecord) => void; onResumeSale?: (sale: SaleRecord) => void; onSettleSale?: (sale: SaleRecord) => void; selectedSaleIds?: number[]; onToggleSaleSelection?: (sale: SaleRecord) => void; isSaleSelectable?: (sale: SaleRecord) => boolean }) => (
+export const RecordTable = ({ sales, onOpenReceipt, onOpenInvoice, onResumeSale, onSettleSale, selectedSaleIds, onToggleSaleSelection, isSaleSelectable }: { sales: SaleRecord[]; onOpenReceipt?: (sale: SaleRecord) => void; onOpenInvoice?: (sale: SaleRecord) => void; onResumeSale?: (sale: SaleRecord) => void; onSettleSale?: (sale: SaleRecord) => void; selectedSaleIds?: number[]; onToggleSaleSelection?: (sale: SaleRecord) => void; isSaleSelectable?: (sale: SaleRecord) => boolean }) => (
   <div className="data-table sales-table">
     <div className="data-head"><span style={{ width: '38px' }}></span><span>Ticket</span><span>Client</span><span>Total</span><span>Reste</span><span>Paiement</span><span>Statut</span><span>Action</span></div>
     {sales.map(sale => {

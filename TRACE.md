@@ -119,6 +119,30 @@ When POS v0 changes, note:
   Treat this as an active risk on every edit, not a resolved one - the hardening track adds a
   lightweight pattern-based check for it.
 
+## 2026-08-12 - Phase 1 nav/route registry (scope revised mid-work)
+
+- Workflow: original Phase 1 plan called for adding React Router and extracting all 15 pages out of
+  `main.tsx`. Both were withdrawn after discovering `App` has 115 `useState` hooks in one component and
+  this environment has no browser/display to verify a UI-behavior change (puppeteer devDependency fails
+  to install here: "platform not supported"). Revised to: no router (this is a terminal-style POS with
+  live auth/cart/register state - URL/history semantics need visual verification this environment can't
+  do), and opportunistic smallest-first extraction via a shared Context instead of prop interfaces (a
+  wrong prop name is a compile error with Context; a same-typed prop *swap* is not, and there was no
+  runtime check available to catch one).
+- What shipped: `pageRenderers` registry replacing the `renderPage()` if-chain; `PosContext` +
+  `frontend/src/pages/{RegistersPage,PaymentsPage}.tsx` as the first real extractions, proving the
+  pattern; `PageHeader`/`productImage` moved into `frontend/src/components/`.
+- UI rules preserved: zero behavior change intended anywhere in this pass - every extraction is a
+  mechanical move (same JSX, same logic), not a rewrite. `vite build` output size was checked after each
+  step and stayed within noise of the baseline.
+- Explicitly deferred: `renderRegister` (the POS cart) - already flagged below as critical/easy-to-regress,
+  and this is the one page where a silent Context-wiring mistake costs real money. Do not extract it
+  without browser verification. `renderReports`/`renderKitchen` are next smallest but were not started
+  this session.
+- Platform/provisioning impact: none - purely a frontend file-organization change, no API/schema touched.
+- Source inspiration: none from UltimatePOS for this pass - purely a build-out of this codebase's own
+  existing `baseModules`/`pageIcon` pattern into a matching dispatch-side registry.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.
