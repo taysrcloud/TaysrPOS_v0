@@ -718,6 +718,39 @@ parseable) so neither can silently regress. Full smoke suite (29 assertions) sti
 workspaces' `tsc` clean. Demo company/seed data (`admin`/`admin123` etc.) left in the dev database
 intentionally for future manual exploration.
 
+## 2026-08-12 - Dependabot alerts resolved (all 12 were transitive dev/build-tool deps)
+
+- GitHub flagged 12 open alerts (7 high, 4 moderate, 1 low) on `package-lock.json` after the last push.
+  Traced every one before touching anything - none were direct dependencies of the app itself:
+  - `fast-uri`, `hono`, `valibot` - pulled in by Prisma's local-dev tooling (`@prisma/dev`, used by
+    `prisma dev`/Prisma Studio), a devDependency of `prisma` in `backend/package.json`. Never runs in
+    the deployed backend, which only imports `@prisma/client`.
+  - `nanoid`, `postcss` - pulled in by `vite`'s CSS/build pipeline. `vite` is declared under frontend
+    `dependencies` (arguably should be `devDependencies` - it's a build tool, not shipped in `dist/`),
+    but its transitive deps never ship in the built bundle either way; they only run during
+    `npm run build`/`npm run dev`.
+  - `shell-quote` - pulled in by `concurrently` (root devDependency, used only to run npm scripts in
+    parallel).
+  None of the vulnerable code paths (URL host-confusion parsing, SSR memoization, ID generation,
+  sourcemap auto-loading, shell-argument parsing) are reachable by an attacker against the running app -
+  they only execute on a developer's or CI's machine during build/dev. Still worth fixing since GitHub
+  will keep alerting and the fix was non-breaking.
+- Ran `PUPPETEER_SKIP_DOWNLOAD=true npm audit fix` at the root (the env var is required here because a
+  plain `npm install`/`npm audit fix` reinstalls `node_modules` and re-triggers Puppeteer's postinstall,
+  which fails outright on Termux/aarch64 - same root cause documented in the headless-browser setup
+  entry above). Result: 0 vulnerabilities, only `package-lock.json` changed (643 insertions/276
+  deletions) - no `package.json` version ranges needed bumping, every fix resolved transitively.
+- Verified nothing broke from the reinstall: backend `tsc --noEmit` clean, frontend `tsc -b` clean,
+  `vite build` succeeds, `prisma generate` succeeds against the bumped `prisma@7.9.1`, the native
+  Chromium/Puppeteer headless-browser setup still launches and reports its version correctly, and the
+  full `tenant-isolation-smoke.ts` suite (29 assertions) still passes against a live backend + Postgres.
+  (Verification note: `tsc`/`vite`/`prisma`'s own bin scripts use a `#!/usr/bin/env node` shebang, which
+  fails to exec in this particular shell session with `sh: 1: tsc: not found` because Termux's
+  `env` doesn't live at `/usr/bin/env` and this session's shell isn't getting `termux-exec`'s
+  `LD_PRELOAD` redirect - unrelated to the dependency bump, worked around here by invoking `node
+  <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
+  future session hits the same "tsc not found" red herring after a clean `npm install`.)
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

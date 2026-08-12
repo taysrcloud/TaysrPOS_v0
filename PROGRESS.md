@@ -549,3 +549,12 @@ Each time a meaningful block is finished:
   showing the real 90,00 MAD total and a chart with the actual sale data point. Locked into
   `tenant-isolation-smoke.ts` as two new regression assertions. Full smoke suite (29 assertions) still
   passes, both workspaces' `tsc` clean. Full writeup in TRACE.md.
+
+## 2026-08-12 - Resolved all 12 open Dependabot alerts
+
+- All 12 (7 high, 4 moderate, 1 low) were transitive deps of dev/build-only tooling (Prisma's local-dev
+  package, Vite's CSS pipeline, `concurrently`) - never reachable by an attacker against the running app.
+  Fixed anyway via `npm audit fix` (only `package-lock.json` changed, no manifest version bumps needed).
+  Verified: both workspaces' `tsc` clean, `vite build` succeeds, `prisma generate` succeeds, the
+  headless-browser tooling still launches, and the full 29-assertion smoke suite still passes. `npm
+  audit` now reports 0 vulnerabilities. Full writeup in TRACE.md.
