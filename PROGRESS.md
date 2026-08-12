@@ -517,3 +517,16 @@ Each time a meaningful block is finished:
   oversights): Expense edit/deactivate doesn't reconcile the ledger, credit-sale settlement has no
   backend endpoint at all, Account reports (trial-balance style) not built, Purchase permanently excluded
   (no cash leg in the model).
+
+## 2026-08-12 - Headless browser unblocked: the "no display" caveat is resolved
+
+- Termux's `x11-repo` ships a real native aarch64 Chromium (despite the repo name, no X server needed at
+  runtime for `--headless --no-sandbox`). Installed alongside Puppeteer, pointed at the native binary
+  instead of Puppeteer's own (unavailable-on-this-platform) bundled download.
+- Verified with a real screenshot of the actual running TaysrPOS login page - real fonts, gradient, and
+  form styling. First visual inspection of any UI in this project this session.
+- Automated as `frontend/scripts/setup-headless-browser.sh` (`npm run browser:setup`) and a reusable
+  one-shot screenshot CLI, `frontend/scripts/screenshot.mjs` (`npm run screenshot -- <url> <output.png>`).
+- Not yet done: logging into the actual app with real/seeded credentials and clicking through to
+  Reports/Payments to close out today's earlier accent-bug-fix visual-verification gap - the setup is
+  ready for it, just not yet exercised against the login-gated UI. Full writeup in TRACE.md.

@@ -589,6 +589,44 @@ the return handler built in Track A, all money-moving code paths.
   and Account reports (trial-balance style) remain open, documented gaps for a future pass - not
   oversights.
 
+## 2026-08-12 - Headless browser unblocked (Termux/Android aarch64) - the "no display" caveat is resolved
+
+**This changes the "no browser in this environment" premise repeated in nearly every entry above and in
+the plan file.** A real, native headless Chromium now runs in this environment, with full Puppeteer
+scripted automation (click, type, wait for selector, screenshot) - not just static rendering.
+
+- Root cause of the earlier "puppeteer fails to install here" note: Puppeteer's own postinstall tries to
+  download a bundled Chromium build with no aarch64/Termux target, the same failure category as the
+  Prisma schema-engine and bcrypt problems solved earlier this session.
+- Fix: Termux's `x11-repo` (a separate package source, enabled via `pkg install x11-repo`) ships a real
+  **native aarch64 Chromium build** (`chromium` package, currently 149.0.7827.155). Despite the repo
+  name, no X server, X11 forwarding, or `termux-x11` app is needed at runtime - `chromium-browser
+  --headless --no-sandbox` genuinely renders without a display, verified first via CLI
+  (`--screenshot=out.png`) against both a static HTML file and the live Vite dev server, then via
+  Puppeteer (`executablePath` pointed at the Termux binary, its own download skipped with
+  `PUPPETEER_SKIP_DOWNLOAD=true`) driving the same binary with full page-interaction APIs.
+- Verified concretely: took a real 1280x900 screenshot of the actual running TaysrPOS login page
+  (`http://127.0.0.1:5173`, Vite dev server) - real fonts, real gradient, real form styling, not a blank
+  or broken render. This is the first time any UI in this project has been visually inspected during this
+  session; every prior "not visually verified" caveat (the accent-bug fix's actual browser effect, Phase
+  1's deferred `renderKitchen`/`renderReports`/`renderRegister` extraction, Track C's POS-cart price-group
+  wiring, and more) is now something a session in this environment can actually check, not just claim.
+- Automated as `frontend/scripts/setup-headless-browser.sh` (idempotent, re-run anytime, mirrors
+  `backend/scripts/setup-local-postgres.sh`'s pattern and rationale) and
+  `frontend/scripts/screenshot.mjs` (reusable one-shot screenshot CLI: `node scripts/screenshot.mjs <url>
+  <output.png> [--width=] [--height=] [--full-page]`). For scripted interaction beyond a single
+  screenshot (login flows, clicking through pages), import `puppeteer` directly and reuse the same
+  `launch()` options (`executablePath` = `$PREFIX/bin/chromium-browser`, `args: ['--no-sandbox']`) -
+  `screenshot.mjs` only covers "load a URL and screenshot it."
+- **What this does NOT yet solve:** no seeded/known test credentials were used to actually log into the
+  app and click through authenticated pages this session (this capability was set up, not yet exercised
+  against the real login-gated UI) - a future session should log in (real or seeded test account),
+  navigate to Reports/Payments, and screenshot them to close out the accent-bug fix's outstanding
+  browser-verification item from earlier today. Also unverified: whether Chromium's software rendering
+  path (`--disable-gpu`, no real GPU access in this sandboxed environment) produces pixel-accurate output
+  for anything relying on hardware-accelerated CSS effects - fine for the standard form/table/card UI
+  this project uses, worth a second look before trusting it for anything more visually exotic.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

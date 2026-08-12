@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5400 --configLoader native",
     "build": "tsc -b && vite build --config vite.config.ts --configLoader native",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "browser:setup": "bash scripts/setup-headless-browser.sh",
+    "screenshot": "node scripts/screenshot.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
