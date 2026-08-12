@@ -435,6 +435,25 @@ in every list that reads this label.
   (404) -> `GET /api/sales` still shows the sale with its original `total: 48` and `status: 'Retour'`.
   Full `test:tenant-isolation` suite (26 assertions) passes; dev DB confirmed empty after cleanup.
 
+## 2026-08-12 - Fixed the statusLabel accent bug (user-approved, separate commit as agreed)
+
+Dropped the accent: `sale.routes.ts`'s `statusLabel()` now returns `'Payee'` instead of `'Payée'`,
+matching the string every frontend comparison (`frontend/src/main.tsx`, ~20 call sites) already checks
+against. No frontend code changed - the frontend's own contract was already correct, the backend was the
+one producing a string nothing could match. Added an explicit regression assertion to
+`tenant-isolation-smoke.ts` (`createdSale.body.status === 'Payee'`, exact match) rather than relying on
+it being implicitly covered by the return-flow test's status checks. Verified: `tsc` clean, full
+`test:tenant-isolation` suite (26 assertions, all still passing) against the live DB. Landed as its own
+commit per the plan from the prior entry, so it can be reverted independently of the Track A return work
+it was found alongside.
+
+**Still not independently verified:** the actual visual/behavioral effect in the browser (Reports
+totals populating, Payments filter buckets working, register shift-sales showing correctly, badge
+colors) - this environment has no display. The fix is a one-line change matching an already-established
+string contract on the frontend side, which is why it was judged low-risk enough to land without that
+verification; a future session with browser access should still confirm Reports/Payments/Dashboard now
+show real data instead of empty results.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

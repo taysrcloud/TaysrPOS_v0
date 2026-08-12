@@ -454,3 +454,14 @@ Each time a meaningful block is finished:
   PARTIALLY_RETURNED) -> return remainder (stock to baseline, balance ->0, RETURNED) -> re-return and
   cross-tenant return both correctly rejected. Full `test:tenant-isolation` suite (26 assertions) passes.
   Not done: frontend UI for partial return; the accent-bug fix (flagged, not fixed).
+
+## 2026-08-12 - Fixed the statusLabel accent bug (user approved, own commit)
+
+- `sale.routes.ts`'s `statusLabel()` now returns `'Payee'` (unaccented), matching the string every
+  frontend status comparison already checks against. Zero frontend changes - the bug was entirely on the
+  backend side. Added an explicit regression assertion to `tenant-isolation-smoke.ts` for this exact
+  string. Verified: `tsc` clean, full 26-assertion smoke suite passes.
+- Not independently verified: the actual browser-visible effect (Reports/Payments/Dashboard should now
+  show real totals instead of empty results) - no display in this environment. Judged low-risk enough to
+  land without that verification since it's a one-line change matching an already-established frontend
+  contract, not new frontend logic.

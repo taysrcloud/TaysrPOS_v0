@@ -106,6 +106,10 @@ try {
     body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL' }),
   });
   assert(createdSale.status === 201 && createdSale.body.id, `Sale create API failed: ${createdSale.status} ${JSON.stringify(createdSale.body)}`);
+  // Regression for the 2026-08-12 accent bug: statusLabel() used to return the
+  // accented 'Payée', which never matched any frontend 'Payee' comparison. Assert
+  // the exact unaccented string, not just that a status field is present.
+  assert(createdSale.body.status === 'Payee', `Paid sale status label wrong: expected exactly 'Payee' (unaccented), got ${JSON.stringify(createdSale.body.status)}`);
 
   // Sale partial-return workflow (Track A) - measured the read-path fan-out question
   // live before building this: there is no linked credit-note row (the existing

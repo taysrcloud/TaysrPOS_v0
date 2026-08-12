@@ -38,13 +38,20 @@ const statusLabel = (sale: any) => {
   if (sale.status === SaleStatus.SUSPENDED) return 'Suspendue';
   if (sale.status === SaleStatus.DRAFT && sale.note === 'DEVIS') return 'Devis';
   if (sale.status === SaleStatus.DRAFT) return 'Brouillon';
-  // Was previously falling through to the default 'Payée' branch below, making a
+  // Was previously falling through to the default 'Payee' branch below, making a
   // returned sale indistinguishable from a normal completed one in every consumer
   // that reads this label. 'Retour' is already a recognized SaleRecord['status']
   // value on the frontend (frontend/src/main.tsx), just never produced until now.
   if (sale.status === SaleStatus.RETURNED || sale.status === SaleStatus.PARTIALLY_RETURNED) return 'Retour';
   if (sale.paymentStatus === PaymentStatus.UNPAID) return 'Credit';
-  return 'Payée';
+  // Unaccented deliberately: every frontend comparison (frontend/src/main.tsx,
+  // ~20 call sites - Reports, Payments, Dashboard, register shift totals,
+  // invoiceable-sales detection) checks the literal string 'Payee'. This used to
+  // return the accented 'Payée' (U+00E9), which never matched any of them - a
+  // real, previously undiscovered bug verified at the byte level on 2026-08-12
+  // (see TRACE.md). Do not add the accent back without also updating every
+  // frontend comparison in the same change.
+  return 'Payee';
 };
 
 const methodLabel = (sale: any) => {
