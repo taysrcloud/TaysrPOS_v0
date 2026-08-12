@@ -2,7 +2,7 @@ import pg from 'pg';
 import 'dotenv/config';
 
 // Connect to the Platform Database to read Account and PlatformUser tables
-const platformDatabaseUrl = process.env.DATABASE_URL || 'postgresql://admin:adminpassword@localhost:5432/gestoptical';
+const platformDatabaseUrl = process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || 'postgresql://admin:adminpassword@localhost:5432/taysroptic_platform?schema=public';
 const pool = new pg.Pool({ connectionString: platformDatabaseUrl });
 
 export const platformDb = {
@@ -24,7 +24,16 @@ export const platformDb = {
   },
   async getMemberships(platformUserId: number) {
     return this.query(`
-      SELECT au.*, a.status, a.code, a."databaseUrl", a.name as "accountName"
+      SELECT 
+        au.*, 
+        a.status, 
+        a.code, 
+        a."databaseUrl", 
+        a.name as "accountName",
+        a."maxProducts",
+        a."maxLocations",
+        a."maxUsers",
+        a."modules"
       FROM "AccountUser" au
       JOIN "Account" a ON au."accountId" = a.id
       WHERE au."platformUserId" = $1

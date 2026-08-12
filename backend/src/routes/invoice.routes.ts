@@ -136,6 +136,15 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
     if (!parsed.success) return res.status(400).json({ message: 'Donnees invalides', errors: parsed.error.issues });
 
     const { customerId, saleIds, notes, mode, displayMode, manualLines } = parsed.data;
+    if (customerId) {
+      const customer = await prisma.contact.findFirst({ where: { id: customerId, companyId } });
+      if (!customer) return res.status(404).json({ message: 'Client introuvable' });
+    }
+    const manualProductIds = [...new Set(manualLines.flatMap(line => line.productId ? [line.productId] : []))];
+    if (manualProductIds.length) {
+      const ownedProducts = await prisma.product.count({ where: { companyId, id: { in: manualProductIds } } });
+      if (ownedProducts !== manualProductIds.length) return res.status(404).json({ message: 'Produit introuvable' });
+    }
     const number = `FAC-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
 
     let subtotal = 0;

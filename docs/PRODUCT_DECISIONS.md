@@ -45,6 +45,11 @@ Keep the business workflows that are proven:
 
 ## What To Reject Or Hide
 
+> **Superseded 2026-08-12:** this section is overridden by a full-ERP-parity migration decision -
+> accounting complexity, the connector/API module, and the other items below are now in scope. See
+> `/data/data/com.termux/files/home/.claude/plans/jolly-percolating-robin.md` and the matching
+> 2026-08-12 entry in `TRACE.md`. Left in place, not deleted, so the original reasoning stays visible.
+
 Reject or hide the parts that make UltimatePOS feel heavy:
 
 - Installer/update screens.

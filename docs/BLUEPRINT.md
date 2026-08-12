@@ -108,6 +108,12 @@ Restaurant is not part of the base POS screen. It is an optional module that can
 
 ## Modules To Leave Out Of v0
 
+> **Superseded 2026-08-12:** this section's exclusions are overridden by a full-ERP-parity migration
+> decision. Every module listed below is now in scope — see
+> `/data/data/com.termux/files/home/.claude/plans/jolly-percolating-robin.md` and the matching
+> 2026-08-12 entry in `TRACE.md` for the plan and rationale. Left in place, not deleted, so the
+> original curated-scope reasoning stays visible.
+
 These are not deleted forever, but they should not enter the first clean build:
 
 - Old installer/update routes.

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
+import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -14,13 +15,12 @@ const expenseSchema = z.object({
   paymentMethod: z.string().default('CASH'),
 });
 
-router.get('/', async (req, res, next) => {
+router.get('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ expenses: [] });
+    const companyId = req.user!.companyId;
 
     const expenses = await prisma.expense.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       orderBy: { date: 'desc' }
     });
 
@@ -36,17 +36,18 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const parsed = expenseSchema.parse(req.body);
-    let company = await prisma.company.findFirst();
-    if (!company) {
-      company = await prisma.company.create({ data: { name: 'Demo Company' } });
+    const companyId = req.user!.companyId;
+    if (parsed.locationId) {
+      const location = await prisma.location.findFirst({ where: { id: parsed.locationId, companyId } });
+      if (!location) return res.status(400).json({ message: 'Magasin invalide' });
     }
 
     const expense = await prisma.expense.create({
       data: {
-        companyId: company.id,
+        companyId,
         locationId: parsed.locationId,
         reference: parsed.reference || `EXP-${Math.floor(Math.random() * 10000)}`,
         category: parsed.category,

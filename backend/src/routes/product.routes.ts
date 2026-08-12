@@ -6,25 +6,6 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-const demoImage = (label: string, bg = '#dbeafe') => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset="1" stop-color="#ffffff"/></linearGradient></defs><rect width="320" height="220" rx="28" fill="url(#g)"/><rect x="94" y="38" width="132" height="148" rx="24" fill="#fff" stroke="#cbd5e1"/><circle cx="160" cy="88" r="28" fill="${bg}"/><rect x="118" y="130" width="84" height="12" rx="6" fill="#cbd5e1"/><rect x="130" y="150" width="60" height="10" rx="5" fill="#e2e8f0"/><text x="160" y="206" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#0f172a">${label}</text></svg>`)}`;
-
-const demoProducts = [
-  { id: 1, name: 'Bouteille eau 50cl', sku: 'EAU-050', barcode: '611000001', type: 'RETAIL', category: 'Boissons', brand: 'Sidi Ali', imageUrl: demoImage('Eau 50cl', '#bae6fd'), salePrice: 6, purchasePrice: 3.2, tvaRate: 20, trackStock: true, lowStockAlert: 12, stock: 36, isKitchenItem: false, isActive: true, createdAt: new Date() },
-  { id: 2, name: 'Riz 5kg', sku: 'RIZ-005', barcode: '611000002', type: 'RETAIL', category: 'Epicerie', brand: null, imageUrl: demoImage('Riz 5kg', '#fde68a'), salePrice: 58, purchasePrice: 46, tvaRate: 20, trackStock: true, lowStockAlert: 8, stock: 21, isKitchenItem: false, isActive: true, createdAt: new Date() },
-  { id: 3, name: 'Recharge mobile', sku: 'SRV-RECHARGE', barcode: null, type: 'SERVICE', category: 'Services', brand: null, imageUrl: demoImage('Service', '#ddd6fe'), salePrice: 20, purchasePrice: 0, tvaRate: 0, trackStock: false, lowStockAlert: 0, stock: 0, isKitchenItem: false, isActive: true, createdAt: new Date() },
-];
-
-const demoResponse = () => ({
-  products: demoProducts,
-  stats: {
-    total: demoProducts.length,
-    lowStock: demoProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert).length,
-    restaurantItems: demoProducts.filter(product => product.type === 'MENU_ITEM').length,
-    retailItems: demoProducts.filter(product => product.type === 'RETAIL').length,
-  },
-  source: 'demo',
-});
-
 const productSchema = z.object({
   name: z.string().trim().min(2),
   salePrice: z.coerce.number().min(0),
@@ -153,13 +134,21 @@ router.get('/', requireAuth, async (req: any, res: any) => {
     });
   } catch (error) {
     console.error('Products list error:', error);
-    res.status(200).json({ ...demoResponse(), message: 'Base de donnees indisponible: produits demo affiches' });
+    res.status(500).json({ message: 'Erreur lors de la recuperation des produits' });
   }
 });
 
 router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any, res: any) => {
   try {
     const companyId = req.user.companyId;
+
+    if (req.user.planLimits && req.user.planLimits.maxProducts !== null && req.user.planLimits.maxProducts !== undefined) {
+      const productCount = await prisma.product.count({ where: { companyId } });
+      if (productCount >= req.user.planLimits.maxProducts) {
+        return res.status(403).json({ message: 'Limite de produits atteinte pour votre abonnement.' });
+      }
+    }
+
     const company = { id: companyId };
     let defaultUnit = await prisma.unit.findFirst({ where: { companyId } });
     if (!defaultUnit) defaultUnit = await prisma.unit.create({ data: { companyId, name: 'Piece', shortName: 'pcs' } });

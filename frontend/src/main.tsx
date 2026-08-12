@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
+  LogOut,
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
@@ -57,7 +58,7 @@ import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
 type EnabledModule = 'POS' | 'RESTAURANT';
-type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients' | 'Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
+type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
 type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
 type CashMovement = {
@@ -208,12 +209,12 @@ type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'WAITER';
 
 type RolePermissions = Record<UserRole, string[]>;
 
-const allModuleLabels = ['Tableau de bord', 'POS', 'Produits', 'Clients', 'Fournisseurs', 'Stock', 'Achats', 'Depenses', 'Ventes', 'Factures', 'Paiements', 'Rapports', 'Caisses', 'Tables', 'Cuisine', 'Parametres', 'ACTION:APPLY_DISCOUNT', 'ACTION:OVERRIDE_PRICE', 'ACTION:VOID_SALE'];
+const allModuleLabels = ['Tableau de bord', 'Clients & Fournisseurs', 'POS', 'Ventes', 'Factures', 'Paiements', 'Produits', 'Stock', 'Achats', 'Depenses', 'Rapports', 'Caisses', 'Tables', 'Cuisine', 'Parametres', 'ACTION:APPLY_DISCOUNT', 'ACTION:OVERRIDE_PRICE', 'ACTION:VOID_SALE'];
 
 const defaultRolePermissions: RolePermissions = {
   ADMIN: [...allModuleLabels],
   MANAGER: allModuleLabels.filter(m => m !== 'Parametres'),
-  CASHIER: ['POS', 'Clients', 'ACTION:VOID_SALE'], // Allow cashier to void, but not discount/override by default
+  CASHIER: ['POS', 'Clients & Fournisseurs', 'ACTION:VOID_SALE'], // Allow cashier to void, but not discount/override by default
   WAITER: ['Tables', 'Cuisine'],
 };
 
@@ -225,6 +226,7 @@ type User = {
   email: string;
   role: UserRole;
   accountId?: string;
+  planLimits?: { maxProducts?: number; maxLocations?: number; maxUsers?: number; modules?: string[] };
   avatarUrl?: string;
 };
 
@@ -278,16 +280,38 @@ type Location = {
 
 
 
-const apiBase = 'http://127.0.0.1:4400';
+const apiBase = window.location.port === '4400' ? window.location.origin : 'http://127.0.0.1:4400';
+const authTokenKey = 'taysrPOS_token';
+const authUserKey = 'taysrPOS_user';
+
+const readStoredUser = (): User | null => {
+  try {
+    const raw = localStorage.getItem(authUserKey);
+    return raw ? JSON.parse(raw) as User : null;
+  } catch {
+    localStorage.removeItem(authUserKey);
+    return null;
+  }
+};
+
+const persistSession = (token: string, user: User) => {
+  localStorage.setItem(authTokenKey, token);
+  localStorage.setItem(authUserKey, JSON.stringify(user));
+};
+
+const clearSession = () => {
+  localStorage.removeItem(authTokenKey);
+  localStorage.removeItem(authUserKey);
+};
 
 const apiFetch = async (url: string, options: RequestInit = {}) => {
-  const token = localStorage.getItem('taysrPOS_token');
+  const token = localStorage.getItem(authTokenKey);
   const headers: Record<string, string> = { ...((options.headers as any) || {}) };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
   const res = await fetch(`${apiBase}${url}`, { ...options, headers });
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     window.dispatchEvent(new Event('auth-error'));
   }
   return res;
@@ -297,16 +321,15 @@ const productImage = (label: string, bg = '#dbeafe') => `data:image/svg+xml;utf8
 
 const baseModules = [
   ['Tableau de bord', LayoutDashboard, 'POS'],
+  ['Clients & Fournisseurs', Users, 'POS'],
   ['POS', ReceiptText, 'POS'],
+  ['Ventes', ClipboardList, 'POS'],
+  ['Factures', FileText, 'POS'],
+  ['Paiements', CreditCard, 'POS'],
   ['Produits', Package, 'POS'],
-  ['Clients', Users, 'POS'],
-  ['Fournisseurs', Truck, 'POS'],
   ['Stock', Warehouse, 'POS'],
   ['Achats', Store, 'POS'],
   ['Depenses', Banknote, 'POS'],
-  ['Ventes', ClipboardList, 'POS'],
-    ['Factures', FileText, 'POS'],
-  ['Paiements', CreditCard, 'POS'],
   ['Rapports', BarChart3, 'POS'],
   ['Caisses', Lock, 'POS'],
   ['Tables', Utensils, 'RESTAURANT'],
@@ -463,8 +486,9 @@ const PageHeader = ({ title, subtitle, action, icon: Icon }: { title: string; su
 );
 
 const App = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => readStoredUser());
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem(authTokenKey) && readStoredUser()));
+  const [authChecking, setAuthChecking] = useState(true);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   
@@ -480,10 +504,52 @@ const App = () => {
       setIsAuthenticated(false);
       setCurrentUser(null);
       setIsLocked(false);
-      localStorage.removeItem('taysrPOS_token');
+      clearSession();
     };
     window.addEventListener('auth-error', handleAuthError);
     return () => window.removeEventListener('auth-error', handleAuthError);
+  }, []);
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      const token = localStorage.getItem(authTokenKey);
+      if (!token) {
+        setAuthChecking(false);
+        return;
+      }
+
+      const cachedUser = readStoredUser();
+      if (cachedUser) {
+        setCurrentUser(cachedUser);
+        setIsAuthenticated(true);
+      }
+
+      try {
+        const response = await apiFetch('/api/auth/me');
+        if (response.ok) {
+          const data = await response.json();
+          localStorage.setItem(authUserKey, JSON.stringify(data.user));
+          setCurrentUser(data.user);
+          setIsAuthenticated(true);
+        } else if (response.status === 401) {
+          clearSession();
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        } else if (!cachedUser) {
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        }
+      } catch {
+        if (!cachedUser) {
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        }
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+
+    void restoreSession();
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -500,12 +566,13 @@ const App = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        localStorage.setItem('taysrPOS_token', data.token);
+        persistSession(data.token, data.user);
         setCurrentUser(data.user);
         setLoginAccounts([]);
         setSelectedLoginAccountId('');
         setIsAuthenticated(true);
         setIsLocked(false);
+        setAuthChecking(false);
       } else {
         const error = await res.json().catch(() => null);
         if (res.status === 409 && error?.requiresAccountSelection && Array.isArray(error.accounts)) {
@@ -523,14 +590,14 @@ const App = () => {
   const handlePinUnlock = async () => {
     if (!currentUser || pinEntry.length !== 4) return;
     try {
-      const res = await fetch(`${apiBase}/api/auth/pin-unlock`, {
+      const res = await apiFetch('/api/auth/pin-unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUser.id, pin: pinEntry })
       });
       if (res.ok) {
         const data = await res.json();
-        localStorage.setItem('taysrPOS_token', data.token);
+        persistSession(data.token, data.user);
         setCurrentUser(data.user);
         setIsAuthenticated(true);
         setIsLocked(false);
@@ -557,6 +624,7 @@ const App = () => {
   const [actualCash, setActualCash] = useState('');
   const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [cashMovementModalOpen, setCashMovementModalOpen] = useState(false);
   const [cashMovementForm, setCashMovementForm] = useState<{type: 'IN' | 'OUT', amount: string, note: string}>({type: 'IN', amount: '', note: ''});
   const [showDenominations, setShowDenominations] = useState(false);
@@ -604,6 +672,8 @@ const App = () => {
   const [invoiceSale, setInvoiceSale] = useState<SaleRecord | null>(null);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [contactTab, setContactTab] = useState<'Client' | 'Fournisseur'>('Client');
+  const [contactModalType, setContactModalType] = useState<'CUSTOMER' | 'SUPPLIER'>('CUSTOMER');
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [settlingContact, setSettlingContact] = useState<Contact | null>(null);
   const [settlementAmount, setSettlementAmount] = useState('');
@@ -620,7 +690,7 @@ const App = () => {
   const [transactionsTab, setTransactionsTab] = useState<'Finalisees' | 'Suspendues' | 'Brouillons' | 'Devis'>('Finalisees');
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [editLineForm, setEditLineForm] = useState({ price: '', discount: '', note: '' });
-  const [contactForm, setContactForm] = useState({ name: '', phone: '', creditLimit: '0', address: '' });
+  const [contactForm, setContactForm] = useState({ name: '', phone: '', email: '', creditLimit: '0', address: '' });
   const [paymentForm, setPaymentForm] = useState({ cash: '0', card: '0', credit: '0', storeCredit: '0' });
   const [serialPort, setSerialPort] = useState<any>(null);
   const [registerStatus, setRegisterStatus] = useState<'OPEN' | 'CLOSED'>('CLOSED');
@@ -641,16 +711,14 @@ const App = () => {
   const [calcOp, setCalcOp] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations'>('general');
-  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => {
-    try {
-      const saved = localStorage.getItem('taysrPOS_rolePermissions');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return defaultRolePermissions;
-  });
-  const saveRolePermissions = (perms: RolePermissions) => {
+  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(defaultRolePermissions);
+  const saveRolePermissions = async (perms: RolePermissions) => {
     setRolePermissions(perms);
-    localStorage.setItem('taysrPOS_rolePermissions', JSON.stringify(perms));
+    try {
+      const response = await apiFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rolePermissions: perms }) });
+      if (!response.ok) throw new Error('Echec de sauvegarde des permissions');
+      setStatus('Permissions sauvegardees');
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Echec de sauvegarde des permissions'); }
   };
   const [reportsTab, setReportsTab] = useState<'synthese' | 'ventes' | 'produits' | 'paiements'>('synthese');
   const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('all');
@@ -674,7 +742,33 @@ const App = () => {
     // Scale Barcode Parsing
     scaleEnabled: false, scalePrefix: '20', scaleType: 'WEIGHT' as 'WEIGHT' | 'PRICE', scaleSkuLength: 4
   });
-  const restaurantEnabled = companySettings?.restaurantEnabled || false;
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  const loadCompanySettings = async () => {
+    try {
+      const response = await apiFetch('/api/settings');
+      if (!response.ok) return;
+      const data = await response.json();
+      setCompanySettings(current => ({ ...current, ...data }));
+      if (data.rolePermissions) setRolePermissions({ ...defaultRolePermissions, ...data.rolePermissions });
+    } catch { setStatus('Impossible de charger les parametres'); }
+  };
+
+  const saveCompanySettings = async () => {
+    setSettingsSaving(true);
+    try {
+      const response = await apiFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(companySettings) });
+      if (!response.ok) { const error = await response.json().catch(() => null); throw new Error(error?.message || 'Echec de sauvegarde'); }
+      setStatus('Parametres sauvegardes avec succes !');
+      await loadCompanySettings();
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Echec de sauvegarde des parametres'); }
+    finally { setSettingsSaving(false); }
+  };
+
+  useEffect(() => { if (isAuthenticated && currentUser) void loadCompanySettings(); }, [isAuthenticated, currentUser?.id]);
+
+  const restaurantEntitled = !currentUser?.accountId || Boolean(currentUser.planLimits?.modules?.includes('RESTAURANT'));
+  const restaurantEnabled = restaurantEntitled && Boolean(companySettings?.restaurantEnabled);
   const enabledModules = useMemo<EnabledModule[]>(() => {
     const modules: EnabledModule[] = ['POS'];
     if (restaurantEnabled) modules.push('RESTAURANT');
@@ -687,14 +781,20 @@ const App = () => {
     let modules = baseModules.filter(([, , module]) => module === 'POS' || (restaurantEnabled && module === 'RESTAURANT'));
     if (currentUser) {
       const allowed = rolePermissions[currentUser.role] || [];
-      modules = modules.filter(([label]) => allowed.includes(label as string));
+      modules = modules.filter(([label]) => allowed.includes(label as string) || (label === 'Clients & Fournisseurs' && (allowed.includes('Clients') || allowed.includes('Fournisseurs'))));
     }
     return modules;
   }, [restaurantEnabled, currentUser, rolePermissions]);
   const ActiveIcon = pageIcon(page);
 
-  const [activeLocation, setActiveLocation] = useState<string | null>(() => localStorage.getItem('taysrPOS_activeLocation'));
+  const [activeLocation, setActiveLocation] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const tenantKey = currentUser.accountId || String(currentUser.id);
+    setActiveLocation(localStorage.getItem('taysrPOS_activeLocation_' + tenantKey));
+  }, [currentUser?.accountId, currentUser?.id]);
 
   const handleClockIn = async () => {
     if(!currentUser) return;
@@ -743,8 +843,9 @@ const App = () => {
       const data = await response.json();
       if (Array.isArray(data.contacts)) {
          setContacts(data.contacts);
-         if (customer.id === 0 && data.contacts.length > 0) {
-            setCustomer(data.contacts[0]);
+         if (customer.id === 0) {
+            const defaultCustomer = data.contacts.find((contact: Contact) => contact.type === 'CUSTOMER' || contact.type === 'BOTH');
+            if (defaultCustomer) setCustomer(defaultCustomer);
          }
       }
     } catch {
@@ -816,6 +917,12 @@ const App = () => {
   };
 
 
+  const openContactModal = (type: 'CUSTOMER' | 'SUPPLIER') => {
+    setContactModalType(type);
+    setContactTab(type === 'CUSTOMER' ? 'Client' : 'Fournisseur');
+    setContactForm({ name: '', phone: '', email: '', creditLimit: '0', address: '' });
+    setCustomerModalOpen(true);
+  };
   const submitContact = async (e: React.FormEvent | React.MouseEvent) => {
     e.preventDefault();
     if (!contactForm.name.trim()) return;
@@ -826,22 +933,25 @@ const App = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fullName: contactForm.name,
-          type: 'CUSTOMER',
+          type: contactModalType,
           phone: contactForm.phone,
+          email: contactForm.email,
           creditLimit: Number(contactForm.creditLimit) || 0,
           balance: 0,
           address: contactForm.address,
         }),
       });
       if (!response.ok) throw new Error('API unavailable');
-      const created = await response.json();
+      const payload = await response.json();
+      const created: Contact = payload.contact;
+      if (!created?.id || !created?.name) throw new Error('Reponse client invalide');
       setContacts(current => [...current, created]);
-      setCustomer(created);
+      if (contactModalType === 'CUSTOMER') setCustomer(created);
       setCustomerModalOpen(false);
-      setContactForm({ name: '', phone: '', creditLimit: '0', address: '' });
-      setStatus('Client ajoute et selectionne');
+      setContactForm({ name: '', phone: '', email: '', creditLimit: '0', address: '' });
+      setStatus(contactModalType === 'CUSTOMER' ? 'Client ajoute et selectionne' : 'Fournisseur ajoute avec succes');
     } catch (err: any) {
-      setStatus('Erreur: Impossible d\'ajouter le client');
+      setStatus(contactModalType === 'CUSTOMER' ? 'Erreur: Impossible d\'ajouter le client' : 'Erreur: Impossible d\'ajouter le fournisseur');
     }
   };
 
@@ -903,8 +1013,30 @@ const App = () => {
   };
 
   useEffect(() => {
+    if (!isAuthenticated || !currentUser) {
+      setContacts([]);
+      setSales([]);
+      setInvoices([]);
+      setLocations([]);
+      setExpenses([]);
+      setPurchases([]);
+      setRegisterLogs([]);
+      setCashMovements([]);
+      setRegisterStatus('CLOSED');
+      setCustomer({ id: 0, name: 'Client comptoir', type: 'Client', phone: '-', balance: 0, creditLimit: 0, lastActivity: 'Aujourd hui' });
+      return;
+    }
+
     const initData = async () => {
       setDataLoading(true);
+      setContacts([]);
+      setSales([]);
+      setInvoices([]);
+      setLocations([]);
+      setExpenses([]);
+      setPurchases([]);
+      setRegisterLogs([]);
+      setCashMovements([]);
       await Promise.all([
         loadInvoices(),
           loadSales(),
@@ -916,8 +1048,8 @@ const App = () => {
       ]);
       setDataLoading(false);
     };
-    initData();
-  }, []);
+    void initData();
+  }, [isAuthenticated, currentUser?.id, currentUser?.accountId]);
 
   useEffect(() => {
     setDashboardLocationFilter(currentLocationId);
@@ -1741,7 +1873,7 @@ const App = () => {
           <div className="action-list">
             <button onClick={() => setPage('POS')}><ReceiptText size={17} /> Ouvrir le POS</button>
             <button onClick={() => { resetProductForm(); setProductModalOpen(true); }}><Plus size={17} /> Ajouter un produit</button>
-            <button onClick={() => setPage('Clients')}><Users size={17} /> Gérer les clients</button>
+            <button onClick={() => setPage('Clients & Fournisseurs')}><Users size={17} /> Gérer les clients</button>
             <button onClick={() => setPage('Stock')}><Warehouse size={17} /> Alertes de stock</button>
             <button onClick={() => setPage('Rapports')}><TrendingUp size={17} /> Voir les rapports</button>
           </div>
@@ -1791,17 +1923,17 @@ const App = () => {
       {selectedVariableProduct && (
         <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setSelectedVariableProduct(null); }}>
           <section className="receipt-panel" style={{ maxWidth: '500px', width: '95%' }}>
-            <div className="receipt-header"><div><p>Declinaisons</p><h2>{selectedVariableProduct.name}</h2></div><button onClick={() => setSelectedVariableProduct(null)}><XCircle size={18} /></button></div>
-            <div style={{ padding: '1.5rem', display: 'grid', gap: '1rem' }}>
-              <p style={{ color: '#64748b', margin: 0 }}>Selectionnez la variation a ajouter au panier :</p>
+            <div className="receipt-header" style={{ borderBottom: '1px solid #e2e8f0', padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><div><p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Déclinaisons</p><h2 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>{selectedVariableProduct.name}</h2></div><button onClick={() => setSelectedVariableProduct(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={22} /></button></div>
+            <div style={{ padding: '1.5rem', display: 'grid', gap: '1.25rem' }}>
+              <p style={{ color: '#475569', margin: 0, fontSize: '0.95rem' }}>Sélectionnez la variation à ajouter au panier :</p>
               <div style={{ display: 'grid', gap: '0.75rem' }}>
                 {selectedVariableProduct.variations?.map(variation => (
-                  <button key={variation.id} className="ghost-action" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#f8fafc', textAlign: 'left', width: '100%' }} onClick={() => addToCart(selectedVariableProduct, variation)}>
-                    <div>
-                      <strong style={{ display: 'block', fontSize: '1rem', color: '#0f172a' }}>{variation.name}</strong>
-                      <small style={{ color: '#64748b' }}>Stock: {selectedVariableProduct.trackStock ? variation.stock : '-'}</small>
+                  <button key={variation.id} type="button" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', border: '1px solid #e2e8f0', borderRadius: '10px', background: '#fff', textAlign: 'left', width: '100%', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }} onClick={() => addToCart(selectedVariableProduct, variation)} onMouseOver={e => e.currentTarget.style.borderColor = '#3b82f6'} onMouseOut={e => e.currentTarget.style.borderColor = '#e2e8f0'}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <strong style={{ fontSize: '1.05rem', color: '#0f172a', fontWeight: 600 }}>{variation.name}</strong>
+                      <small style={{ color: '#64748b', fontSize: '0.85rem' }}>En stock: <span style={{ fontWeight: 600, color: variation.stock > 0 ? '#10b981' : '#ef4444' }}>{selectedVariableProduct.trackStock ? variation.stock : 'N/A'}</span></small>
                     </div>
-                    <span style={{ fontWeight: 700, color: '#3b82f6' }}>{formatMoney(variation.salePrice)}</span>
+                    <span style={{ fontWeight: 700, color: '#3b82f6', fontSize: '1.1rem', background: '#eff6ff', padding: '0.5rem 0.75rem', borderRadius: '8px' }}>{formatMoney(variation.salePrice)}</span>
                   </button>
                 ))}
               </div>
@@ -1881,8 +2013,8 @@ const App = () => {
           <Users size={13} />
           <strong>{customer.name}</strong>
           {customer.balance > 0 && <small>{formatMoney(customer.balance)}</small>}
-          <button className="wf-chip-btn" type="button" onClick={() => setCustomerModalOpen(true)} title="Nouveau client"><Plus size={12} /></button>
-          <button className="wf-chip-btn" type="button" onClick={() => setPage('Clients')} title="Portefeuille"><Wallet size={12} /></button>
+          <button className="wf-chip-btn" type="button" onClick={() => openContactModal('CUSTOMER')} title="Nouveau client"><Plus size={12} /></button>
+          <button className="wf-chip-btn" type="button" onClick={() => setPage('Clients & Fournisseurs')} title="Portefeuille"><Wallet size={12} /></button>
         </div>
         <button className="wf-chip wf-chip-search" type="button" onClick={() => productSearchInputRef.current?.focus()}>
           <Search size={13} />
@@ -1949,9 +2081,9 @@ const App = () => {
           <div className="cart-customer-bar">
             <Users className="cart-customer-icon" size={16} />
             <select value={customer.id} onChange={e => setCustomer(contacts.find(c => c.id === Number(e.target.value)) || contacts[0])}>
-              {contacts.filter(c => ['CUSTOMER', 'BOTH'].includes(c.type)).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
+              {contacts.filter(c => ['Client', 'CUSTOMER', 'BOTH'].includes(c.type)).map(c => <option key={c.id} value={c.id}>{c.name}{c.balance > 0 ? ` (${formatMoney(c.balance)})` : ''}</option>)}
             </select>
-            <button className="cart-add-customer" onClick={() => setCustomerModalOpen(true)}><Plus size={14} /></button>
+            <button className="cart-add-customer" onClick={() => openContactModal('CUSTOMER')}><Plus size={14} /></button>
           </div>
           <div className="cart-table">
             <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
@@ -1960,7 +2092,10 @@ const App = () => {
               const lineNet = Math.max(0, (currentPrice - line.discount) * line.quantity);
               return <div className="cart-row" key={line.uniqueId}>
                 <span>
-                  <strong style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>{line.product.name} {line.variation && <span style={{ color: '#3b82f6' }}>({line.variation.name})</span>} {(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) && <button className="ghost-action" onClick={() => { setEditingLineId(line.uniqueId); setEditLineForm({ price: String(currentPrice), discount: String(line.discount), note: line.note || '' }); }} style={{ padding: '2px' }}><Edit2 size={13} /></button>}</strong>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>{line.product.name} {line.variation && <span style={{ color: '#3b82f6' }}>({line.variation.name})</span>}</span>
+                    {(!currentUser || rolePermissions[currentUser.role]?.includes('ACTION:OVERRIDE_PRICE')) && <button className="ghost-action" onClick={() => { setEditingLineId(line.uniqueId); setEditLineForm({ price: String(currentPrice), discount: String(line.discount), note: line.note || '' }); }} style={{ padding: '4px', border: '1px solid #e2e8f0', borderRadius: '4px', background: '#fff' }} title="Modifier le prix"><Edit2 size={13} /></button>}
+                  </strong>
                   <small>{line.variation ? line.variation.sku : line.product.sku}</small>
                   {line.note && <em style={{ fontSize: '0.75rem', color: '#64748b', display: 'block' }}>Note: {line.note}</em>}
                 </span>
@@ -2006,28 +2141,6 @@ const App = () => {
         </div>
       </div>
       
-      {customerModalOpen && (
-        <div className="receipt-backdrop" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setCustomerModalOpen(false); }}>
-          <div style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: 'auto' }}>
-            <form className="product-form-panel" onSubmit={submitContact} style={{ padding: '2rem' }}>
-              <div className="panel-title"><div><p>Client</p><h2>Nouveau client</h2></div><button type="button" onClick={() => setCustomerModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><XCircle size={24} /></button></div>
-              <div className="field-cluster" style={{ gridTemplateColumns: '1fr', gap: '1rem', marginTop: '1.5rem' }}>
-                <label><span>Nom complet *</span><input value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} placeholder="Ex: Jean Dupont" autoFocus /></label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-                  <label><span>Téléphone</span><input value={contactForm.phone} onChange={e => setContactForm({...contactForm, phone: e.target.value})} placeholder="+212 6..." /></label>
-                  <label><span>Plafond de crédit (MAD)</span><input value={contactForm.creditLimit} onChange={e => setContactForm({...contactForm, creditLimit: e.target.value})} inputMode="decimal" placeholder="0.00" /></label>
-                </div>
-                <label><span>Adresse</span><input value={contactForm.address} onChange={e => setContactForm({...contactForm, address: e.target.value})} placeholder="Adresse complète" /></label>
-              </div>
-              <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-                <button type="button" onClick={() => setCustomerModalOpen(false)} style={{ padding: '0.5rem 1.5rem', background: 'none', border: 'none', color: '#64748b', fontWeight: 'bold', cursor: 'pointer' }}>Annuler</button>
-                <button type="submit" className="primary-action" style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}>Enregistrer</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {topupContact && (
         <div className="receipt-backdrop" style={{ zIndex: 60 }} role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) { setTopupContact(null); setTopupAmount(''); } }}>
           <div style={{ position: 'relative', width: '100%', maxWidth: '400px', margin: 'auto' }}>
@@ -2665,6 +2778,32 @@ const App = () => {
     </>
   );
 
+  const renderContactModal = () => {
+    if (!customerModalOpen) return null;
+    const isSupplier = contactModalType === 'SUPPLIER';
+    return (
+      <div className="receipt-backdrop contact-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="contact-modal-title" onClick={(event) => { if (event.target === event.currentTarget) setCustomerModalOpen(false); }}>
+        <form className="product-form-panel contact-form-panel" onSubmit={submitContact}>
+          <div className="contact-modal-header">
+            <div className="contact-modal-icon">{isSupplier ? <Truck size={22} /> : <Users size={22} />}</div>
+            <div><p>{isSupplier ? 'Fournisseur' : 'Client'}</p><h2 id="contact-modal-title">{isSupplier ? 'Nouveau fournisseur' : 'Nouveau client'}</h2></div>
+            <button type="button" className="contact-modal-close" onClick={() => setCustomerModalOpen(false)} aria-label="Fermer"><XCircle size={22} /></button>
+          </div>
+          <div className="contact-form-grid">
+            <label className="contact-field-wide"><span>Nom complet / raison sociale *</span><input value={contactForm.name} onChange={event => setContactForm({ ...contactForm, name: event.target.value })} placeholder={isSupplier ? 'Ex: Atlas Distribution' : 'Ex: Jean Dupont'} autoFocus required /></label>
+            <label><span>Téléphone</span><input value={contactForm.phone} onChange={event => setContactForm({ ...contactForm, phone: event.target.value })} placeholder="+212 6..." /></label>
+            <label><span>Email</span><input type="email" value={contactForm.email} onChange={event => setContactForm({ ...contactForm, email: event.target.value })} placeholder="contact@entreprise.ma" /></label>
+            {!isSupplier && <label><span>Plafond de crédit (MAD)</span><input value={contactForm.creditLimit} onChange={event => setContactForm({ ...contactForm, creditLimit: event.target.value })} inputMode="decimal" placeholder="0.00" /></label>}
+            <label className={isSupplier ? 'contact-field-wide' : ''}><span>Adresse</span><input value={contactForm.address} onChange={event => setContactForm({ ...contactForm, address: event.target.value })} placeholder="Adresse complète" /></label>
+          </div>
+          <div className="contact-modal-footer">
+            <button type="button" className="secondary-action" onClick={() => setCustomerModalOpen(false)}>Annuler</button>
+            <button type="submit" className="primary-action"><Plus size={16} /> Enregistrer {isSupplier ? 'le fournisseur' : 'le client'}</button>
+          </div>
+        </form>
+      </div>
+    );
+  };
   const getCustomerTier = (points: number) => {
     if (points >= 5000) return { name: 'Platinum', color: '#8b5cf6', bg: '#ede9fe' };
     if (points >= 2000) return { name: 'Gold', color: '#eab308', bg: '#fef9c3' };
@@ -2672,20 +2811,25 @@ const App = () => {
     return { name: 'Bronze', color: '#d97706', bg: '#fef3c7' };
   };
 
-  const renderContacts = (kind: 'Client' | 'Fournisseur') => {
+  const renderContacts = () => {
+    const kind = contactTab;
     const rows = contacts.filter(contact => {
-      const matchesKind = kind === 'Client' ? contact.type.includes('Client') : contact.type === 'Fournisseur';
+      const matchesKind = kind === 'Client' ? contact.type === 'CUSTOMER' || contact.type === 'BOTH' : contact.type === 'SUPPLIER' || contact.type === 'BOTH';
       const q = contactSearch.trim().toLowerCase();
       return matchesKind && (!q || [contact.name, contact.phone, contact.type].some(value => value.toLowerCase().includes(q)));
     });
     return <section className="panel table-section flush-top">
       <div style={{ padding: '1.5rem 1.5rem 0' }}>
-        <PageHeader 
+        <PageHeader
           icon={Users}
-          title={kind === 'Client' ? 'Portefeuille Clients' : 'Carnet Fournisseurs'} 
-          subtitle={`Gérez vos ${kind === 'Client' ? 'clients et leur fidélité' : 'fournisseurs et vos approvisionnements'}`} 
-          action={<button className="primary-action"><Plus size={16} style={{ marginRight: '8px' }} /> Nouveau</button>} 
+          title="Clients & Fournisseurs"
+          subtitle="Centralisez vos relations commerciales dans un seul espace."
+          action={<button className="primary-action" onClick={() => openContactModal(kind === 'Client' ? 'CUSTOMER' : 'SUPPLIER')}><Plus size={16} /> {kind === 'Client' ? 'Nouveau client' : 'Nouveau fournisseur'}</button>}
         />
+        <div className="contact-tabs" role="tablist" aria-label="Type de contact">
+          <button type="button" role="tab" aria-selected={kind === 'Client'} className={kind === 'Client' ? 'selected' : ''} onClick={() => { setContactTab('Client'); setContactSearch(''); }}><Users size={16} /> Clients <span>{contacts.filter(contact => contact.type === 'CUSTOMER' || contact.type === 'BOTH').length}</span></button>
+          <button type="button" role="tab" aria-selected={kind === 'Fournisseur'} className={kind === 'Fournisseur' ? 'selected' : ''} onClick={() => { setContactTab('Fournisseur'); setContactSearch(''); }}><Truck size={16} /> Fournisseurs <span>{contacts.filter(contact => contact.type === 'SUPPLIER' || contact.type === 'BOTH').length}</span></button>
+        </div>
       </div>
       <div className="table-toolbar" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', padding: '0 1.5rem 1.5rem' }}>
         <div className="search-box" style={{ flex: 1, maxWidth: '400px' }}><Search size={17} /><input value={contactSearch} onChange={event => setContactSearch(event.target.value)} placeholder={kind === 'Client' ? 'Rechercher client...' : 'Rechercher fournisseur...'} /></div>
@@ -2701,7 +2845,7 @@ const App = () => {
         </div>
       </div>
       <div className="data-table">
-        <div className="data-head" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }}>
+        <div className="data-head" style={{ gridTemplateColumns: kind === 'Client' ? '2fr .8fr 1fr 1fr 1.5fr 1.25fr' : '2fr .9fr 1.1fr 1fr 1.2fr .8fr' }}>
           <span>Nom</span><span>Type</span><span>Telephone</span><span>Solde</span>{kind === 'Client' ? <span>Fidélité & Crédit</span> : <span>Activite</span>}<span>Actions</span>
         </div>
         {rows.map(contact => {
@@ -2711,7 +2855,7 @@ const App = () => {
           const invoiceableSales = relatedSales.filter(sale => sale.status === 'Payee' && !sale.invoiceId);
           const openCreditTotal = openCredits.reduce((sum, sale) => sum + getSaleDueAmount(sale), 0);
           return (
-            <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr 1fr 1fr 1fr 1fr 1fr' : undefined }} key={contact.id}>
+            <div className="data-row" style={{ gridTemplateColumns: kind === 'Client' ? '2fr .8fr 1fr 1fr 1.5fr 1.25fr' : '2fr .9fr 1.1fr 1fr 1.2fr .8fr' }} key={contact.id}>
               <span>
                 <strong>{contact.name}</strong>
                 <small>#{String(contact.id).padStart(4, '0')}</small>
@@ -2733,12 +2877,13 @@ const App = () => {
                     {invoiceableSales.length > 0 ? `${invoiceableSales.length} ticket(s) a facturer` : 'Pas de ticket a facturer'}
                   </small>
                 </span> 
-                : <span>{contact.lastActivity}</span>}
+                : <span>{Number.isNaN(new Date(contact.lastActivity).getTime()) ? contact.lastActivity : new Date(contact.lastActivity).toLocaleDateString('fr-FR')}</span>}
               <span style={{ display: 'flex', gap: '0.5rem' }}>
                 {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Regler</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => openCustomerInvoiceFlow(contact)} style={{ color: '#7c3aed', background: '#f3e8ff', border: 'none' }}>Facturer</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setTopupContact(contact); setTopupAmount(''); }} style={{ color: '#3b82f6', background: '#eff6ff', border: 'none' }}>Recharger</button>}
                 {kind === 'Client' && <button className="row-action" onClick={() => { setMessageContact(contact); setMessageContent(''); }} style={{ color: '#8b5cf6', background: '#ede9fe', border: 'none' }}><Mail size={14} /></button>}
+                {kind === 'Fournisseur' && <button className="row-action" onClick={() => setPurchaseModalOpen(true)} style={{ color: '#0369a1', background: '#e0f2fe', border: 'none' }}><Plus size={14} /> Nouvel achat</button>}
               </span>
             </div>
           );
@@ -4267,8 +4412,8 @@ const App = () => {
           <div className="settings-icon-box"><Settings size={22} /></div>
           Paramètres
         </div>
-        <button className="settings-gradient-btn" style={{ padding: '0.75rem 1.5rem', borderRadius: '12px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setStatus('Paramètres sauvegardés avec succès !')}>
-          <Save size={18} /> Enregistrer
+        <button className="settings-gradient-btn" style={{ padding: '0.75rem 1.5rem', borderRadius: '12px', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={saveCompanySettings} disabled={settingsSaving}>
+          <Save size={18} /> {settingsSaving ? 'Enregistrement...' : 'Enregistrer'}
         </button>
       </div>
 
@@ -4299,13 +4444,15 @@ const App = () => {
               <label><span>Devise par défaut</span><select value={companySettings.currency} onChange={e => setCompanySettings(s => ({...s, currency: e.target.value}))} style={{ height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px' }}><option value="MAD">MAD (Dirham)</option><option value="EUR">EUR (Euro)</option><option value="USD">USD (Dollar)</option></select></label>
               <label><span>TVA par défaut (%)</span><input type="number" value={companySettings.defaultTva} onChange={e => setCompanySettings(s => ({...s, defaultTva: e.target.value}))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row', marginTop: '10px' }}><input type="checkbox" checked={companySettings.pricesIncludeTva} onChange={e => setCompanySettings(s => ({...s, pricesIncludeTva: e.target.checked}))} style={{ width: 'auto' }} /> <span>Les prix saisis incluent la TVA (TTC)</span></label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', flexDirection: 'row', marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                <input type="checkbox" checked={companySettings.restaurantEnabled} onChange={e => setCompanySettings(s => ({...s, restaurantEnabled: e.target.checked}))} style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} /> 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.9rem' }}>Activer le module Restaurant</span>
-                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Affiche les modules Tables et Cuisine dans la barre latérale.</span>
-                </div>
-              </label>
+              {restaurantEntitled && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', flexDirection: 'row', marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={companySettings.restaurantEnabled} onChange={e => setCompanySettings(s => ({...s, restaurantEnabled: e.target.checked}))} style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} /> 
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.9rem' }}>Activer le module Restaurant</span>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Affiche les modules Tables et Cuisine dans la barre latérale.</span>
+                  </div>
+                </label>
+              )}
               <label style={{ marginTop: '16px' }}>
                 <span>Verrouillage automatique (minutes)</span>
                 <input type="number" min="0" value={companySettings.autoLockMinutes} onChange={e => setCompanySettings(s => ({...s, autoLockMinutes: Number(e.target.value)}))} style={{ marginTop: '4px' }} />
@@ -4695,8 +4842,7 @@ const App = () => {
     if (page === 'Tableau de bord') return renderDashboard();
     if (page === 'POS') return renderRegister();
     if (page === 'Produits') return renderProducts();
-    if (page === 'Clients') return renderContacts('Client');
-    if (page === 'Fournisseurs') return renderContacts('Fournisseur');
+    if (page === 'Clients & Fournisseurs') return renderContacts();
     if (page === 'Stock') return renderStock();
     if (page === 'Achats') return renderPurchases();
     if (page === 'Depenses') return renderExpenses();
@@ -4710,6 +4856,10 @@ const App = () => {
     if (page === 'Caisses') return renderRegisters();
     return renderDashboard();
   };
+
+  if (authChecking) {
+    return <div className="auth-layout" aria-busy="true" />;
+  }
 
   if (!isAuthenticated) {
     return (
@@ -4794,35 +4944,126 @@ const App = () => {
             <em>POS</em>
           </div>
         </div>
-        <div style={{ padding: '0 1rem', marginBottom: '1rem' }}>
-          <select 
-            value={currentLocationId} 
-            onChange={(e) => setCurrentLocationId(Number(e.target.value))}
-            style={{ width: '100%', padding: '0.6rem', background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', borderRadius: '8px', fontSize: '0.85rem', outline: 'none', cursor: 'pointer', fontWeight: 600 }}
-          >
-            {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>{loc.name}</option>
-            ))}
-          </select>
-        </div>
+
         <div className="sidebar-search"><button><Search size={18} /><span>Recherche rapide</span><kbd>Ctrl K</kbd></button></div>
         <nav>{visibleModules.map(([label, Icon]) => <button className={label === page ? 'active' : ''} key={label as string} onClick={() => setPage(label as any)}><Icon size={18} /><span>{label as string}</span></button>)}</nav>
         <div className="sidebar-footer">
+          <div style={{ position: 'relative', marginBottom: '16px' }} title="Magasin Principal">
+            <Store size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none' }} />
+            <select 
+              value={currentLocationId} 
+              onChange={(e) => setCurrentLocationId(Number(e.target.value))}
+              style={{ width: '100%', padding: '8px 28px 8px 34px', background: '#fff', color: '#334155', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.8rem', outline: 'none', cursor: 'pointer', fontWeight: 700, appearance: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}
+            >
+              {locations.map(loc => (
+                <option key={loc.id} value={loc.id}>{loc.name}</option>
+              ))}
+            </select>
+            <ArrowRight size={14} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%) rotate(90deg)', color: '#94a3b8', pointerEvents: 'none' }} />
+          </div>
           {currentUser ? (
-            <button className="user-chip" onClick={() => { setIsAuthenticated(false); setCurrentUser(null); }}>
-              {currentUser.avatarUrl && <img src={currentUser.avatarUrl} alt={currentUser.fullName || currentUser.username} style={{ width: '24px', height: '24px', borderRadius: '50%' }} />}
-              <strong>{((currentUser.fullName || currentUser.username || '').split(' ')[0])}</strong>
-              <small>{currentUser.role}</small>
-            </button>
+            <div className="user-chip" style={{ gridTemplateColumns: '40px 1fr auto', cursor: 'default' }}>
+              <div style={{ display: 'contents', cursor: 'pointer' }} onClick={() => setProfileModalOpen(true)} title="Mon Profil">
+                {currentUser.avatarUrl ? <img src={currentUser.avatarUrl} alt={currentUser.fullName || currentUser.username} style={{ width: '40px', height: '40px', borderRadius: '12px', gridRow: '1 / 3' }} /> : <span style={{ gridRow: '1 / 3' }}>{(currentUser.fullName || currentUser.username || 'U').charAt(0).toUpperCase()}</span>}
+                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{((currentUser.fullName || currentUser.username || '').split(' ')[0])}</strong>
+                  <small style={{ textTransform: 'uppercase' }}>{currentUser.role}</small>
+                </div>
+              </div>
+              <button 
+                title="Déconnexion" 
+                onClick={() => { clearSession(); setIsAuthenticated(false); setCurrentUser(null); }}
+                style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '8px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#ef4444', gridRow: '1 / 3' }}
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           ) : (
-            <button className="user-chip"><span>A</span><strong>admin</strong><small>ADMIN</small></button>
+            <div className="user-chip" style={{ gridTemplateColumns: '40px 1fr auto', cursor: 'default' }}>
+              <span style={{ gridRow: '1 / 3' }}>A</span>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <strong>admin</strong>
+                <small>ADMIN</small>
+              </div>
+              <button 
+                title="Déconnexion" 
+                onClick={() => { clearSession(); setIsAuthenticated(false); setCurrentUser(null); }}
+                style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '8px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#ef4444', gridRow: '1 / 3' }}
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           )}
         </div>
       </aside>
       )}
       <main className={page === 'POS' ? 'pos-main' : undefined}>
         {renderPage()}
+        {renderContactModal()}
         {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} serialPort={serialPort} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {profileModalOpen && currentUser && (
+          <div className="calc-modal" style={{ zIndex: 9999 }}>
+            <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '400px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '1.25rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>Mon Profil</h3>
+                <button onClick={() => setProfileModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><span style={{ fontSize: '24px', lineHeight: 1 }}>&times;</span></button>
+              </div>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                const p = fd.get('password');
+                const fn = fd.get('fullName');
+                const body: any = {};
+                if (fn && fn !== currentUser.fullName) body.fullName = fn;
+                if (p) body.password = p;
+                
+                if (Object.keys(body).length === 0) {
+                  setProfileModalOpen(false);
+                  return;
+                }
+                
+                try {
+                  const res = await apiFetch('/api/auth/me', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    setCurrentUser(data.user);
+                    localStorage.setItem(authUserKey, JSON.stringify(data.user));
+                    setProfileModalOpen(false);
+                    setStatus('Profil mis à jour !');
+                  } else {
+                    const err = await res.json();
+                    alert('Erreur: ' + err.message);
+                  }
+                } catch (error) {
+                  alert('Erreur de connexion');
+                }
+              }}>
+                <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <strong>Nom complet</strong>
+                    <input type="text" name="fullName" defaultValue={currentUser.fullName || ''} style={{ padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%', boxSizing: 'border-box' }} />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <strong>Nouveau mot de passe</strong>
+                    <input type="password" name="password" placeholder="Laisser vide pour ne pas changer" style={{ padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', width: '100%', boxSizing: 'border-box' }} />
+                  </label>
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: '#64748b' }}>
+                    <strong>Identifiant:</strong> {currentUser.username}<br/>
+                    <strong>Rôle:</strong> {currentUser.role}
+                  </div>
+                </div>
+                <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #f1f5f9', background: '#f8fafc', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                  <button type="button" onClick={() => setProfileModalOpen(false)} style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontWeight: 600, color: '#475569' }}>Annuler</button>
+                  <button type="submit" style={{ padding: '0.5rem 1.5rem', borderRadius: '8px', border: 'none', background: '#2563eb', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Enregistrer</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
         {purchaseModalOpen && <CreatePurchaseModal suppliers={contacts.filter(c => ['SUPPLIER', 'BOTH'].includes(c.type))} warehouses={locations} products={products} formatMoney={formatMoney} onClose={() => setPurchaseModalOpen(false)} onSubmit={async (data) => {
           try {
             const finalItems = [];
@@ -5138,11 +5379,11 @@ const ProductsTable = ({ products, filter, setFilter, search, setSearch, visible
     </div>
     <div className="product-table modern-product-table">
       <div className="table-head">
-        <span style={{ width: '40px', textAlign: 'center' }}><input type="checkbox" checked={products.length > 0 && selectedIds.length === products.length} onChange={(e) => onSelectAll(e.target.checked ? products.map(p => p.id) : [])} /></span>
+        <span style={{ width: '30px', textAlign: 'center' }}><input type="checkbox" style={{ width: '14px', height: '14px', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }} checked={products.length > 0 && selectedIds.length === products.length} onChange={(e) => onSelectAll(e.target.checked ? products.map(p => p.id) : [])} /></span>
         <span>Produit</span><span>Catalogue</span><span>Prix</span><span>Stock</span><span>Actions</span>
       </div>
       {products.map(product => <div className={`table-row ${!product.isActive ? 'deactivated' : ''}`} key={product.id} style={{ opacity: product.isActive ? 1 : 0.6 }}>
-        <span style={{ width: '40px', textAlign: 'center' }}><input type="checkbox" checked={selectedIds.includes(product.id)} onChange={() => onSelect(product.id)} /></span>
+        <span style={{ width: '30px', textAlign: 'center' }}><input type="checkbox" style={{ width: '14px', height: '14px', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }} checked={selectedIds.includes(product.id)} onChange={() => onSelect(product.id)} /></span>
         <span className="product-cell">
           <span className="product-thumb" style={{ filter: product.isActive ? 'none' : 'grayscale(1)' }}>{product.imageUrl ? <img src={product.imageUrl} alt={product.name} /> : <ImageIcon size={18} />}</span>
           <span>

@@ -184,6 +184,17 @@ router.post('/sell', async (req: AuthRequest, res, next) => {
     const body = req.body;
 
     let customerId = body.contact_id;
+    if (customerId) {
+      const customer = await prisma.contact.findFirst({ where: { id: Number(customerId), companyId } });
+      if (!customer) return res.status(404).json({ message: 'Contact not found' });
+    }
+    if (body.location_id) {
+      const location = await prisma.location.findFirst({ where: { id: Number(body.location_id), companyId } });
+      if (!location) return res.status(404).json({ message: 'Location not found' });
+    }
+    const productIds = [...new Set((body.products || []).map((item: any) => Number(item.product_id)))] as number[];
+    const productCount = await prisma.product.count({ where: { companyId, id: { in: productIds } } });
+    if (productCount !== productIds.length) return res.status(404).json({ message: 'Product not found' });
     if (!customerId) {
       const walkIn = await prisma.contact.findFirst({ where: { companyId, name: 'Client comptoir' } });
       customerId = walkIn?.id || null;
@@ -237,7 +248,7 @@ router.post('/contactapi-payment', async (req: AuthRequest, res, next) => {
     const companyId = req.user!.companyId;
     const body = req.body;
     // Simple implementation: updates contact balance and returns ok.
-    const contact = await prisma.contact.findUnique({ where: { id: body.contact_id } });
+    const contact = await prisma.contact.findFirst({ where: { id: body.contact_id, companyId } });
     if (contact) {
       await prisma.contact.update({
         where: { id: contact.id },

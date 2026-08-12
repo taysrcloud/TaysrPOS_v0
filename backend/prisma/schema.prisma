@@ -107,6 +107,7 @@ model Company {
   invoiceEnabled    Boolean  @default(false)
   opticEnabled      Boolean  @default(false)
   multiWarehouse    Boolean  @default(false)
+  settings          Json     @default("{}")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
+import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -11,31 +12,46 @@ const contactSchema = z.object({
   email: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   ice: z.string().optional().nullable(),
+  creditLimit: z.coerce.number().min(0).default(0),
+  balance: z.coerce.number().default(0),
 });
 
-router.get('/', async (req, res, next) => {
+const toContactResponse = (contact: {
+  id: number;
+  fullName: string;
+  phone: string | null;
+  email: string | null;
+  type: string;
+  balance: unknown;
+  creditLimit: unknown;
+  address: string | null;
+  ice: string | null;
+  createdAt: Date;
+}) => ({
+  id: contact.id,
+  name: contact.fullName,
+  phone: contact.phone || '',
+  email: contact.email || '',
+  type: contact.type,
+  balance: Number(contact.balance),
+  creditLimit: Number(contact.creditLimit),
+  lastActivity: contact.createdAt.toISOString(),
+  rewardPoints: 0,
+  storeCredit: 0,
+  address: contact.address || '',
+  taxId: contact.ice || '',
+});
+
+router.get('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ contacts: [] });
+    const companyId = req.user!.companyId;
 
     const contacts = await prisma.contact.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       orderBy: { createdAt: 'desc' }
     });
     
-    const mapped = contacts.map(c => ({
-      id: c.id,
-      name: c.fullName,
-      phone: c.phone || '',
-      email: c.email || '',
-      type: c.type,
-      purchases: 0,
-      totalSpent: 0,
-      debt: Number(c.balance),
-      loyaltyPoints: 0,
-      address: c.address || '',
-      taxId: c.ice || ''
-    }));
+    const mapped = contacts.map(toContactResponse);
 
     res.json({ contacts: mapped });
   } catch (err) {
@@ -43,22 +59,19 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const parsed = contactSchema.parse(req.body);
-    let company = await prisma.company.findFirst();
-    if (!company) {
-      company = await prisma.company.create({ data: { name: 'Demo Company' } });
-    }
+    const companyId = req.user!.companyId;
 
     const contact = await prisma.contact.create({
       data: {
-        companyId: company.id,
+        companyId,
         ...parsed
       }
     });
 
-    res.json({ success: true, contact });
+    res.status(201).json({ success: true, contact: toContactResponse(contact) });
   } catch (err) {
     next(err);
   }

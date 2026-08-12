@@ -16,16 +16,19 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
       }))
     }).parse(req.body);
 
-    const company = await prisma.company.findFirst();
-    if (!company) return res.status(400).json({ error: 'No company found' });
+    const companyId = (req as any).user.companyId;
+
+    const productIds = [...new Set(parsed.adjustments.map(item => item.productId))];
+    const ownedProductCount = await prisma.product.count({ where: { companyId, id: { in: productIds } } });
+    if (ownedProductCount !== productIds.length) return res.status(404).json({ error: 'Produit introuvable' });
 
     let warehouse = await prisma.warehouse.findFirst({
-      where: parsed.locationId ? { companyId: company.id, locationId: parsed.locationId } : { companyId: company.id }
+      where: parsed.locationId ? { companyId, locationId: parsed.locationId } : { companyId }
     });
 
     if (!warehouse) {
       warehouse = await prisma.warehouse.create({
-        data: { companyId: company.id, name: 'Magasin principal', isMain: true }
+        data: { companyId, name: 'Magasin principal', isMain: true }
       });
     }
 
@@ -73,10 +76,9 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
 
 router.get('/warehouses', requireAuth, async (req, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.status(400).json({ error: 'No company found' });
+    const companyId = (req as any).user.companyId;
     const warehouses = await prisma.warehouse.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       include: { stocks: { include: { product: true } } }
     });
     res.json({ warehouses });
@@ -87,13 +89,12 @@ router.get('/warehouses', requireAuth, async (req, res, next) => {
 
 router.get('/movements', requireAuth, async (req, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.status(400).json({ error: 'No company found' });
+    const companyId = (req as any).user.companyId;
     const locationId = req.query.locationId ? Number(req.query.locationId) : undefined;
     const movements = await prisma.stockMovement.findMany({
       where: {
         warehouse: {
-          companyId: company.id,
+          companyId,
           ...(locationId ? { locationId } : {}),
         }
       },
@@ -131,6 +132,16 @@ router.post('/transfer', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (
       quantity: z.number().positive(),
       notes: z.string().optional()
     }).parse(req.body);
+
+    const companyId = (req as any).user.companyId;
+    const [sourceWarehouse, destinationWarehouse, product] = await Promise.all([
+      prisma.warehouse.findFirst({ where: { id: parsed.sourceWarehouseId, companyId } }),
+      prisma.warehouse.findFirst({ where: { id: parsed.destinationWarehouseId, companyId } }),
+      prisma.product.findFirst({ where: { id: parsed.productId, companyId } }),
+    ]);
+    if (!sourceWarehouse || !destinationWarehouse || !product) {
+      return res.status(404).json({ error: 'Produit ou depot introuvable' });
+    }
 
     if (parsed.sourceWarehouseId === parsed.destinationWarehouseId) {
       return res.status(400).json({ error: 'Source and destination warehouses must be different' });

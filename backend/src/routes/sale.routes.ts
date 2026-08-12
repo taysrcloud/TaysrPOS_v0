@@ -6,12 +6,6 @@ import { prisma } from '../utils/prisma.js';
 
 const router = Router();
 
-const demoCatalog = new Map([
-  [1, { name: 'Bouteille eau 50cl', sku: 'EAU-050', salePrice: 6, tvaRate: 20 }],
-  [2, { name: 'Riz 5kg', sku: 'RIZ-005', salePrice: 58, tvaRate: 20 }],
-  [3, { name: 'Recharge mobile', sku: 'SRV-RECHARGE', salePrice: 20, tvaRate: 0 }],
-]);
-
 const saleSchema = z.object({
   customerId: z.coerce.number().int().positive().optional().nullable(),
   customerName: z.string().trim().optional().default('Client comptoir'),
@@ -91,7 +85,7 @@ router.get('/', requireAuth, async (req: any, res: any) => {
     const company = { id: companyId };
     const locationId = req.query.locationId ? parseInt(req.query.locationId) : undefined;
     const sales = await prisma.sale.findMany({
-      where: { companyId: company.id, ...(locationId ? { locationId } : {}) },
+      where: { companyId, ...(locationId ? { locationId } : {}) },
       include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 80,
@@ -106,25 +100,29 @@ router.get('/', requireAuth, async (req: any, res: any) => {
 router.post('/', async (req, res) => {
   try {
     const data = saleSchema.parse(req.body);
-    const company = await prisma.company.findFirst();
-    if (!company) return res.status(400).json({ message: 'No company found' });
+    const companyId = (req as any).user.companyId;
 
     let location = await prisma.location.findFirst({
-      where: data.locationId ? { id: data.locationId, companyId: company.id } : { companyId: company.id }
+      where: data.locationId ? { id: data.locationId, companyId } : { companyId }
     });
     if (!location) return res.status(400).json({ message: 'Location not found' });
 
     let warehouse = await prisma.warehouse.findFirst({
-      where: { companyId: company.id, locationId: location.id }
+      where: { companyId, locationId: location.id }
     });
     if (!warehouse) {
-      warehouse = await prisma.warehouse.findFirst({ where: { companyId: company.id } });
+      warehouse = await prisma.warehouse.findFirst({ where: { companyId } });
     }
     if (!warehouse) return res.status(400).json({ message: 'Warehouse not found' });
 
-    const productIds = data.items.map(item => item.productId);
+    if (data.tableId) {
+      const table = await prisma.restaurantTable.findFirst({ where: { id: data.tableId, companyId } });
+      if (!table) return res.status(404).json({ message: 'Table introuvable' });
+    }
+
+    const productIds = [...new Set(data.items.map(item => item.productId))];
     const products = await prisma.product.findMany({
-      where: { companyId: company.id, id: { in: productIds }, isActive: true },
+      where: { companyId, id: { in: productIds }, isActive: true },
       include: { stocks: { where: { warehouseId: warehouse.id } }, variations: true },
     });
     if (products.length !== productIds.length) return res.status(400).json({ message: 'Un produit du panier est introuvable' });
@@ -160,14 +158,15 @@ router.post('/', async (req, res) => {
       const customerName = data.customerName || 'Client comptoir';
       let customer = null;
       if (data.customerId) {
-        customer = await tx.contact.findUnique({ where: { id: data.customerId } });
+        customer = await tx.contact.findFirst({ where: { id: data.customerId, companyId } });
+        if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
       } else if (customerName !== 'Client comptoir') {
-        customer = await tx.contact.create({ data: { companyId: company.id, type: 'CUSTOMER', fullName: customerName } });
+        customer = await tx.contact.create({ data: { companyId, type: 'CUSTOMER', fullName: customerName } });
       }
 
       const created = await tx.sale.create({
         data: {
-          companyId: company.id,
+          companyId,
           locationId: location.id,
           customerId: customer?.id,
           channel: SaleChannel.RETAIL,
@@ -207,11 +206,14 @@ router.post('/', async (req, res) => {
       if (shouldFinalize) {
         for (const line of rawLines) {
           if (!line.product.trackStock || line.product.type === ProductType.SERVICE) continue;
-          await tx.productStock.upsert({
-            where: { productId_warehouseId_variationId: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId ?? null } } as any,
-            update: { quantity: { decrement: line.item.quantity } },
-            create: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId, quantity: -line.item.quantity },
+          const existingStock = await tx.productStock.findFirst({
+            where: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId ?? null },
           });
+          if (existingStock) {
+            await tx.productStock.update({ where: { id: existingStock.id }, data: { quantity: { decrement: line.item.quantity } } });
+          } else {
+            await tx.productStock.create({ data: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId, quantity: -line.item.quantity } });
+          }
           await tx.stockMovement.create({
             data: {
               productId: line.product.id,
@@ -235,50 +237,7 @@ router.post('/', async (req, res) => {
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ message: 'Ticket invalide', errors: error.issues });
     if (error?.message === 'VARIATION_NOT_FOUND') return res.status(400).json({ message: 'Une declinaison du panier est inactive ou introuvable' });
-    const parsed = saleSchema.safeParse(req.body);
-    if (parsed.success) {
-      const data = parsed.data;
-      const rawLines = data.items.map(item => {
-        const product = demoCatalog.get(item.productId) || { name: 'Produit #' + item.productId, sku: 'PRD-' + item.productId, salePrice: 0, tvaRate: 20 };
-        const lineNet = Math.max(0, (product.salePrice - item.discount) * item.quantity);
-        const lineTax = lineNet * product.tvaRate / 100;
-        return { item, product, lineNet, lineTax, lineTotal: lineNet + lineTax };
-      });
-      const subtotal = rawLines.reduce((sum, line) => sum + line.product.salePrice * line.item.quantity, 0);
-      const lineDiscount = rawLines.reduce((sum, line) => sum + line.item.discount * line.item.quantity, 0);
-      const orderDiscount = Math.max(0, subtotal - lineDiscount) * data.discountRate / 100;
-      const discountTotal = lineDiscount + orderDiscount;
-      const taxTotal = rawLines.reduce((sum, line) => sum + line.lineTax, 0);
-      const total = Math.max(0, subtotal - discountTotal + taxTotal);
-      const status = data.status === 'SUSPENDED' ? 'Suspendue' : data.status === 'QUOTE' ? 'Devis' : data.status === 'DRAFT' ? 'Brouillon' : data.method === 'CREDIT' ? 'Credit' : 'Payée';
-      return res.status(201).json({
-        id: Date.now(),
-        ticket: (data.status === 'QUOTE' ? 'DEV' : data.status === 'SUSPENDED' ? 'SUS' : 'TCK') + '-' + Date.now().toString().slice(-5),
-        customer: data.customerName || 'Client comptoir',
-        total,
-        subtotal,
-        taxTotal,
-        discountTotal,
-        items: data.items.reduce((sum, item) => sum + item.quantity, 0),
-        method: data.method,
-        status,
-        createdAt: 'Maintenant',
-        lines: rawLines.map(line => ({
-          productId: line.item.productId,
-          variationId: line.item.variationId,
-          name: line.product.name,
-          sku: line.product.sku,
-          imageUrl: null,
-          quantity: line.item.quantity,
-          unitPrice: line.product.salePrice,
-          discount: line.item.discount,
-          tvaRate: line.product.tvaRate,
-          lineTotal: line.lineTotal,
-          note: line.item.note,
-        })),
-        source: 'demo',
-      });
-    }
+    if (error?.message === 'CUSTOMER_NOT_FOUND') return res.status(404).json({ message: 'Client introuvable' });
     console.error('Sale create error:', error);
     res.status(500).json({ message: 'Erreur lors de la validation du ticket' });
   }
@@ -300,6 +259,11 @@ router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
     });
     if (!sale || sale.companyId !== companyId) return res.status(404).json({ message: 'Vente introuvable' });
     if (sale.status === SaleStatus.FINAL) return res.status(400).json({ message: 'Cette vente est déjà finalisée' });
+
+    if (newCustomerId) {
+      const customer = await prisma.contact.findFirst({ where: { id: Number(newCustomerId), companyId } });
+      if (!customer) return res.status(404).json({ message: 'Client introuvable' });
+    }
 
     const paymentMethod: PaymentMethod = method === 'CARD' ? PaymentMethod.CARD : method === 'CREDIT' ? PaymentMethod.CREDIT : PaymentMethod.CASH;
     const isCredit = paymentMethod === PaymentMethod.CREDIT;
@@ -341,11 +305,14 @@ router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
       if (warehouse) {
         for (const item of sale.items) {
           if (!item.product.trackStock || item.product.type === ProductType.SERVICE) continue;
-          await tx.productStock.upsert({
-            where: { productId_warehouseId_variationId: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId ?? null } } as any,
-            update: { quantity: { decrement: Number(item.quantity) } },
-            create: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId, quantity: -Number(item.quantity) },
+          const existingStock = await tx.productStock.findFirst({
+            where: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId ?? null },
           });
+          if (existingStock) {
+            await tx.productStock.update({ where: { id: existingStock.id }, data: { quantity: { decrement: Number(item.quantity) } } });
+          } else {
+            await tx.productStock.create({ data: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId, quantity: -Number(item.quantity) } });
+          }
           await tx.stockMovement.create({
             data: {
               productId: item.productId,
@@ -387,7 +354,7 @@ router.delete('/:id', requireAuth, async (req: any, res: any, next) => {
   }
 });
 
-router.patch('/:id/kitchen', async (req: any, res: any, next) => {
+router.patch('/:id/kitchen', requireAuth, async (req: any, res: any, next) => {
   try {
     const { id } = req.params;
     const { kitchenStatus } = req.body;
@@ -395,8 +362,10 @@ router.patch('/:id/kitchen', async (req: any, res: any, next) => {
     // We will update the status of the Sale to READY if that's what's sent, or update items.
     // For simplicity, we just mark the sale status for now since the UI uses it.
     if (kitchenStatus === 'READY') {
+      const ownedSale = await prisma.sale.findFirst({ where: { id: Number(id), companyId: req.user.companyId } });
+      if (!ownedSale) return res.status(404).json({ message: 'Sale not found' });
       const sale = await prisma.sale.update({
-        where: { id: Number(id) },
+        where: { id: ownedSale.id },
         data: { status: 'READY' }
       });
       res.json({ success: true, sale: normalizeSale(sale) });
@@ -593,11 +562,10 @@ router.post('/merge', requireAuth, async (req: any, res: any, next) => {
 router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
   try {
     const saleId = Number(req.params.id);
-    const company = await prisma.company.findFirst();
-    if (!company) return res.status(400).json({ message: 'Company not found' });
+    const companyId = req.user.companyId;
 
-    const sale = await prisma.sale.findUnique({
-      where: { id: saleId },
+    const sale = await prisma.sale.findFirst({
+      where: { id: saleId, companyId },
       include: { items: { include: { product: true } } }
     });
 
@@ -605,10 +573,10 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
     if (sale.status === 'RETURNED') return res.status(400).json({ message: 'Sale is already returned' });
 
     let warehouse = await prisma.warehouse.findFirst({
-      where: { companyId: company.id, locationId: sale.locationId }
+      where: { companyId, locationId: sale.locationId }
     });
     if (!warehouse) {
-      warehouse = await prisma.warehouse.findFirst({ where: { companyId: company.id } });
+      warehouse = await prisma.warehouse.findFirst({ where: { companyId } });
     }
 
     const updatedSale = await prisma.$transaction(async (tx) => {

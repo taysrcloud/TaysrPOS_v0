@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
-import { prisma } from '../utils/prisma.js';
+import { prisma, runWithTenantDatabase } from '../utils/prisma.js';
 import { UserRole } from '../generated/client/index.js';
 
 const router = Router();
@@ -55,9 +55,12 @@ const provisionSchema = z.object({
 });
 
 router.post('/provision-tenant', async (req, res) => {
-  const expectedSecret = process.env.TAYSR_PROVISIONING_SECRET || 'secret';
+  const expectedSecret = process.env.TAYSRPOS_PROVISIONING_SECRET || 'secret';
   const receivedSecret = req.header('X-Platform-Secret');
-  if (!receivedSecret || receivedSecret !== expectedSecret) {
+  
+  console.log(`[PROVISION] expected: ${expectedSecret}, received: ${receivedSecret}`);
+  
+  if (!expectedSecret || !receivedSecret || receivedSecret !== expectedSecret) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -77,7 +80,9 @@ router.post('/provision-tenant', async (req, res) => {
       multiWarehouse: data.modules?.multiWarehouse ?? Boolean(data.features?.multiBranches || data.features?.multiWarehouses),
     };
 
-    const company = await prisma.company.upsert({
+    const tenantDbUrl = req.header('X-Tenant-DB') || null;
+    return await runWithTenantDatabase(tenantDbUrl, async () => {
+      const company = await prisma.company.upsert({
       where: { accountId },
       update: {
         name: data.name,
@@ -218,6 +223,7 @@ router.post('/provision-tenant', async (req, res) => {
         role: user.role,
         isActive: user.isActive,
       },
+    });
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

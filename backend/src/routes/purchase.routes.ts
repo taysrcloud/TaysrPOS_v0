@@ -5,13 +5,12 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/', async (req, res, next) => {
+router.get('/', requireAuth, async (req: any, res, next) => {
   try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ purchases: [] });
+    const companyId = req.user.companyId;
 
     const purchases = await prisma.purchase.findMany({
-      where: { companyId: company.id },
+      where: { companyId },
       include: { supplier: true, items: true },
       orderBy: { createdAt: 'desc' }
     });
@@ -46,15 +45,23 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
       total: z.number()
     }).parse(req.body);
 
-    let company = await prisma.company.findFirst();
-    if (!company) {
-      company = await prisma.company.create({ data: { name: 'Demo Company' } });
+    const companyId = (req as any).user.companyId;
+    const productIds = [...new Set(parsed.items.map(item => item.productId))];
+    const ownedProducts = await prisma.product.count({ where: { companyId, id: { in: productIds } } });
+    if (ownedProducts !== productIds.length) return res.status(404).json({ error: 'Produit introuvable' });
+    if (parsed.supplierId) {
+      const supplier = await prisma.contact.findFirst({ where: { id: parsed.supplierId, companyId, type: { in: ['SUPPLIER', 'BOTH'] } } });
+      if (!supplier) return res.status(404).json({ error: 'Fournisseur introuvable' });
+    }
+    if (parsed.locationId) {
+      const location = await prisma.location.findFirst({ where: { id: parsed.locationId, companyId } });
+      if (!location) return res.status(404).json({ error: 'Magasin introuvable' });
     }
 
     const purchase = await prisma.$transaction(async (tx) => {
       const created = await tx.purchase.create({
         data: {
-          companyId: company!.id,
+          companyId,
           supplierId: parsed.supplierId,
           reference: `ACH-${Math.floor(Math.random() * 10000)}`,
           total: parsed.total,
@@ -72,12 +79,12 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
 
       if (parsed.status === 'RECEIVED') {
         let warehouse = await tx.warehouse.findFirst({
-          where: parsed.locationId ? { companyId: company!.id, locationId: parsed.locationId } : { companyId: company!.id }
+          where: parsed.locationId ? { companyId, locationId: parsed.locationId } : { companyId }
         });
 
         if (!warehouse) {
           warehouse = await tx.warehouse.create({
-            data: { companyId: company!.id, name: 'Magasin principal', isMain: true }
+            data: { companyId, name: 'Magasin principal', isMain: true }
           });
         }
 
@@ -123,8 +130,9 @@ router.put('/:id/receive', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
       locationId: z.coerce.number().int().positive().optional()
     }).parse(req.body);
 
-    const purchase = await prisma.purchase.findUnique({
-      where: { id: Number(id) },
+    const companyId = (req as any).user.companyId;
+    const purchase = await prisma.purchase.findFirst({
+      where: { id: Number(id), companyId },
       include: { items: true }
     });
 
@@ -132,12 +140,12 @@ router.put('/:id/receive', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
     if (purchase.status === 'RECEIVED') return res.status(400).json({ error: 'Purchase is already received' });
 
     let warehouse = await prisma.warehouse.findFirst({
-      where: parsed.locationId ? { companyId: purchase.companyId, locationId: parsed.locationId } : { companyId: purchase.companyId }
+      where: parsed.locationId ? { companyId, locationId: parsed.locationId } : { companyId }
     });
 
     if (!warehouse) {
       warehouse = await prisma.warehouse.create({
-        data: { companyId: purchase.companyId, name: 'Magasin principal', isMain: true }
+        data: { companyId, name: 'Magasin principal', isMain: true }
       });
     }
 

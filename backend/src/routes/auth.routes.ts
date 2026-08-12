@@ -4,7 +4,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { prisma, getTenantPrisma } from '../utils/prisma.js';
 import { platformDb } from '../utils/platformPrisma.js';
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { requireAuth, AuthRequest, normalizeModules } from '../middleware/auth.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'taysr-super-secret-key-1234';
@@ -28,6 +28,9 @@ router.post('/login', async (req, res) => {
     let tenantUser = null;
     let targetAccountId = undefined;
     let platformUserId = undefined;
+    let targetDatabaseUrl = undefined;
+    let targetPlanLimits = undefined;
+    let forceFail = false;
 
     try {
       // 1. Try Platform Database first (Multi-tenant mode)
@@ -59,6 +62,15 @@ router.post('/login', async (req, res) => {
               if (tenantUser) {
                 targetAccountId = targetMembership.accountId;
                 platformUserId = platformUser.id;
+                targetDatabaseUrl = targetMembership.databaseUrl;
+                targetPlanLimits = {
+                  maxProducts: targetMembership.maxProducts,
+                  maxLocations: targetMembership.maxLocations,
+                  maxUsers: targetMembership.maxUsers,
+                  modules: normalizeModules(typeof targetMembership.modules === 'string' ? JSON.parse(targetMembership.modules || '[]') : targetMembership.modules),
+                };
+              } else {
+                forceFail = true;
               }
             }
           }
@@ -66,6 +78,10 @@ router.post('/login', async (req, res) => {
       }
     } catch (err) {
       console.warn('Platform DB login failed or not configured, falling back to standalone mode', (err as any)?.message);
+    }
+
+    if (forceFail) {
+      return res.status(401).json({ message: 'Compte mal configuré (base de données vide). Veuillez recréer le compte.' });
     }
 
     // 2. Fallback to Standalone Mode (Local DB)
@@ -94,6 +110,7 @@ router.post('/login', async (req, res) => {
         role: tenantUser.role,
         accountId: targetAccountId,
         platformUserId: platformUserId,
+        databaseUrl: targetDatabaseUrl,
       },
       JWT_SECRET,
       { expiresIn: '12h' }
@@ -101,7 +118,14 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: tenantUser.id, fullName: tenantUser.fullName, role: tenantUser.role, username: tenantUser.username, accountId: targetAccountId },
+      user: { 
+        id: tenantUser.id, 
+        fullName: tenantUser.fullName, 
+        role: tenantUser.role, 
+        username: tenantUser.username, 
+        accountId: targetAccountId,
+        planLimits: targetPlanLimits
+      },
       company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId, restaurantEnabled: tenantUser.company.restaurantEnabled },
     });
   } catch (error) {
@@ -114,14 +138,15 @@ router.post('/login', async (req, res) => {
 });
 
 // Quick unlock for POS lock screen
-router.post('/pin-unlock', async (req, res) => {
+router.post('/pin-unlock', requireAuth, async (req: AuthRequest, res) => {
   try {
     const { userId, pin } = z.object({
       userId: z.number().int().positive(),
       pin: z.string().length(4),
     }).parse(req.body);
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, include: { company: true } });
+    if (userId !== req.user!.userId) return res.status(403).json({ message: 'Utilisateur invalide' });
+    const user = await prisma.user.findFirst({ where: { id: userId, companyId: req.user!.companyId }, include: { company: true } });
     if (!user || !user.isActive || !user.pinHash) {
       return res.status(401).json({ message: 'Utilisateur introuvable ou inactif' });
     }
@@ -138,8 +163,9 @@ router.post('/pin-unlock', async (req, res) => {
     // or the client passes the previous token to prove tenant context.
     // For now we'll issue the token but without `databaseUrl` if we don't have it, 
     // which relies on the fallback local database. The frontend should ideally re-auth.
+    // In the future, frontend can pass `databaseUrl` from its storage.
     const token = jwt.sign(
-      { userId: user.id, username: user.username, companyId: user.companyId, role: user.role },
+      { userId: user.id, username: user.username, companyId: user.companyId, role: user.role, accountId: req.user!.accountId, platformUserId: req.user!.platformUserId, databaseUrl: req.user!.databaseUrl },
       JWT_SECRET,
       { expiresIn: '12h' }
     );
@@ -157,10 +183,10 @@ router.post('/pin-unlock', async (req, res) => {
   }
 });
 
-router.get('/users', async (_req, res) => {
+router.get('/users', requireAuth, async (req: AuthRequest, res) => {
   try {
     const users = await prisma.user.findMany({
-      where: { isActive: true },
+      where: { companyId: req.user!.companyId, isActive: true },
       select: { id: true, fullName: true, role: true, username: true, email: true },
       orderBy: [{ fullName: 'asc' }, { username: 'asc' }],
     });
@@ -188,11 +214,45 @@ router.get('/me', requireAuth, async (req: AuthRequest, res) => {
         role: user.role,
         companyId: user.companyId,
         accountId: user.company.accountId,
+        planLimits: req.user!.planLimits
       },
       company: user.company,
     });
   } catch (error) {
     console.error('Auth me error', error);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+});
+
+router.put('/me', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { fullName, password } = z.object({
+      fullName: z.string().min(1).optional(),
+      password: z.string().min(4).optional(),
+    }).parse(req.body);
+
+    const updateData: any = {};
+    if (fullName !== undefined) updateData.fullName = fullName;
+    if (password) {
+      updateData.passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: 'Rien  mettre  jour' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: updateData,
+      select: { id: true, username: true, email: true, fullName: true, role: true, companyId: true }
+    });
+
+    return res.json({ message: 'Profil mis  jour', user: updatedUser });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Requte invalide' });
+    }
+    console.error('Update me error', error);
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 });

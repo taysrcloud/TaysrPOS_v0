@@ -1,128 +1,67 @@
 import { Router } from 'express';
 import { prisma } from '../utils/prisma.js';
+import { requireAuth, requireRole, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/tables', async (req, res, next) => {
-  try {
-    const company = await prisma.company.findFirst();
-    if (!company) return res.json({ areas: [] });
-
-    // Seed some basic areas if none exist for demo purposes
-    let areas = await prisma.restaurantArea.findMany({
-      where: { companyId: company.id },
-      include: { tables: true }
-    });
-
-    if (areas.length === 0) {
-      const area1 = await prisma.restaurantArea.create({
-        data: {
-          companyId: company.id,
-          name: 'Salle Principale',
-          tables: {
-            create: Array.from({ length: 8 }).map((_, i) => ({ companyId: company.id, name: `Salle ${i + 1}`, seats: 4 }))
-          }
-        },
-        include: { tables: true }
-      });
-      const area2 = await prisma.restaurantArea.create({
-        data: {
-          companyId: company.id,
-          name: 'Terrasse',
-          tables: {
-            create: Array.from({ length: 6 }).map((_, i) => ({ companyId: company.id, name: `Terrasse ${i + 1}`, seats: 4 }))
-          }
-        },
-        include: { tables: true }
-      });
-      
-      const newAreas = [area1, area2];
-      
-      const formattedAreas = newAreas.map(area => ({
-        id: area.id,
-        name: area.name,
-        tables: area.tables.map(t => ({
-          id: t.id,
-          name: t.name,
-          seats: t.seats,
-          isActive: t.isActive
-        }))
-      }));
-      return res.json({ areas: formattedAreas });
-    }
-
-    const formattedAreas = areas.map(area => ({
-      id: area.id,
-      name: area.name,
-      tables: area.tables.map(t => ({
-        id: t.id,
-        name: t.name,
-        seats: t.seats,
-        isActive: t.isActive
-      }))
-    }));
-
-    res.json({ areas: formattedAreas });
-  } catch (error) {
-    next(error);
+const requireRestaurant = async (req: AuthRequest, res: any) => {
+  const companyId = req.user!.companyId;
+  const company = await prisma.company.findFirst({ where: { id: companyId, restaurantEnabled: true } });
+  if (!company) {
+    res.status(403).json({ message: 'Module restaurant non active' });
+    return null;
   }
+  return companyId;
+};
+
+router.get('/tables', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = await requireRestaurant(req, res);
+    if (!companyId) return;
+    const areas = await prisma.restaurantArea.findMany({
+      where: { companyId },
+      include: { tables: { where: { companyId }, orderBy: { name: 'asc' } } },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.json({ areas: areas.map(area => ({ id: area.id, name: area.name, tables: area.tables })) });
+  } catch (error) { next(error); }
+});
+
+router.post('/areas', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = await requireRestaurant(req, res);
+    if (!companyId) return;
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ message: 'Nom requis' });
+    const area = await prisma.restaurantArea.create({ data: { name, companyId }, include: { tables: true } });
+    res.status(201).json(area);
+  } catch (error) { next(error); }
+});
+
+router.post('/areas/:areaId/tables', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = await requireRestaurant(req, res);
+    if (!companyId) return;
+    const areaId = Number(req.params.areaId);
+    const area = await prisma.restaurantArea.findFirst({ where: { id: areaId, companyId } });
+    if (!area) return res.status(404).json({ message: 'Zone introuvable' });
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ message: 'Nom requis' });
+    const table = await prisma.restaurantTable.create({ data: { name, seats: Number(req.body.seats) || 2, areaId, companyId } });
+    res.status(201).json(table);
+  } catch (error) { next(error); }
+});
+
+router.delete('/tables/:id', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = await requireRestaurant(req, res);
+    if (!companyId) return;
+    const id = Number(req.params.id);
+    const table = await prisma.restaurantTable.findFirst({ where: { id, companyId } });
+    if (!table) return res.status(404).json({ message: 'Table introuvable' });
+    await prisma.restaurantTable.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) { next(error); }
 });
 
 export default router;
-
-// Helper to get company from request context. Currently relying on the same logic used elsewhere.
-const getCompanyId = async (req: any) => {
-  // If requireAuth sets req.user.companyId, use it. Otherwise, fallback to the first company.
-  if (req.user && req.user.companyId) return req.user.companyId;
-  const company = await prisma.company.findFirst();
-  return company?.id;
-};
-
-router.post('/areas', async (req: any, res: any, next) => {
-  try {
-    const companyId = await getCompanyId(req);
-    if (!companyId) return res.status(400).json({ message: 'No company found' });
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ message: 'Name is required' });
-
-    const area = await prisma.restaurantArea.create({
-      data: { name, companyId },
-      include: { tables: true }
-    });
-    res.status(201).json(area);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/areas/:areaId/tables', async (req: any, res: any, next) => {
-  try {
-    const companyId = await getCompanyId(req);
-    if (!companyId) return res.status(400).json({ message: 'No company found' });
-    const { areaId } = req.params;
-    const { name, seats } = req.body;
-    if (!name) return res.status(400).json({ message: 'Name is required' });
-
-    const table = await prisma.restaurantTable.create({
-      data: {
-        name,
-        seats: Number(seats) || 2,
-        areaId: Number(areaId),
-        companyId
-      }
-    });
-    res.status(201).json(table);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete('/tables/:id', async (req: any, res: any, next) => {
-  try {
-    const { id } = req.params;
-    await prisma.restaurantTable.delete({ where: { id: Number(id) } });
-    res.json({ success: true });
-  } catch (error) {
-    next(error);
-  }
-});

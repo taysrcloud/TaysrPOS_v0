@@ -139,9 +139,9 @@ Each time a meaningful block is finished:
 - [x] Confirmed the `WAITER` role is completely hidden unless `restaurantEnabled` is active.
 
 ### 2026-07-09 Main Component Modularization
-- [x] Extracted \SettingsPage\, \RestaurantTablesPage\, and \ExpensesPage\ into separate components to reduce \main.tsx\ complexity.
-- [x] Extracted reusable \PageHeader\ component for standardizing view headers.
-- [x] Cleaned up obsolete rendering functions and duplicate logic from \main.tsx\.
+- [x] Extracted `SettingsPage`, `RestaurantTablesPage`, and `ExpensesPage` into separate components to reduce `main.tsx` complexity.
+- [x] Extracted reusable `PageHeader` component for standardizing view headers.
+- [x] Cleaned up obsolete rendering functions and duplicate logic from `main.tsx`.
 - [x] Fixed all TypeScript definitions, import inconsistencies, and strict-mode implicit `any` errors across newly extracted files.
 - [x] Verified full build integrity with `npm run build` yielding zero errors.
 
@@ -149,3 +149,66 @@ Each time a meaningful block is finished:
 - [x] Refactored `loadSessions` in `main.tsx` to remove the date check, allowing users to safely resume and close previous day's open sessions without being locked out.
 - [x] Refactored the mobile sidebar into a fully responsive off-canvas drawer with a hamburger menu trigger, matching `TaysrOptic` and `TaysrPlatform`.
 - [x] Fixed an exported type issue (`Contact`, `Product`, etc.) during the modularization phase to ensure the Vite build remains stable.
+
+### 2026-07-16 Tenant Isolation & Real API Verification
+- [x] Replaced all first-company fallbacks in Contacts, Expenses, Locations, Inventory, Purchases, Restaurant, and Sales with the authenticated tenant company ID.
+- [x] Validated linked IDs before writes: customers, suppliers, products, locations, warehouses, restaurant areas/tables, sales, and invoices must belong to the current tenant.
+- [x] Protected PIN unlock and user listing with tenant-aware authentication.
+- [x] Removed fake HTTP-200 demo product/sale persistence fallbacks; database failures now remain visible as real API errors.
+- [x] Fixed finalized-sale stock persistence for base products where variationId is null.
+- [x] Added the missing attendance API used by the frontend.
+- [x] Replaced the Settings page's fake Save action with tenant-scoped API persistence, including company/TVA/document/loyalty/scale preferences.
+- [x] Moved role permissions from a global browser key into tenant settings; account-specific UI preferences no longer bleed between logins.
+- [x] Added repeatable `npm run test:tenant-isolation` coverage using two temporary tenants, real API writes, cross-tenant attack attempts, and automatic cleanup.
+- [x] Verified full backend/frontend typecheck, frontend production build, Prisma generation/schema sync, and the live PostgreSQL smoke suite.
+
+## Next Targeted Steps
+1. Replace the stale `/api/sales/:id/receipt` and `/api/sales/:id/invoice` window-open calls with authenticated document download/print flows.
+2. Complete edit/deactivate workflows for contacts and expenses so those management pages have full lifecycle controls, not create/list only.
+3. Add a tenant-safe logo upload endpoint; browser blob URLs must never be persisted as company branding.
+4. Add route-contract tests for every frontend API URL and role matrix (Admin, Manager, Cashier, Waiter).
+5. Split the remaining large `main.tsx` sections after API parity is locked, beginning with Settings, Contacts, and document printing.
+
+## 2026-07-16 - Live auth and customer state synchronization
+
+- Fixed tenant data loading so protected POS data is requested only after authentication succeeds.
+- Login and tenant/account changes now immediately reload sessions, contacts, sales, invoices, locations, expenses, and purchases.
+- Existing JWT sessions are restored through GET /api/auth/me after refresh; users no longer need to log in twice.
+- Customer POST and GET now return the same UI contract, including name, balance, credit limit, and activity fields.
+- Creating a customer from POS now selects and displays it immediately in POS and Clients without refresh.
+- Verified locally with the real browser flow: login -> POS -> customer create -> Clients -> refresh.
+
+## 2026-07-16 - Persistent refresh session
+
+- Persisted both the JWT and authenticated user summary so refresh restores the workspace immediately.
+- Session verification now runs in the background through GET /api/auth/me.
+- Temporary network/server errors no longer delete a valid local session; only a confirmed 401 clears it.
+- A 403 permission response no longer logs the whole user out.
+- Explicit logout now clears both persisted token and user state.
+- PIN unlock now uses the authenticated API helper and refreshes the persisted session.
+- Verified five consecutive browser refreshes: dashboard remained authenticated and POS navigation remained available each time.
+- Verified current GET /api/settings returns 200; the reported 404 belonged to an older running backend/bundle.
+
+## 2026-07-16 - Unified Clients & Suppliers workspace
+
+- Replaced separate Clients and Suppliers sidebar destinations with one Clients & Fournisseurs workspace.
+- Added compact Clients and Fournisseurs tabs inspired by TaysrOptic, including live counts and tab-specific search.
+- Fixed the dead New Supplier button by moving contact creation into a shared global modal.
+- Shared modal now creates CUSTOMER or SUPPLIER records through the authenticated contacts API and includes name, phone, email, and address; client-only credit limit remains contextual.
+- Supplier creation updates the active list immediately without refresh; customers continue to be selected immediately in POS.
+- Supplier rows expose a Nouvel achat action, while client-specific invoice, credit, and loyalty actions remain isolated to Clients.
+- Prevented suppliers from ever being selected as the POS default customer after contact loading.
+- Kept backward compatibility for roles that still store old Clients/Fournisseurs permission labels.
+- Verified frontend/backend typechecks, production build, live supplier creation, immediate list visibility, and a clean browser console. Temporary verification supplier removed.
+
+## 2026-07-16 - Sidebar workflow order and Restaurant entitlement
+
+- Reordered the sidebar around daily work: Dashboard, Clients & Fournisseurs, POS, Ventes, Factures, Paiements, Produits, Stock, Achats, Depenses, Rapports, Caisses, optional Restaurant pages, then Parametres.
+- Reordered the permissions matrix labels to match the sidebar.
+- Added one normalized module contract that accepts Super Admin module arrays or objects and converts them to uppercase module names.
+- Platform-managed accounts see the Restaurant setting only when their account/plan includes RESTAURANT.
+- Restaurant pages require both account entitlement and tenant activation; without entitlement, Tables/Cuisine and the toggle are hidden.
+- Added backend enforcement: direct settings activation and Restaurant API routes reject Platform accounts without RESTAURANT access.
+- Standalone local mode retains Restaurant access for development; deployed Platform accounts remain controlled by Super Admin.
+- Updated Platform POS sync to derive Restaurant, Invoice, and Optic module flags from account.modules as well as legacy feature flags.
+- Verified POS frontend/backend typechecks, Platform backend build, live sidebar order, hidden Restaurant controls for a non-entitled account, and no browser console errors.
