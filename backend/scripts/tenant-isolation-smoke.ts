@@ -61,7 +61,9 @@ try {
     method: 'POST',
     body: JSON.stringify({ fullName: `API Contact ${marker}`, type: 'CUSTOMER' }),
   });
-  assert(createdContact.status === 200 && createdContact.body.contact?.companyId === a.company.id, 'Contact create API failed');
+  // toContactResponse maps to a UI-facing shape with no companyId field (unlike Purchase/
+  // Expense, which return the raw Prisma record) - assert on name instead.
+  assert(createdContact.status === 201 && createdContact.body.contact?.name === `API Contact ${marker}`, `Contact create API failed: ${createdContact.status} ${JSON.stringify(createdContact.body)}`);
 
   const editedContact = await request(`/contacts/${createdContact.body.contact.id}`, a.token, {
     method: 'PUT',
@@ -231,6 +233,13 @@ try {
   for (const tenant of [a, b]) {
     if (!tenant) continue;
     await prisma.attendance.deleteMany({ where: { companyId: tenant.company.id } });
+    // SaleItem.productId and PurchaseItem.productId have no onDelete:Cascade (deliberately -
+    // real sale/purchase history must survive a product being removed), so a single cascading
+    // Company delete can hit that RESTRICT before Sale/Purchase's own cascade to their line
+    // items finishes clearing the reference. Delete them explicitly first so those cascades
+    // complete before Company deletion cascades to Product.
+    await prisma.sale.deleteMany({ where: { companyId: tenant.company.id } });
+    await prisma.purchase.deleteMany({ where: { companyId: tenant.company.id } });
     await prisma.company.delete({ where: { id: tenant.company.id } });
   }
   await prisma.$disconnect();

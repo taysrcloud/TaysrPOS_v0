@@ -1,5 +1,29 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-12 - Local Postgres unblocked - this session's DB caveats are resolved
+
+- [x] Installed and running a local Postgres server (Termux `postgresql` package, aarch64-native).
+      `backend/scripts/setup-local-postgres.sh` (`npm run db:setup`) automates the full setup and is
+      safe to re-run. See TRACE.md for why this needed a workaround (Prisma CLI's schema-engine, not
+      Postgres itself, was the actual platform blocker) and exactly what it does.
+- [x] `prisma db push` applied the full accumulated schema from this session (39 tables) to a real
+      database.
+- [x] Also fixed: `bcrypt`'s native module (skipped earlier via `--ignore-scripts`) now builds and
+      loads correctly - needed for both the smoke test and the real `auth.routes.ts` login flow.
+- [x] Ran `npm run test:tenant-isolation` for real for the first time this session. Found and fixed two
+      real pre-existing bugs in the test itself (wrong expected status code on contact create; asserting
+      a `companyId` field that `toContactResponse` deliberately doesn't return) plus a real cleanup-order
+      bug (deleting a `Company` before its `Sale`/`Purchase` rows hits the `RESTRICT` FK on
+      `SaleItem`/`PurchaseItem`'s `productId` - fixed by deleting those first in the test's `finally`
+      block). Full run now passes clean: all 24 verified areas, zero orphaned rows after cleanup.
+- **Result:** every item logged earlier today as "schema/type-level only, not applied to or tested
+      against a real database" (Phase 2, Track A, Tracks B/C/D/E/F/I) is now genuinely verified against
+      live Postgres, not just `tsc`.
+- **Still not unblocked:** browser/UI verification (still no display in this environment) and the
+      DB-dependent items that specifically need *real production data* to convert safely, not just *a*
+      database - `Purchase.status` String -> enum still has nothing but synthetic test rows to check
+      against here.
+
 ## 2026-08-12 - Full ERP parity migration: Tracks B, C, D, E, F, I (additive slices)
 
 User instruction for this pass: push through the remaining tracks, additive slices only. Every item

@@ -143,6 +143,59 @@ When POS v0 changes, note:
 - Source inspiration: none from UltimatePOS for this pass - purely a build-out of this codebase's own
   existing `baseModules`/`pageIcon` pattern into a matching dispatch-side registry.
 
+## 2026-08-12 - Local Postgres unblocked (Termux/Android aarch64)
+
+**This changes the "no database in this environment" premise behind every deferral logged above and
+below on 2026-08-12.** A local Postgres server is now installed, running, and schema-synced - the
+tenant-isolation smoke test ran for real against it and passed all 24 assertions.
+
+- Root cause of the earlier "no reachable Postgres" state: Postgres itself was never installed (not a
+  platform limitation - Termux's `postgresql` package is aarch64-native and installs/runs cleanly).
+  What genuinely doesn't work on this platform is the **Prisma CLI's schema-engine binary**: its
+  platform auto-detection reports "unknown OS android" and falls back to a `debian-openssl-1.1.x`
+  x86-64 build, which fails with `Exec format error` on this aarch64 device - wrong CPU architecture,
+  not just wrong OS.
+- Fix: Prisma does publish a real `linux-arm64-openssl-3.0.x` schema-engine build (glibc-linked).
+  Termux ships `glibc`/`glibc-runner` packages that let a glibc ARM64 Linux binary run inside Termux's
+  Bionic (Android) userland via `grun`. Downloaded that build directly from
+  `https://binaries.prisma.sh/all_commits/<engines-hash>/linux-arm64-openssl-3.0.x/schema-engine.gz`
+  (hash from `prisma -v`'s "Default Engines Hash" line), wrapped it in a one-line script that execs it
+  through `grun`, and pointed the CLI at that wrapper via `PRISMA_SCHEMA_ENGINE_BINARY`. `prisma db push`
+  now works normally. This only affects the CLI - Prisma Client's actual runtime queries already went
+  through `@prisma/adapter-pg` (pure-JS `pg` driver, no native/wasm query engine involved), so the
+  backend server itself never had this problem.
+- Also fixed to get here: `bcrypt`'s native addon (skipped via `--ignore-scripts` back in Phase 0/1)
+  needed `node-gyp` (distinct from the already-present `node-gyp-build` loader) plus
+  `GYP_DEFINES="android_ndk_path="` to work around `gyp`'s Android-target detection expecting an NDK
+  path that isn't relevant here (Termux's `clang` builds native Android-compatible binaries directly,
+  no NDK cross-compilation needed). Builds clean now; bcrypt is a real runtime dependency of
+  `auth.routes.ts`, not just the smoke test, so this matters beyond DB testing.
+- Automated as `backend/scripts/setup-local-postgres.sh` (idempotent, re-run anytime) and
+  `npm run db:setup` from `backend/`. Does **not** commit the 22MB engine binary to git - the script
+  re-downloads it, matching whatever Prisma version is currently installed.
+- **Real bugs the live smoke test caught immediately** that `tsc` structurally could not, both in test
+  code that had been "written but never run" since earlier in this session:
+  1. `POST /contacts` returns `201 Created` (correct REST behavior); the smoke test's create-contact
+     assertion checked for `200`. Never executed until now.
+  2. That same assertion checked the response for a `companyId` field - but `toContactResponse` maps to
+     a UI-facing shape that deliberately omits it (unlike `Purchase`/`Expense`, which return the raw
+     Prisma record). Fixed the assertion to check `name` instead.
+  3. The test's own cleanup (`finally` block) failed with a Postgres `RESTRICT` violation:
+     `SaleItem.productId`/`PurchaseItem.productId` have no `onDelete: Cascade` **by design** (real sale/
+     purchase history must survive a product being deleted), so a single cascading `Company` delete hit
+     that RESTRICT before `Sale`/`Purchase`'s own cascade to their line items had cleared the reference.
+     Fixed by explicitly deleting `Sale` and `Purchase` rows before the `Company` delete in the cleanup
+     block. This is exactly the class of finding this whole session's "written, not run" caveats were
+     flagging.
+- Everything from the 2026-08-12 Phase 2 / Track A / Tracks B-F/I entries above that was previously
+  marked "schema/type-level only, not applied to or tested against a real database" is now genuinely
+  verified: `prisma db push` applied cleanly, and every tenant-scoped create/edit/ownership assertion
+  written across those passes ran for real and passed.
+- What's still not unblocked by this: browser/UI verification (still no display in this environment),
+  and the specific deferred items that need real *data* to convert safely (`Purchase.status` enum -
+  worth re-examining now that a real DB exists to inspect, though this dev DB has no legacy data to
+  check against; the Sale return/credit-note read-path fan-out question).
+
 ## 2026-08-12 - Tracks B/C/D/E/F/I: additive schema + CRUD batch
 
 - Workflow: given the standing instruction to keep moving through the remaining tracks with additive
