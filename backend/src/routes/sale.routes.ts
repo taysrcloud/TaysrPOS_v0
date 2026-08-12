@@ -38,6 +38,11 @@ const statusLabel = (sale: any) => {
   if (sale.status === SaleStatus.SUSPENDED) return 'Suspendue';
   if (sale.status === SaleStatus.DRAFT && sale.note === 'DEVIS') return 'Devis';
   if (sale.status === SaleStatus.DRAFT) return 'Brouillon';
+  // Was previously falling through to the default 'Payée' branch below, making a
+  // returned sale indistinguishable from a normal completed one in every consumer
+  // that reads this label. 'Retour' is already a recognized SaleRecord['status']
+  // value on the frontend (frontend/src/main.tsx), just never produced until now.
+  if (sale.status === SaleStatus.RETURNED || sale.status === SaleStatus.PARTIALLY_RETURNED) return 'Retour';
   if (sale.paymentStatus === PaymentStatus.UNPAID) return 'Credit';
   return 'Payée';
 };
@@ -620,6 +625,15 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
   try {
     const saleId = Number(req.params.id);
     const companyId = req.user.companyId;
+    const parsed = z.object({
+      // Optional per-item partial return. Omitted (or an item omitted from the array)
+      // means "return whatever remains outstanding on that line" - preserves the
+      // pre-existing full-return behavior of this endpoint as the default.
+      items: z.array(z.object({
+        saleItemId: z.number(),
+        quantity: z.number().positive()
+      })).optional()
+    }).parse(req.body || {});
 
     const sale = await prisma.sale.findFirst({
       where: { id: saleId, companyId },
@@ -629,6 +643,19 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
     if (!sale) return res.status(404).json({ message: 'Sale not found' });
     if (sale.status === 'RETURNED') return res.status(400).json({ message: 'Sale is already returned' });
 
+    const requestedByItemId = new Map(parsed.items?.map(i => [i.saleItemId, i.quantity]) ?? []);
+    const returnLines: { item: (typeof sale.items)[number]; quantity: number }[] = [];
+    for (const item of sale.items) {
+      const alreadyReturned = Number(item.returnedQty ?? 0);
+      const remaining = Number(item.quantity) - alreadyReturned;
+      if (remaining <= 0) continue;
+      const requested = requestedByItemId.has(item.id) ? requestedByItemId.get(item.id)! : remaining;
+      if (requested > remaining) return res.status(400).json({ message: `Quantite superieure au reste retournable pour l'article ${item.id}` });
+      if (requested > 0) returnLines.push({ item, quantity: requested });
+    }
+
+    if (returnLines.length === 0) return res.status(400).json({ message: 'Rien a retourner' });
+
     let warehouse = await prisma.warehouse.findFirst({
       where: { companyId, locationId: sale.locationId }
     });
@@ -636,40 +663,67 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
       warehouse = await prisma.warehouse.findFirst({ where: { companyId } });
     }
 
+    // Proportional balance reversal: what fraction of the sale's line-level value
+    // (before any order-level discount) is being returned, applied to sale.total
+    // (which already reflects that discount). Reduces to sale.total exactly when
+    // everything outstanding is returned in one call, matching the prior full-return
+    // behavior of decrementing the whole total.
+    const originalLineTotalSum = sale.items.reduce((sum, item) => sum + Number(item.lineTotal), 0);
+    const returnedLineTotalSum = returnLines.reduce((sum, { item, quantity }) => sum + (Number(item.lineTotal) * quantity) / Number(item.quantity), 0);
+    const balanceDelta = originalLineTotalSum > 0 ? Number(sale.total) * (returnedLineTotalSum / originalLineTotalSum) : 0;
+
     const updatedSale = await prisma.$transaction(async (tx) => {
-      if (warehouse) {
-        for (const item of sale.items) {
-          if (!item.product.trackStock || item.product.type === 'SERVICE') continue;
+      for (const { item, quantity } of returnLines) {
+        if (warehouse && item.product.trackStock && item.product.type !== 'SERVICE') {
           await tx.stockMovement.create({
             data: {
               productId: item.productId,
               warehouseId: warehouse.id,
               type: 'IN',
-              quantity: item.quantity,
+              quantity,
               reference: sale.ticketNumber,
               notes: 'Retour Vente'
             }
           });
           await tx.productStock.updateMany({
             where: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId },
-            data: { quantity: { increment: item.quantity } }
+            data: { quantity: { increment: quantity } }
           });
         }
-      }
 
-      // Handle customer balance if it was a credit sale
-      const payments = await tx.payment.findMany({ where: { saleId: sale.id } });
-      const wasCredit = payments.some(p => p.method === 'CREDIT') || (sale.status === 'FINAL' && payments.length === 0);
-      if (wasCredit && sale.customerId) {
-        await tx.contact.update({
-          where: { id: sale.customerId },
-          data: { balance: { decrement: sale.total } }
+        await tx.saleItem.update({
+          where: { id: item.id },
+          data: { returnedQty: Number(item.returnedQty ?? 0) + quantity }
         });
       }
 
+      // Handle customer balance if it was a credit sale. Credit sales never get a
+      // Payment row (see the finalize handler above - balance is incremented directly
+      // instead), so zero payments on a sale that was actually finalized (not still
+      // DRAFT/SUSPENDED) identifies it. Deliberately does NOT check sale.status ===
+      // 'FINAL' here: on a second/subsequent partial return, status has already moved
+      // to PARTIALLY_RETURNED from the first call, and that must not turn off balance
+      // reversal for the rest of the line.
+      const payments = await tx.payment.findMany({ where: { saleId: sale.id } });
+      const wasCredit = payments.some(p => p.method === 'CREDIT') || (payments.length === 0 && sale.status !== 'DRAFT' && sale.status !== 'SUSPENDED');
+      if (wasCredit && sale.customerId && balanceDelta > 0) {
+        await tx.contact.update({
+          where: { id: sale.customerId },
+          data: { balance: { decrement: balanceDelta } }
+        });
+      }
+
+      const requestedById = new Map(returnLines.map(({ item, quantity }) => [item.id, quantity]));
+      const fullyReturned = sale.items.every(item => {
+        const returned = Number(item.returnedQty ?? 0) + (requestedById.get(item.id) ?? 0);
+        return returned >= Number(item.quantity);
+      });
+      const anyReturned = sale.items.some(item => Number(item.returnedQty ?? 0) + (requestedById.get(item.id) ?? 0) > 0);
+      const nextStatus = fullyReturned ? 'RETURNED' : anyReturned ? 'PARTIALLY_RETURNED' : sale.status;
+
       return await tx.sale.update({
         where: { id: sale.id },
-        data: { status: 'RETURNED' },
+        data: { status: nextStatus },
         include: { items: { include: { product: true, variation: true } }, customer: true, payments: true }
       });
     });

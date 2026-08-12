@@ -380,6 +380,61 @@ this throws `Unknown argument productId_warehouseId` and the request 500s.
 - No schema change involved - this was a pure application-code bug, so no migration/data-loss risk like
   the `Purchase.status` entry above. Safe to have applied directly.
 
+## 2026-08-12 - Track A sale return flow: measured first, found the design was already different than planned
+
+**The "linked credit-note Sale row" design from Phase 2 (`Sale.originalSaleId`, added specifically for
+this) was never actually needed.** Before building anything, read the existing `POST /sales/:id/return`
+endpoint fully (it already existed - full return only, no partial support) and ran a live experiment:
+created a real sale via the API, then inserted a simulated linked-return row directly via Prisma to see
+how `GET /api/sales` and the contact ledger actually handle it. Both include it unfiltered, as expected -
+but the bigger finding was that `sale.routes.ts`'s `statusLabel()` has **no special case for `RETURNED`
+at all**, so a return row falls through to the default branch and is labeled identically to a normal
+paid sale (`'Payée'`). That would make a returned sale visually indistinguishable from a completed one
+in every list that reads this label.
+
+- **Separate, much larger finding surfaced by this same investigation:** `statusLabel()` returns `'Payée'`
+  (with the accent, U+00E9) but every frontend comparison (`frontend/src/main.tsx`, ~20 call sites -
+  Reports, Payments, Dashboard, register shift-sales, invoiceable-sales detection, payment badges) checks
+  against `'Payee'` (no accent), and `data.sales` from the API is stored with zero transform in between
+  (`setSales(data.sales)` at `main.tsx:843`). Verified at the byte level (`Pay\303\251e` vs `Payee`) -
+  this is not a rendering illusion. **Every `status === 'Payee'` filter in the frontend has likely never
+  matched a single real API-sourced sale.** This is independent of returns and much higher severity -
+  flagged to the user directly, not fixed in this pass (fixing it changes behavior across ~20 call sites
+  simultaneously - Reports goes from always-empty to populated, `isSaleSelectable` starts accepting rows
+  it currently rejects - and none of that is visually verifiable without a browser). Left as its own,
+  clearly-scoped follow-up, not silently patched or silently ignored.
+- Given the existing endpoint mutates the ORIGINAL sale in place (no new row), the `Sale.originalSaleId`
+  self-relation added in Phase 2 for a linked-row design is now genuinely unused by any route. Kept in
+  schema rather than dropped (unlike the `Purchase.status` `ORDERED` cleanup) - it's a free nullable
+  column, not a value blocking a finished workflow, and a future exchange/credit-note flow is a plausible
+  consumer; removing it later would need the same `USING`-cast discipline as any other destructive change.
+  Schema comment updated to say it's unused by the current design.
+- Extended `/:id/return` with optional per-item quantities (`SaleItem.returnedQty`, mirroring the
+  Purchase pattern), proportional stock reversal (skips non-stock-tracked/SERVICE lines, matching the
+  pre-existing behavior), and proportional customer-balance reversal derived from each line's actual
+  `lineTotal` share of `sale.total` (correctly folds in any order-level discount rather than assuming
+  uniform per-unit pricing). `Sale.status` now tracks FINAL -> PARTIALLY_RETURNED -> RETURNED
+  automatically; new `PARTIALLY_RETURNED` enum value added (additive, no data-loss). `sale.total`/
+  `subtotal`/`taxTotal` are never mutated by a return - only `status` and each item's `returnedQty` - so
+  the original fiscal document amount stays exactly what was charged, consistent with the project's
+  TVA-immutability rule.
+- Added a `RETURNED`/`PARTIALLY_RETURNED` -> `'Retour'` branch to `statusLabel()` (that string is already
+  a recognized `SaleRecord['status']` value on the frontend, unaccented, so this one branch is safe on
+  its own - unlike the accent bug above, it doesn't change what any *existing* status maps to).
+- **Found and fixed a real bug via the new arithmetic assertion**, not just a status/shape check: the
+  credit-sale detection (`wasCredit = ... || (sale.status === 'FINAL' && payments.length === 0)`) broke
+  on a *second* partial return, because by then `sale.status` had already moved to `PARTIALLY_RETURNED`
+  from the first return call, so the `=== 'FINAL'` check silently failed and balance reversal was skipped
+  for the rest of the return sequence. Caught immediately by asserting the exact expected balance after a
+  second return call, not just checking the HTTP status. Fixed by dropping the `FINAL` check in favor of
+  "zero payments and not still DRAFT/SUSPENDED" - a criterion that stays true across the whole
+  return-in-progress lineage instead of only on the first call.
+- Verified live: 4-unit credit sale (subtotal 40, tax 8, total 48) -> partial return (1 unit) -> assert
+  stock +1, balance 48->36, status PARTIALLY_RETURNED -> return remainder -> assert stock back to
+  baseline, balance 36->0, status RETURNED -> re-return rejected (400) -> cross-tenant return rejected
+  (404) -> `GET /api/sales` still shows the sale with its original `total: 48` and `status: 'Retour'`.
+  Full `test:tenant-isolation` suite (26 assertions) passes; dev DB confirmed empty after cleanup.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

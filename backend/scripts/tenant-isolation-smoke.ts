@@ -107,6 +107,66 @@ try {
   });
   assert(createdSale.status === 201 && createdSale.body.id, `Sale create API failed: ${createdSale.status} ${JSON.stringify(createdSale.body)}`);
 
+  // Sale partial-return workflow (Track A) - measured the read-path fan-out question
+  // live before building this: there is no linked credit-note row (the existing
+  // /:id/return endpoint mutates the original Sale in place), so the arithmetic that
+  // matters is the ORIGINAL sale's own status/returnedQty/stock/balance, not a second
+  // row appearing in GET /api/sales. Product: salePrice 10, tvaRate 20% (both defaults
+  // from createTenant), so 4 units -> subtotal 40, tax 8, total 48.
+  const returnStockBaseline = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const creditSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 4 }], method: 'CREDIT', status: 'FINAL' }),
+  });
+  assert(creditSale.status === 201 && creditSale.body.total === 48, `Credit sale create failed or total wrong: ${creditSale.status} ${JSON.stringify(creditSale.body)}`);
+  const returnSaleId = creditSale.body.id;
+  const returnSaleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: returnSaleId } });
+  const balanceAfterCreditSale = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  assert(balanceAfterCreditSale === 48, `Customer balance after credit sale wrong: expected 48, got ${balanceAfterCreditSale}`);
+  const stockAfterCreditSale = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  assert(stockAfterCreditSale === returnStockBaseline - 4, `Stock after credit sale wrong: expected ${returnStockBaseline - 4}, got ${stockAfterCreditSale}`);
+
+  const partialSaleReturn = await request(`/sales/${returnSaleId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ saleItemId: returnSaleItem.id, quantity: 1 }] }),
+  });
+  assert(partialSaleReturn.status === 200, `Partial sale return failed: ${partialSaleReturn.status} ${JSON.stringify(partialSaleReturn.body)}`);
+  assert(partialSaleReturn.body.status === 'Retour', `Partial sale return status label wrong: expected Retour, got ${partialSaleReturn.body.status}`);
+  assert(partialSaleReturn.body.total === 48, `Sale total must stay unchanged (fiscal snapshot) after a partial return: expected 48, got ${partialSaleReturn.body.total}`);
+  const stockAfterPartialSaleReturn = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const balanceAfterPartialSaleReturn = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  const saleAfterPartialReturn = await prisma.sale.findUniqueOrThrow({ where: { id: returnSaleId } });
+  assert(stockAfterPartialSaleReturn === returnStockBaseline - 3, `Stock after partial sale return wrong: expected ${returnStockBaseline - 3}, got ${stockAfterPartialSaleReturn}`);
+  assert(balanceAfterPartialSaleReturn === 36, `Customer balance after partial sale return wrong: expected 36, got ${balanceAfterPartialSaleReturn}`);
+  assert(saleAfterPartialReturn.status === 'PARTIALLY_RETURNED', `Sale status after partial return wrong: expected PARTIALLY_RETURNED, got ${saleAfterPartialReturn.status}`);
+
+  const overSaleReturn = await request(`/sales/${returnSaleId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ saleItemId: returnSaleItem.id, quantity: 100 }] }),
+  });
+  assert(overSaleReturn.status === 400, `Returning more than the returnable quantity was not rejected (${overSaleReturn.status})`);
+
+  const finalSaleReturn = await request(`/sales/${returnSaleId}/return`, a.token, { method: 'POST', body: '{}' });
+  assert(finalSaleReturn.status === 200, `Final sale return (remaining quantity) failed: ${finalSaleReturn.status} ${JSON.stringify(finalSaleReturn.body)}`);
+  const stockAfterFinalSaleReturn = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const balanceAfterFinalSaleReturn = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  const saleAfterFinalReturn = await prisma.sale.findUniqueOrThrow({ where: { id: returnSaleId } });
+  assert(stockAfterFinalSaleReturn === returnStockBaseline, `Stock after full sale return should be back to baseline ${returnStockBaseline}, got ${stockAfterFinalSaleReturn}`);
+  assert(balanceAfterFinalSaleReturn === 0, `Customer balance after full sale return should be 0, got ${balanceAfterFinalSaleReturn}`);
+  assert(saleAfterFinalReturn.status === 'RETURNED', `Sale status after full return wrong: expected RETURNED, got ${saleAfterFinalReturn.status}`);
+
+  const doubleSaleReturn = await request(`/sales/${returnSaleId}/return`, a.token, { method: 'POST', body: '{}' });
+  assert(doubleSaleReturn.status === 400, `Returning an already-fully-returned sale was not rejected (${doubleSaleReturn.status})`);
+
+  const crossSaleReturn = await request(`/sales/${returnSaleId}/return`, b.token, { method: 'POST', body: '{}' });
+  assert(crossSaleReturn.status === 404, `Cross-tenant sale return was not rejected (${crossSaleReturn.status})`);
+
+  // GET /api/sales stays unfiltered (no linked row was created), and the sale's own
+  // total remains the original fiscal amount - only its status label changed.
+  const salesListAfterReturn = await request('/sales', a.token);
+  const returnedRow = salesListAfterReturn.body.sales.find((s: any) => s.id === returnSaleId);
+  assert(returnedRow && returnedRow.status === 'Retour' && returnedRow.total === 48, `GET /sales did not reflect the returned sale correctly: ${JSON.stringify(returnedRow)}`);
+
   const createdInvoice = await request('/invoices', a.token, {
     method: 'POST',
     body: JSON.stringify({ customerId: a.contact.id, mode: 'MANUAL', manualLines: [{ description: 'API line', quantity: 1, unitPrice: 10, tvaRate: 20 }] }),
@@ -301,7 +361,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

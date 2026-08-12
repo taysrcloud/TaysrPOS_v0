@@ -57,6 +57,7 @@ enum SaleStatus {
   READY
   FINAL
   CANCELLED
+  PARTIALLY_RETURNED
   RETURNED
 }
 
@@ -500,7 +501,11 @@ model Sale {
   table           RestaurantTable?      @relation(fields: [tableId], references: [id])
   items           SaleItem[]
   payments        Payment[]
-  // Links a return/credit-note Sale back to the sale it reverses (Track A).
+  // Reserved for a future linked credit-note/exchange Sale (Track A originally planned this).
+  // The 2026-08-12 return implementation went a different route - item-level SaleItem.returnedQty
+  // against the SAME sale, no new row - so this relation is currently unused by any route. Left in
+  // place rather than dropped: removing an enum/relation later needs the same USING-cast discipline
+  // as the Purchase.status conversion, and a future exchange/credit-note flow is a plausible consumer.
   originalSale    Sale?                 @relation("SaleReturns", fields: [originalSaleId], references: [id])
   returns         Sale[]                @relation("SaleReturns")
   // Track E: tags a sale for commission reporting; no rate calculation/posting yet.

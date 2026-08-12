@@ -424,4 +424,33 @@ Each time a meaningful block is finished:
   against French strings (`'Recu'`/`'Retour'`) the backend has never sent - pre-existing dead code, now
   more visibly wrong with the new reachable statuses. Needs a frontend pass alongside the eventual
   partial-receive/return UI.
-- Verified POS frontend/backend typechecks, Platform backend build, live sidebar order, hidden Restaurant controls for a non-entitled account, and no browser console errors.
+
+## 2026-08-12 - Track A sale partial-return flow, plus a major finding: Reports/Payments status filters likely never matched real data
+
+- Measured before building: the "linked credit-note Sale row" design added to the schema in Phase 2
+  (`Sale.originalSaleId`) turned out unnecessary. `POST /sales/:id/return` already existed (full-return
+  only) and mutates the original sale in place. Extended it with optional per-item quantities
+  (`SaleItem.returnedQty`), proportional stock and customer-balance reversal (correctly accounts for any
+  order-level discount rather than assuming uniform pricing), and automatic FINAL -> PARTIALLY_RETURNED ->
+  RETURNED status tracking (`PARTIALLY_RETURNED` is a new, additive enum value). `sale.total`/`subtotal`/
+  `taxTotal` are never mutated by a return - matches the project's TVA-immutability rule.
+- **Major separate finding, flagged directly rather than silently fixed:** `statusLabel()` in
+  `sale.routes.ts` returns `'Payée'` (accented), but every frontend status comparison (~20 call sites in
+  `main.tsx` - Reports totals, Payments filter, Dashboard, register shift-sales, invoiceable-sales
+  detection, payment badges) checks the unaccented `'Payee'`, and the API response is stored with no
+  transform in between. Verified at the byte level - these strings have likely never matched for any real
+  database-backed sale, meaning Reports/Payments/Dashboard revenue views may currently show empty/wrong
+  results against the real backend. Not fixed in this pass - it changes behavior across ~20 call sites at
+  once and none of it is visually verifiable without a browser. Needs its own dedicated pass and its own
+  commit, separate from any other change, so it can be reverted independently if something looks wrong.
+- Added a `RETURNED`/`PARTIALLY_RETURNED` -> `'Retour'` branch to `statusLabel()` - safe on its own since
+  `'Retour'` is a pre-existing, currently-unproduced `SaleRecord['status']` value; does not touch the
+  accent bug or any existing status's output.
+- **Found and fixed a real bug via the live arithmetic assertion**: credit-sale detection broke on a
+  *second* partial return because it checked `sale.status === 'FINAL'`, which is no longer true after the
+  first return moves status to `PARTIALLY_RETURNED` - balance reversal was silently skipped for the rest
+  of the sequence. Fixed by dropping the `FINAL` check.
+- Verified live: 4-unit credit sale -> partial return (1 unit: stock +1, balance 48->36,
+  PARTIALLY_RETURNED) -> return remainder (stock to baseline, balance ->0, RETURNED) -> re-return and
+  cross-tenant return both correctly rejected. Full `test:tenant-isolation` suite (26 assertions) passes.
+  Not done: frontend UI for partial return; the accent-bug fix (flagged, not fixed).
