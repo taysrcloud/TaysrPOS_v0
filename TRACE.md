@@ -516,6 +516,33 @@ scoped per-`Location`.
   touched the unrelated manual account (still exactly 70). Full `test:tenant-isolation` suite (27
   assertions) passes; dev DB confirmed empty after cleanup.
 
+## 2026-08-12 - Track D auto-posting, increment 2: Expense
+
+Wired `expense.routes.ts`'s `POST /` create handler: posts a `CREDIT` (cash decrease) to the resolved
+location account unless `paymentMethod === 'CREDIT'`, mirroring the same "not yet paid, no cash left"
+exclusion already applied to Sale's `CREDIT` method (`Expense.paymentMethod` is a free-text `String`
+field, no enum, but the value comparison is the same). Posted inside the same `$transaction` as the
+`Expense` row.
+
+- **Deliberately scoped to create only.** `PUT /:id` (edit/deactivate) does not adjust any previously
+  posted `AccountTransaction` - changing an expense's amount or `paymentMethod` after the fact does not
+  reverse or re-post the ledger entry. Documented directly above the edit handler as a known, flagged gap
+  (matching the same class of decision as excluding Purchase from this whole track), not a silent
+  omission - reconciling an edit means reversing the old amount and posting the new one, or skipping
+  entirely if `paymentMethod` moved to/from `CREDIT`, and that's real scope for a future increment.
+- **Real ordering dependency this surfaced in the smoke test, worth remembering for future additions**:
+  the existing `createdExpense` assertion (CASH, amount 12, at `a.location`) runs earlier in the script
+  than the CashMovement assertions added in increment 1 - once Expense auto-posting landed, both now
+  touch the *same* location account, so the CashMovement assertions' hardcoded absolute balances (100,
+  70) were no longer correct starting from a non-zero balance. Fixed by making them delta-based (capture
+  the balance right before each cash movement, assert the expected *change*) instead of assuming a
+  zero-balance start - the correct pattern for any future addition that shares an account across multiple
+  smoke-test sections, since account balances accumulate across the whole script run by design.
+- Verified live: CASH expense (12) posts a CREDIT, balance -12; CREDIT expense (50) posts nothing,
+  balance unchanged at -12; the later CashMovement IN/OUT deltas land correctly on top of that starting
+  balance. Full `test:tenant-isolation` suite (29 assertions) passes; dev DB confirmed empty after
+  cleanup.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
 
 const router = Router();
 
@@ -49,17 +50,29 @@ router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
       if (!location) return res.status(400).json({ message: 'Magasin invalide' });
     }
 
-    const expense = await prisma.expense.create({
-      data: {
-        companyId,
-        locationId: parsed.locationId,
-        reference: parsed.reference || `EXP-${Math.floor(Math.random() * 10000)}`,
-        category: parsed.category,
-        amount: parsed.amount,
-        date: new Date(parsed.date),
-        note: parsed.note,
-        paymentMethod: parsed.paymentMethod,
+    const expense = await prisma.$transaction(async (tx) => {
+      const created = await tx.expense.create({
+        data: {
+          companyId,
+          locationId: parsed.locationId,
+          reference: parsed.reference || `EXP-${Math.floor(Math.random() * 10000)}`,
+          category: parsed.category,
+          amount: parsed.amount,
+          date: new Date(parsed.date),
+          note: parsed.note,
+          paymentMethod: parsed.paymentMethod,
+        }
+      });
+
+      // Track D auto-posting: an expense with paymentMethod 'CREDIT' hasn't
+      // actually been paid in cash yet (same convention as Sale's CREDIT
+      // method) - no cash left the account, so nothing to post.
+      if (parsed.paymentMethod !== 'CREDIT') {
+        const account = await getOrCreateCashAccount(tx, companyId, parsed.locationId);
+        await postCashTransaction(tx, account, 'CREDIT', parsed.amount, `EXPENSE-${created.id}`, parsed.category);
       }
+
+      return created;
     });
 
     res.json({ success: true, expense });
@@ -68,6 +81,11 @@ router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
   }
 });
 
+// Note: editing an expense (amount, paymentMethod, or isActive/deactivation)
+// does NOT adjust any AccountTransaction posted when it was created. Reconciling
+// an edit means reversing the old posted amount and posting the new one (or
+// skipping if paymentMethod moved to/from CREDIT) - deliberately out of scope
+// for this increment, a known gap, not a silent omission.
 router.put('/:id', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const companyId = req.user!.companyId;

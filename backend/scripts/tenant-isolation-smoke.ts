@@ -82,6 +82,20 @@ try {
     body: JSON.stringify({ locationId: a.location.id, category: 'TEST', amount: 12, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CASH' }),
   });
   assert(createdExpense.status === 200 && createdExpense.body.expense?.companyId === a.company.id, 'Expense create API failed');
+  // Track D auto-posting, increment 2: a CASH expense posts a CREDIT (cash out)
+  // to the resolved location account. This is the first thing in the run to
+  // touch a.location's account, which the later CashMovement assertions below
+  // account for by comparing deltas rather than assuming a zero starting balance.
+  const locationAccountAfterExpense = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(locationAccountAfterExpense.currentBalance) === -12, `Location account balance after CASH expense wrong: expected -12, got ${locationAccountAfterExpense.currentBalance}`);
+
+  const creditExpense = await request('/expenses', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, category: 'TEST-CREDIT', amount: 50, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CREDIT' }),
+  });
+  assert(creditExpense.status === 200, `Credit expense create failed: ${creditExpense.status} ${JSON.stringify(creditExpense.body)}`);
+  const locationAccountAfterCreditExpense = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(locationAccountAfterCreditExpense.currentBalance) === -12, `A CREDIT (unpaid) expense must not post to the cash account: expected balance unchanged at -12, got ${locationAccountAfterCreditExpense.currentBalance}`);
 
   const editedExpense = await request(`/expenses/${createdExpense.body.expense.id}`, a.token, {
     method: 'PUT',
@@ -294,13 +308,16 @@ try {
   // Track D auto-posting (2026-08-12), CashMovement first - the unambiguous
   // case, no payment-method conditionality to get wrong. Verifies the
   // get-or-create-per-location Account helper and the DEBIT/CREDIT direction.
+  // Delta-based (not hardcoded absolutes): the CASH expense above already
+  // posted to this same location account, so its starting balance isn't 0.
+  const locationBalanceBeforeCash = Number(locationAccountAfterExpense.currentBalance);
   const cashIn = await request('/register/movements', a.token, {
     method: 'POST',
     body: JSON.stringify({ type: 'IN', amount: 100, locationId: a.location.id, note: 'Fond de caisse' }),
   });
   assert(cashIn.status === 200, `Cash movement IN failed: ${cashIn.status} ${JSON.stringify(cashIn.body)}`);
   const locationAccountA = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
-  assert(Number(locationAccountA.currentBalance) === 100, `Location account balance after cash IN wrong: expected 100, got ${locationAccountA.currentBalance}`);
+  assert(Number(locationAccountA.currentBalance) === locationBalanceBeforeCash + 100, `Location account balance after cash IN wrong: expected ${locationBalanceBeforeCash + 100}, got ${locationAccountA.currentBalance}`);
 
   const cashOut = await request('/register/movements', a.token, {
     method: 'POST',
@@ -308,7 +325,7 @@ try {
   });
   assert(cashOut.status === 200, `Cash movement OUT failed: ${cashOut.status} ${JSON.stringify(cashOut.body)}`);
   const locationAccountAAfterOut = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
-  assert(Number(locationAccountAAfterOut.currentBalance) === 70, `Location account balance after cash OUT wrong: expected 70, got ${locationAccountAAfterOut.currentBalance}`);
+  assert(Number(locationAccountAAfterOut.currentBalance) === locationBalanceBeforeCash + 70, `Location account balance after cash OUT wrong: expected ${locationBalanceBeforeCash + 70}, got ${locationAccountAAfterOut.currentBalance}`);
 
   // No locationId given: must fall back to a single company-wide 'Caisse'
   // account (locationId: null), not create a second, different account each
@@ -397,7 +414,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

@@ -487,3 +487,14 @@ Each time a meaningful block is finished:
 - Verified live: location cash IN/OUT nets correctly; two no-location movements land on the same
   company-wide account without touching the unrelated manual account. Full smoke suite (27 assertions)
   passes.
+
+## 2026-08-12 - Track D auto-posting, increment 2: Expense
+
+- `expense.routes.ts POST /` now posts a CREDIT (cash decrease) unless `paymentMethod === 'CREDIT'`,
+  same exclusion rule as Sale's CREDIT method. Scoped to create only - `PUT /:id` edit/deactivate does not
+  adjust any previously posted transaction, documented as a known gap.
+- Surfaced a real ordering dependency in the smoke test: expense auto-posting and the earlier CashMovement
+  assertions (increment 1) now touch the same location account, so hardcoded absolute-balance assertions
+  broke. Fixed by making them delta-based instead.
+- Verified live: CASH expense posts correctly, CREDIT expense posts nothing, later cash-movement deltas
+  land correctly on top. Full smoke suite (29 assertions) passes.
