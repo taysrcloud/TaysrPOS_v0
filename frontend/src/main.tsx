@@ -322,6 +322,26 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
   return res;
 };
 
+// window.open(apiUrl) can't carry the Authorization header, so authenticated
+// documents (receipt/invoice PDFs) must be fetched via apiFetch and opened as
+// a blob instead. Revoking the object URL is deferred so the new tab has time
+// to actually load the PDF before it's freed.
+const openAuthenticatedDocument = async (url: string, errorMessage: string) => {
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      alert(errorMessage);
+      return;
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch {
+    alert(errorMessage);
+  }
+};
+
 const baseModules = [
   ['Tableau de bord', LayoutDashboard, 'POS'],
   ['Clients & Fournisseurs', Users, 'POS'],
@@ -5196,7 +5216,7 @@ const InvoicePanel = ({ sale, settings, onClose }: { sale: SaleRecord; settings:
       </div>
       <div className="receipt-actions no-print" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderTop: '1px solid #e2e8f0', background: '#f8fafc', padding: '16px' }}>
         <button onClick={onClose}><XCircle size={15} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Fermer</button>
-        <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/invoice`, '_blank')}>
+        <button className="primary-action" onClick={() => openAuthenticatedDocument(`/api/sales/${sale.id}/invoice`, "Impossible de generer la facture PDF")}>
           <FileText size={15} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Imprimer (PDF)
         </button>
       </div>
@@ -5275,7 +5295,7 @@ const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoi
             <FileText size={16} style={{ marginRight: '8px' }} /> {sale.status === 'Devis' || sale.status === 'Brouillon' ? 'Ouvrir devis' : 'Facture (A4)'}
           </button>
         )}
-        <button className="primary-action" onClick={() => window.open(`${apiBase}/api/sales/${sale.id}/receipt`, '_blank')}>
+        <button className="primary-action" onClick={() => openAuthenticatedDocument(`/api/sales/${sale.id}/receipt`, "Impossible de generer le ticket PDF")}>
           <ReceiptText size={16} /> Imprimer
         </button>
       </div>

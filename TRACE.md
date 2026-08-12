@@ -143,6 +143,38 @@ When POS v0 changes, note:
 - Source inspiration: none from UltimatePOS for this pass - purely a build-out of this codebase's own
   existing `baseModules`/`pageIcon` pattern into a matching dispatch-side registry.
 
+## 2026-08-12 - Track A: receipt/invoice endpoints (return flow deferred)
+
+- Workflow: scoped Track A down to one of its three pieces this session after a risk review. The
+  return/credit-note flow and consolidated invoices were both deferred, for different reasons - see
+  PROGRESS.md's entry above for the return-flow reasoning (unfiltered read-path fan-out across
+  `GET /api/sales`, Paiements, `renderReports`, register Z-report, none of it checkable without a real
+  database) and consolidated invoices (net-new, no consumer yet, lower priority). Only the receipt/
+  invoice PDF endpoints were judged safe to build and verify in this environment.
+- What shipped: `GET /api/sales/:id/receipt` and `GET /api/sales/:id/invoice`, wiring up
+  `backend/src/utils/pdf.ts`'s two PDF generators, which existed but were dead code with zero callers.
+  Tenant ownership is checked the same way as every other route since the July 16 pass (`findFirst({
+  where: { id, companyId } })`, 404 on mismatch) - the whole point of this route was to add auth, so
+  reusing a weaker check would have defeated it. Headers (`Content-Type`, `Content-Disposition`) are set
+  before the pdfkit stream starts, since `doc.pipe(res)` + `doc.end()` means there is no way to send a
+  JSON error once the PDF generator is called - all validation had to complete first.
+- Source inspiration: none from UltimatePOS for the endpoint shape - this was closing an already-broken
+  feature in this codebase, not porting new behavior. The **fix itself** matters for Moroccan fiscal
+  compliance though: both generators had hardcoded demo ICE/RC (`'ICE: 000000000000000'`) instead of the
+  tenant's real `Company` fields, which would have shipped legally-wrong documents if this had ever been
+  wired up as-is. Now pulls `name`/`legalName`/`address`/`city`/`ice`/`ifNumber`/`rc`/`receiptFooter`
+  from the real company record.
+- UI rules preserved: frontend buttons keep their existing labels/placement, only the click handler
+  changed - from a bare `window.open(apiUrl)` (which cannot carry an Authorization header, so the route
+  would 401 even if it existed) to `apiFetch` + blob-URL open, matching the project's own `apiFetch`
+  auth pattern used everywhere else.
+- Platform/provisioning impact: none - no schema change in this pass (Phase 2 already added what was
+  needed), pure route + frontend wiring.
+- Verification note for future sessions: `backend/scripts/verify-pdf-generation.ts` is a real runtime
+  check (executes pdfkit against synthetic data, asserts a valid `%PDF-` file), not just a typecheck.
+  Worth re-running after any future change to `pdf.ts` even before a DB-enabled session is available,
+  since it catches failures `tsc` structurally cannot see.
+
 ## 2026-08-12 - Phase 2 shared-foundation refactors (safe/additive subset only)
 
 - Workflow: this environment has no reachable Postgres (port 5432 closed) and `prisma migrate diff`

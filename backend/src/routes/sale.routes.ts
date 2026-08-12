@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { PaymentMethod, PaymentStatus, ProductType, SaleChannel, SaleStatus } from '../generated/client/index.js';
 import { prisma } from '../utils/prisma.js';
+import { generateInvoicePDF, generateReceiptPDF, type PdfCompany } from '../utils/pdf.js';
 
 const router = Router();
 
@@ -94,6 +95,62 @@ router.get('/', requireAuth, async (req: any, res: any) => {
   } catch (error) {
     console.error('Sales list error:', error);
     res.status(200).json({ sales: [], message: 'Base de donnees indisponible: ventes locales uniquement' });
+  }
+});
+
+// Shared load for the receipt/invoice document routes below: fetches the sale
+// (tenant-scoped, matching GET /'s include exactly so normalizeSale has
+// payments/variation data to work with) and the company fiscal info, or
+// returns null if either lookup fails. All validation must finish before a
+// PDF generator is invoked - pdfkit pipes straight to res and calls doc.end(),
+// so once it starts there is no way to send a JSON error instead.
+const loadSaleForDocument = async (saleId: number, companyId: number) => {
+  const [sale, company] = await Promise.all([
+    prisma.sale.findFirst({
+      where: { id: saleId, companyId },
+      include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
+    }),
+    prisma.company.findUnique({ where: { id: companyId } }),
+  ]);
+  if (!sale || !company) return null;
+  const pdfCompany: PdfCompany = {
+    name: company.name,
+    legalName: company.legalName,
+    address: company.address,
+    city: company.city,
+    ice: company.ice,
+    ifNumber: company.ifNumber,
+    rc: company.rc,
+    receiptFooter: company.receiptFooter,
+  };
+  return { sale: normalizeSale(sale), company: pdfCompany };
+};
+
+router.get('/:id/receipt', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const saleId = Number(req.params.id);
+    const loaded = await loadSaleForDocument(saleId, req.user.companyId);
+    if (!loaded) return res.status(404).json({ message: 'Vente introuvable' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="ticket-${loaded.sale.ticket}.pdf"`);
+    generateReceiptPDF(loaded.sale, res, loaded.company);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/invoice', requireAuth, async (req: any, res: any, next) => {
+  try {
+    const saleId = Number(req.params.id);
+    const loaded = await loadSaleForDocument(saleId, req.user.companyId);
+    if (!loaded) return res.status(404).json({ message: 'Vente introuvable' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="facture-${loaded.sale.ticket}.pdf"`);
+    generateInvoicePDF(loaded.sale, res, loaded.company);
+  } catch (error) {
+    next(error);
   }
 });
 

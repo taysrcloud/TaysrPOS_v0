@@ -1,5 +1,30 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-12 - Full ERP parity migration: Track A (receipt/invoice endpoints only)
+
+- [x] Closed the long-open targeted step ("replace stale `/api/sales/:id/receipt` and
+      `/api/sales/:id/invoice` window-open calls"). Root cause was worse than stale wiring: the PDF
+      generator functions (`backend/src/utils/pdf.ts`) existed but were never imported by any route, and
+      the frontend buttons pointed at URLs with no backend handler at all - both "Imprimer (PDF)" buttons
+      were fully dead. Added `GET /api/sales/:id/receipt` and `GET /api/sales/:id/invoice`
+      (`requireAuth`, tenant-scoped), and switched the frontend from a bare `window.open(apiUrl)` (which
+      cannot carry an Authorization header) to an authenticated `apiFetch` + blob-URL open.
+- [x] Fixed a real compliance defect while wiring this up, not just plumbing: both PDF generators had
+      hardcoded demo fiscal data (`'TaysrPOS Demo'`, `'ICE: 000000000000000'`, `'RC: 123456'`). Real
+      Moroccan fiscal documents need the real ICE/RC/IF - these now come from the tenant's actual
+      `Company` record.
+- [x] Verified beyond `tsc`: added `backend/scripts/verify-pdf-generation.ts`, which actually executes
+      both pdfkit generators (pure JS, no native deps, no DB needed) against synthetic data and asserts
+      real `%PDF-` output. Ran successfully this session - the only genuine runtime check available in
+      an environment with no reachable database or browser.
+- [ ] **Return/credit-note flow - deferred.** Schema groundwork (`Sale.originalSaleId`,
+      `SaleItem.returnedQty`) is already in from the Phase 2 pass, but a new linked credit-note `Sale`
+      row would be picked up by every unfiltered sales query (`GET /api/sales`, Paiements page,
+      `renderReports` totals, register Z-report) with no way to verify the show/exclude/negate decision
+      for each without a real database. Needs a DB-enabled session.
+- [ ] **Consolidated invoices - deferred.** Net-new, no consumer yet, overlaps existing
+      `Invoice`/`Sale.invoiceId`. Lower priority than the return flow.
+
 ## 2026-08-12 - Full ERP parity migration: Phase 2 (safe/additive subset)
 
 **No reachable Postgres in this environment** (port 5432 closed, no `psql`), and `prisma migrate diff`

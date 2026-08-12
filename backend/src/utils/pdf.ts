@@ -5,7 +5,18 @@ const formatMoney = (amount: number) => {
   return amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
 };
 
-export const generateInvoicePDF = (sale: any, res: Response) => {
+export type PdfCompany = {
+  name: string;
+  legalName?: string | null;
+  address?: string | null;
+  city?: string | null;
+  ice?: string | null;
+  ifNumber?: string | null;
+  rc?: string | null;
+  receiptFooter?: string | null;
+};
+
+export const generateInvoicePDF = (sale: any, res: Response, company: PdfCompany) => {
   const doc = new PDFDocument({ margin: 50, size: 'A4' });
   doc.pipe(res);
 
@@ -16,10 +27,12 @@ export const generateInvoicePDF = (sale: any, res: Response) => {
   doc.moveDown();
 
   // Company Info
-  doc.fontSize(14).text('TaysrPOS Demo', { align: 'left' });
-  doc.fontSize(10).text('Casablanca, Maroc');
-  doc.text('ICE: 000000000000000');
-  doc.text('RC: 123456');
+  doc.fontSize(14).text(company.legalName || company.name, { align: 'left' });
+  doc.fontSize(10);
+  if (company.address || company.city) doc.text([company.address, company.city].filter(Boolean).join(', '));
+  if (company.ice) doc.text(`ICE: ${company.ice}`);
+  if (company.rc) doc.text(`RC: ${company.rc}`);
+  if (company.ifNumber) doc.text(`IF: ${company.ifNumber}`);
   doc.moveDown(2);
 
   // Client Info
@@ -80,14 +93,15 @@ export const generateInvoicePDF = (sale: any, res: Response) => {
   doc.end();
 };
 
-export const generateReceiptPDF = (sale: any, res: Response) => {
+export const generateReceiptPDF = (sale: any, res: Response, company: PdfCompany) => {
   // 80mm is ~226 points wide
   const doc = new PDFDocument({ margin: 10, size: [226, 800] });
   doc.pipe(res);
 
-  doc.font('Helvetica-Bold').fontSize(14).text('TaysrPOS', { align: 'center' });
-  doc.font('Helvetica').fontSize(10).text('Casablanca', { align: 'center' });
-  doc.text('ICE: 000000000000000', { align: 'center' });
+  doc.font('Helvetica-Bold').fontSize(14).text(company.legalName || company.name, { align: 'center' });
+  doc.font('Helvetica').fontSize(10);
+  if (company.city) doc.text(company.city, { align: 'center' });
+  if (company.ice) doc.text(`ICE: ${company.ice}`, { align: 'center' });
   doc.moveDown();
 
   doc.text(`Ticket: ${sale.ticket}`, { align: 'center' });
@@ -114,7 +128,7 @@ export const generateReceiptPDF = (sale: any, res: Response) => {
   doc.text(`Client: ${sale.customer}`, { align: 'center' });
   doc.text(`Payé par: ${sale.method}`, { align: 'center' });
   doc.moveDown(2);
-  doc.text('Merci de votre visite !', { align: 'center' });
+  doc.text(company.receiptFooter || 'Merci de votre visite !', { align: 'center' });
 
   doc.end();
 };
