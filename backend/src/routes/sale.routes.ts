@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { PaymentMethod, PaymentStatus, ProductType, SaleChannel, SaleStatus } from '../generated/client/index.js';
 import { prisma } from '../utils/prisma.js';
 import { generateInvoicePDF, generateReceiptPDF, type PdfCompany } from '../utils/pdf.js';
+import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
 
 const router = Router();
 
@@ -266,6 +267,11 @@ router.post('/', async (req, res) => {
 
       if (shouldFinalize && data.method !== 'CREDIT') {
         await tx.payment.create({ data: { saleId: created.id, method: mapMethod(data.method), amount: total } });
+        // Track D auto-posting, increment 3: real cash/card/bank payment
+        // received now - CREDIT sales post nothing here (handled below via
+        // customer.balance, no cash moved yet).
+        const account = await getOrCreateCashAccount(tx, companyId, location.id);
+        await postCashTransaction(tx, account, 'DEBIT', total, `SALE-${created.id}`, created.ticketNumber ?? undefined);
       }
 
       if (shouldFinalize && data.method === 'CREDIT' && customer) {
@@ -360,6 +366,10 @@ router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
         await tx.payment.create({
           data: { saleId: sale.id, method: paymentMethod, amount: total },
         });
+        // Track D auto-posting, increment 3 (same rule as the primary POST /
+        // finalize path above).
+        const account = await getOrCreateCashAccount(tx, companyId, sale.locationId);
+        await postCashTransaction(tx, account, 'DEBIT', total, `SALE-${sale.id}`, finalized.ticketNumber ?? undefined);
       }
 
       // Update customer balance for credit sales
@@ -718,6 +728,17 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
           where: { id: sale.customerId },
           data: { balance: { decrement: balanceDelta } }
         });
+      }
+
+      // Track D auto-posting, increment 3: reverse the cash DEBIT finalize
+      // posted, using the same balanceDelta already computed above rather than
+      // looking up the original transaction (AccountTransaction has no saleId
+      // link - see TRACE.md). Only when a real payment happened (!wasCredit,
+      // payments.length > 0) - a credit sale never posted a cash DEBIT in the
+      // first place, so there is nothing to reverse.
+      if (!wasCredit && payments.length > 0 && balanceDelta > 0) {
+        const account = await getOrCreateCashAccount(tx, companyId, sale.locationId);
+        await postCashTransaction(tx, account, 'CREDIT', balanceDelta, `SALE-RETURN-${sale.id}`, sale.ticketNumber ?? undefined);
       }
 
       const requestedById = new Map(returnLines.map(({ item, quantity }) => [item.id, quantity]));

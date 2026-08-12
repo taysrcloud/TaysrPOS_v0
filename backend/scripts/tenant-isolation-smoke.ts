@@ -185,6 +185,39 @@ try {
   const returnedRow = salesListAfterReturn.body.sales.find((s: any) => s.id === returnSaleId);
   assert(returnedRow && returnedRow.status === 'Retour' && returnedRow.total === 48, `GET /sales did not reflect the returned sale correctly: ${JSON.stringify(returnedRow)}`);
 
+  // Track D auto-posting, increment 3: the credit sale/return sequence above
+  // must NOT have touched the location account at all (no cash moved for a
+  // CREDIT sale). Captured now as the baseline for the CASH sequence below.
+  // Expected 0, not the CASH expense's -12 alone: the earlier 'sales CRUD'
+  // createdSale test (quantity 1, CASH, FINAL -> total 12) also posts a DEBIT
+  // now that finalize auto-posting is wired, netting -12 + 12 = 0.
+  const locationAccountBeforeCashSale = await prisma.account.findFirst({ where: { companyId: a.company.id, locationId: a.location.id } });
+  const baselineBeforeCashSale = locationAccountBeforeCashSale ? Number(locationAccountBeforeCashSale.currentBalance) : 0;
+  assert(baselineBeforeCashSale === 0, `Location account should be unaffected by the credit sale/return above (0 = -12 CASH expense + 12 from the earlier CASH createdSale test): got ${baselineBeforeCashSale}`);
+
+  const cashSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 4 }], method: 'CASH', status: 'FINAL' }),
+  });
+  assert(cashSale.status === 201 && cashSale.body.total === 48, `Cash sale create failed or total wrong: ${cashSale.status} ${JSON.stringify(cashSale.body)}`);
+  const cashSaleId = cashSale.body.id;
+  const cashSaleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: cashSaleId } });
+  const accountAfterCashSale = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(accountAfterCashSale.currentBalance) === baselineBeforeCashSale + 48, `Location account after CASH sale finalize wrong: expected ${baselineBeforeCashSale + 48} (DEBIT posted), got ${accountAfterCashSale.currentBalance}`);
+
+  const cashSalePartialReturn = await request(`/sales/${cashSaleId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ saleItemId: cashSaleItem.id, quantity: 1 }] }),
+  });
+  assert(cashSalePartialReturn.status === 200, `Cash sale partial return failed: ${cashSalePartialReturn.status} ${JSON.stringify(cashSalePartialReturn.body)}`);
+  const accountAfterCashPartialReturn = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(accountAfterCashPartialReturn.currentBalance) === baselineBeforeCashSale + 36, `Location account after partial cash-sale return wrong: expected ${baselineBeforeCashSale + 36} (CREDIT reversal of 12 posted), got ${accountAfterCashPartialReturn.currentBalance}`);
+
+  const cashSaleFinalReturn = await request(`/sales/${cashSaleId}/return`, a.token, { method: 'POST', body: '{}' });
+  assert(cashSaleFinalReturn.status === 200, `Cash sale final return failed: ${cashSaleFinalReturn.status} ${JSON.stringify(cashSaleFinalReturn.body)}`);
+  const accountAfterCashFullReturn = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(accountAfterCashFullReturn.currentBalance) === baselineBeforeCashSale, `Location account after full cash-sale return should net back to baseline ${baselineBeforeCashSale} (DEBIT 48 fully reversed by CREDITs 12+36), got ${accountAfterCashFullReturn.currentBalance}`);
+
   const createdInvoice = await request('/invoices', a.token, {
     method: 'POST',
     body: JSON.stringify({ customerId: a.contact.id, mode: 'MANUAL', manualLines: [{ description: 'API line', quantity: 1, unitPrice: 10, tvaRate: 20 }] }),
@@ -308,9 +341,11 @@ try {
   // Track D auto-posting (2026-08-12), CashMovement first - the unambiguous
   // case, no payment-method conditionality to get wrong. Verifies the
   // get-or-create-per-location Account helper and the DEBIT/CREDIT direction.
-  // Delta-based (not hardcoded absolutes): the CASH expense above already
-  // posted to this same location account, so its starting balance isn't 0.
-  const locationBalanceBeforeCash = Number(locationAccountAfterExpense.currentBalance);
+  // Delta-based (not hardcoded absolutes): several earlier tests (the CASH
+  // expense, the CASH createdSale, the cash-sale-return sequence) already
+  // posted to this same location account, so re-read its current balance
+  // fresh rather than reusing a value captured earlier in the script.
+  const locationBalanceBeforeCash = Number((await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } })).currentBalance);
   const cashIn = await request('/register/movements', a.token, {
     method: 'POST',
     body: JSON.stringify({ type: 'IN', amount: 100, locationId: a.location.id, note: 'Fond de caisse' }),
@@ -414,7 +449,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

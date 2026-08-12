@@ -543,6 +543,52 @@ field, no enum, but the value comparison is the same). Posted inside the same `$
   balance. Full `test:tenant-isolation` suite (29 assertions) passes; dev DB confirmed empty after
   cleanup.
 
+## 2026-08-12 - Track D auto-posting, increment 3 (final): Sale finalize + return reversal
+
+The riskiest increment of this whole track, sequenced last as planned - two finalize entry points plus
+the return handler built in Track A, all money-moving code paths.
+
+- **`POST /` (create-and-finalize):** posts a `DEBIT` of `total` to the resolved location's account
+  right after the `Payment` row is created, only when `data.method !== 'CREDIT'`. `location` was already
+  resolved earlier in the handler for warehouse lookup, reused directly.
+- **`PATCH /:id/finalize` (finalize-from-draft):** same rule, using `sale.locationId` (this handler
+  doesn't resolve a `location` variable the way the primary path does). Same `!isCredit` guard as its
+  existing `Payment.create` branch.
+- **`POST /:id/return`:** posts a compensating `CREDIT` of the exact same `balanceDelta` the handler
+  already computes for the customer-balance reversal (see Track A's 2026-08-12 entry), when
+  `!wasCredit && payments.length > 0` - i.e. only when the original sale actually posted a cash `DEBIT`
+  at finalize in the first place. Deliberately does NOT look up the original `AccountTransaction` (no
+  `saleId` link exists - see increment 1's note) - recomputing the amount independently from data the
+  return handler already has is simpler and doesn't need that traceability feature to exist first.
+  `reference` uses `SALE-{id}` for the forward post and `SALE-RETURN-{id}` for the reversal - a documented
+  prefix convention, grep-level traceable, not a queryable FK.
+- **Two real test bugs found while writing the live smoke coverage** (not application bugs - the auto-
+  posting logic itself worked correctly both times; the test's own assumptions were wrong):
+  1. A new assertion checking the location account was "unaffected by the credit-sale/return sequence"
+     assumed the balance would still be the CASH expense's `-12` from increment 2 - but the pre-existing
+     `createdSale` test (quantity 1, `CASH`, `FINAL` -> total 12) *also* now posts a `DEBIT`, since it
+     runs before this new block and finalize auto-posting is now wired. `-12 + 12 = 0`, not `-12`. Fixed
+     the expected value.
+  2. The increment-1 CashMovement assertions captured their "balance before" snapshot from a variable set
+     much earlier in the script (`locationAccountAfterExpense`, right after the CASH expense) - once the
+     cash-sale-and-return sequence was inserted between that capture point and the CashMovement section,
+     the snapshot went stale (real balance had moved through +12 DEBIT, -12/-36 CREDIT reversals netting
+     back to 0, none of which the stale variable reflected). Fixed by re-reading the account balance fresh
+     immediately before the CashMovement section instead of reusing an earlier capture - the durable
+     lesson from both bugs: **any assertion that shares an account across multiple smoke-test sections
+     must capture its "before" baseline as close to the point of use as possible, not once near the top
+     of the script**, since later-added sections keep changing what "before" actually means.
+- Verified live end-to-end: CASH sale (4 units, total 48) -> account +48 (DEBIT) -> partial return (1
+  unit) -> account -12 (CREDIT reversal) -> full remainder return -> account -36 more, net back to exactly
+  the pre-sale baseline (0 change over the whole sequence). Separately confirmed the CREDIT sale/return
+  sequence from Track A never touches the account at all. Full `test:tenant-isolation` suite (30
+  assertions) passes; dev DB confirmed empty after cleanup. Backend and frontend `tsc` both clean.
+- **Track D is now feature-complete for this session's scope**: CashMovement, Expense (create only),
+  and Sale (finalize + return) all auto-post against the per-location account model. Purchase remains
+  permanently out of scope (no cash leg in the model). Expense edit/deactivate, credit-sale settlement,
+  and Account reports (trial-balance style) remain open, documented gaps for a future pass - not
+  oversights.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

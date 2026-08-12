@@ -498,3 +498,22 @@ Each time a meaningful block is finished:
   broke. Fixed by making them delta-based instead.
 - Verified live: CASH expense posts correctly, CREDIT expense posts nothing, later cash-movement deltas
   land correctly on top. Full smoke suite (29 assertions) passes.
+
+## 2026-08-12 - Track D auto-posting, increment 3 (final): Sale finalize + return reversal
+
+- Both finalize entry points (`POST /` create-and-finalize, `PATCH /:id/finalize` finalize-from-draft)
+  now post a DEBIT of the sale total when a real payment happens (not CREDIT). `POST /:id/return` posts a
+  compensating CREDIT using the same `balanceDelta` it already computes for the customer-balance reversal
+  - no lookup of the original posting needed.
+- Two real bugs found while writing live smoke coverage, both in the *test's* assumptions (the auto-
+  posting logic itself was correct both times): a stale expected-balance constant that didn't account for
+  an earlier CASH sale test now also posting, and a stale "before" snapshot captured too early in the
+  script that didn't reflect several intervening postings. Both fixed by re-reading balances fresh right
+  before use instead of relying on values captured earlier.
+- Verified live: full CASH-sale-and-return sequence nets back to exactly its starting balance; CREDIT
+  sales confirmed to never touch the ledger. Full smoke suite (30 assertions) passes, both workspaces
+  `tsc` clean.
+- **Track D is now feature-complete for this session's scope.** Remaining open, documented gaps (not
+  oversights): Expense edit/deactivate doesn't reconcile the ledger, credit-sale settlement has no
+  backend endpoint at all, Account reports (trial-balance style) not built, Purchase permanently excluded
+  (no cash leg in the model).
