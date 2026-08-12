@@ -627,6 +627,47 @@ scripted automation (click, type, wait for selector, screenshot) - not just stat
   for anything relying on hardware-accelerated CSS effects - fine for the standard form/table/card UI
   this project uses, worth a second look before trusting it for anything more visually exotic.
 
+## 2026-08-12 - Accent-bug fix visually confirmed; a second, separate date-filter bug found
+
+Used the newly-set-up headless browser to close out the accent-bug fix's outstanding verification item.
+Seeded the demo company (`backend/src/scripts/seed.ts`, `accountId: 'pos-v0-demo'`, admin/admin123),
+created one real product and two real `FINAL` sales via the API (CASH 54 MAD, CARD 36 MAD), then drove
+the actual login form and navigation with Puppeteer.
+
+- **Confirmed, with real screenshots: the accent-bug fix works.** The Paiements page shows both sales
+  correctly - `Total: 90,00 MAD`, `2 Transactions`, both rows tagged the green `Payee` badge with correct
+  method (Especes/Carte) and amount. The Rapports page's default "Toutes" (all-time) period shows the
+  same `90,00 MAD`, `2 Tickets Encaissés`, and a real rendered bar chart. Before today's fix, both of
+  these were guaranteed to show zero for any real sale - confirmed now that they don't.
+- **Found a second, separate bug while checking the obvious next thing (non-default period filters):**
+  switching Rapports to "Ce mois" (this month) - or Aujourd'hui/Cette semaine/Cette annee - zeroes out
+  sales created *seconds earlier, the same day*. Root cause, verified directly:
+  `new Date("12/08 20:02")` (the exact format `normalizeSale` sends, DD/MM HH:mm via
+  `toLocaleString('fr-FR', ...)`, no year) parses in Chromium as **December 8, 2001** - JS's loose date
+  parser reads "12/08" as US-convention MM/DD, and defaults the missing year to an unrelated baseline.
+  Every downstream `getMonth()`/`getFullYear()` comparison against `now` then fails for any real sale,
+  every day of the year except (by coincidence) December.
+- The two consumers of this logic - `matchesPeriod` (`main.tsx:1094`, used by the Dashboard) and
+  `filterByPeriod` (`main.tsx:3681`, used by Rapports) - were both clearly written against the *old*
+  mock/seed data convention, where `createdAt` held literal relative French strings ("Aujourd'hui",
+  "Hier", "Lundi"...) and period-matching was a simple substring check. Real API data has never used that
+  format, so every date-based period other than "Toutes"/"all" has likely always been broken for any
+  sale created outside a coincidental match. `'week'` in `matchesPeriod` has the opposite failure mode
+  (over-inclusive: if a `createdAt` string contains no day-name substring, the ternary falls through to
+  `true`), so a "this week" dashboard filter may currently show *everything*, not nothing - not verified
+  by screenshot, inferred from reading the exact branch.
+- **Not fixed this pass** - found while doing something the user hadn't asked for yet (checking period
+  filters beyond the specific accent-bug item), flagged rather than silently patched, matching this
+  session's established discipline for out-of-scope findings. The real fix is for the backend to send an
+  unambiguous, parseable timestamp (ISO 8601) instead of a pre-formatted French display string, and for
+  the frontend to format for *display* separately from what it uses for *filtering* - conflating the two
+  is the root design mistake, not just the specific date format chosen.
+- Diagnostic scripts (`verify-accent-fix.mjs`, `verify-period-filter.mjs`) were one-off and deleted after
+  use, matching this session's pattern for scratch verification tooling - not committed.
+- Seeded demo company/users left in the dev database intentionally (`pos-v0-demo`, this is the project's
+  own designated demo seed, not synthetic smoke-test data) - available for manual browser exploration:
+  `admin`/`admin123`, `manager`/`manager123`, `cashier`/`cashier123`.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.
