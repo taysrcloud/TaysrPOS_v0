@@ -10,7 +10,7 @@
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
-    "prisma:push": "prisma db push --schema prisma/schema.prisma",
+    "prisma:push": "PRISMA_SCHEMA_ENGINE_BINARY=$PREFIX/tmp/prisma-arm64/schema-engine-wrapper.sh prisma db push --schema prisma/schema.prisma",
     "db:setup": "bash scripts/setup-local-postgres.sh",
     "test:tenant-isolation": "tsx scripts/tenant-isolation-smoke.ts"
   },

@@ -36,8 +36,8 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
     await prisma.$transaction(async (tx) => {
       for (const adj of parsed.adjustments) {
         // Find or create product stock
-        let stock = await tx.productStock.findUnique({
-          where: { productId_warehouseId: { productId: adj.productId, warehouseId: warehouse!.id } } as any
+        let stock = await tx.productStock.findFirst({
+          where: { productId: adj.productId, warehouseId: warehouse!.id, variationId: null }
         });
 
         if (!stock) {
@@ -149,8 +149,8 @@ router.post('/transfer', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (
 
     await prisma.$transaction(async (tx) => {
       // Check and deduct from source
-      const sourceStock = await tx.productStock.findUnique({
-        where: { productId_warehouseId: { productId: parsed.productId, warehouseId: parsed.sourceWarehouseId } } as any
+      const sourceStock = await tx.productStock.findFirst({
+        where: { productId: parsed.productId, warehouseId: parsed.sourceWarehouseId, variationId: null }
       });
       if (!sourceStock || Number(sourceStock.quantity) < parsed.quantity) {
         throw new Error('Insufficient stock in source warehouse');
@@ -164,11 +164,14 @@ router.post('/transfer', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (
       });
 
       // Add to destination
-      await tx.productStock.upsert({
-        where: { productId_warehouseId: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId } } as any,
-        update: { quantity: { increment: parsed.quantity } },
-        create: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, quantity: parsed.quantity }
+      const destStock = await tx.productStock.findFirst({
+        where: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, variationId: null }
       });
+      if (destStock) {
+        await tx.productStock.update({ where: { id: destStock.id }, data: { quantity: { increment: parsed.quantity } } });
+      } else {
+        await tx.productStock.create({ data: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, quantity: parsed.quantity } });
+      }
       await tx.stockMovement.create({
         data: { productId: parsed.productId, warehouseId: parsed.destinationWarehouseId, type: 'TRANSFER', quantity: parsed.quantity, reference: parsed.notes || 'Transfer In' }
       });

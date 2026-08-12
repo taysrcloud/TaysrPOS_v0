@@ -119,6 +119,80 @@ try {
   });
   assert(createdPurchase.status === 200 && createdPurchase.body.purchase?.companyId === a.company.id, 'Purchase create API failed');
 
+  // Purchase partial-receive/return workflow (Track B) - exercises real stock and
+  // supplier-balance math across multiple sequential calls, not just create+list.
+  const supplierA = await prisma.contact.create({ data: { companyId: a.company.id, fullName: `Supplier A ${marker}`, type: 'SUPPLIER' } });
+  const workflowPurchase = await request('/purchases', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ supplierId: supplierA.id, status: 'PENDING', items: [{ productId: a.product.id, quantity: 10, unitCost: 5 }], total: 50 }),
+  });
+  assert(workflowPurchase.status === 200, `Workflow purchase create failed: ${workflowPurchase.status} ${JSON.stringify(workflowPurchase.body)}`);
+  const workflowPurchaseId = workflowPurchase.body.purchase.id;
+  const workflowItem = await prisma.purchaseItem.findFirstOrThrow({ where: { purchaseId: workflowPurchaseId } });
+  const stockBaseline = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+
+  const partialReceive = await request(`/purchases/${workflowPurchaseId}/receive`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ items: [{ purchaseItemId: workflowItem.id, quantity: 4 }] }),
+  });
+  assert(partialReceive.status === 200, `Partial receive failed: ${partialReceive.status} ${JSON.stringify(partialReceive.body)}`);
+  const afterPartialReceive = await prisma.purchase.findUniqueOrThrow({ where: { id: workflowPurchaseId } });
+  const stockAfterPartial = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const supplierAfterPartial = Number((await prisma.contact.findUniqueOrThrow({ where: { id: supplierA.id } })).balance);
+  assert(afterPartialReceive.status === 'PARTIALLY_RECEIVED', `Expected PARTIALLY_RECEIVED, got ${afterPartialReceive.status}`);
+  assert(stockAfterPartial === stockBaseline + 4, `Stock after partial receive wrong: expected ${stockBaseline + 4}, got ${stockAfterPartial}`);
+  assert(supplierAfterPartial === 20, `Supplier balance after partial receive wrong: expected 20, got ${supplierAfterPartial}`);
+
+  const remainderReceive = await request(`/purchases/${workflowPurchaseId}/receive`, a.token, { method: 'PUT', body: '{}' });
+  assert(remainderReceive.status === 200, `Remainder receive failed: ${remainderReceive.status} ${JSON.stringify(remainderReceive.body)}`);
+  const afterFullReceive = await prisma.purchase.findUniqueOrThrow({ where: { id: workflowPurchaseId } });
+  const stockAfterFull = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const supplierAfterFull = Number((await prisma.contact.findUniqueOrThrow({ where: { id: supplierA.id } })).balance);
+  assert(afterFullReceive.status === 'RECEIVED', `Expected RECEIVED, got ${afterFullReceive.status}`);
+  assert(stockAfterFull === stockBaseline + 10, `Stock after full receive wrong: expected ${stockBaseline + 10}, got ${stockAfterFull}`);
+  assert(supplierAfterFull === 50, `Supplier balance after full receive wrong: expected 50, got ${supplierAfterFull}`);
+
+  const doubleReceive = await request(`/purchases/${workflowPurchaseId}/receive`, a.token, { method: 'PUT', body: '{}' });
+  assert(doubleReceive.status === 400, `Receiving an already-fully-received purchase was not rejected (${doubleReceive.status})`);
+
+  const partialReturn = await request(`/purchases/${workflowPurchaseId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ purchaseItemId: workflowItem.id, quantity: 3 }] }),
+  });
+  assert(partialReturn.status === 200, `Partial return failed: ${partialReturn.status} ${JSON.stringify(partialReturn.body)}`);
+  const afterPartialReturn = await prisma.purchase.findUniqueOrThrow({ where: { id: workflowPurchaseId } });
+  const stockAfterPartialReturn = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const supplierAfterPartialReturn = Number((await prisma.contact.findUniqueOrThrow({ where: { id: supplierA.id } })).balance);
+  assert(afterPartialReturn.status === 'RECEIVED', `Purchase status should stay RECEIVED after a partial return, got ${afterPartialReturn.status}`);
+  assert(stockAfterPartialReturn === stockBaseline + 7, `Stock after partial return wrong: expected ${stockBaseline + 7}, got ${stockAfterPartialReturn}`);
+  assert(supplierAfterPartialReturn === 35, `Supplier balance after partial return wrong: expected 35, got ${supplierAfterPartialReturn}`);
+
+  const overReturn = await request(`/purchases/${workflowPurchaseId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ purchaseItemId: workflowItem.id, quantity: 100 }] }),
+  });
+  assert(overReturn.status === 400, `Returning more than the returnable quantity was not rejected (${overReturn.status})`);
+
+  const finalReturn = await request(`/purchases/${workflowPurchaseId}/return`, a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ purchaseItemId: workflowItem.id, quantity: 7 }] }),
+  });
+  assert(finalReturn.status === 200, `Final return failed: ${finalReturn.status} ${JSON.stringify(finalReturn.body)}`);
+  const afterFinalReturn = await prisma.purchase.findUniqueOrThrow({ where: { id: workflowPurchaseId } });
+  const stockAfterFinalReturn = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
+  const supplierAfterFinalReturn = Number((await prisma.contact.findUniqueOrThrow({ where: { id: supplierA.id } })).balance);
+  assert(afterFinalReturn.status === 'RETURNED', `Expected RETURNED after full return, got ${afterFinalReturn.status}`);
+  assert(stockAfterFinalReturn === stockBaseline, `Stock after full return should be back to baseline ${stockBaseline}, got ${stockAfterFinalReturn}`);
+  assert(supplierAfterFinalReturn === 0, `Supplier balance after full return should be 0, got ${supplierAfterFinalReturn}`);
+
+  const crossReceive = await request(`/purchases/${workflowPurchaseId}/receive`, b.token, { method: 'PUT', body: '{}' });
+  assert(crossReceive.status === 404, `Cross-tenant purchase receive was not rejected (${crossReceive.status})`);
+  const crossReturn = await request(`/purchases/${workflowPurchaseId}/return`, b.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ purchaseItemId: workflowItem.id, quantity: 1 }] }),
+  });
+  assert(crossReturn.status === 404, `Cross-tenant purchase return was not rejected (${crossReturn.status})`);
+
   const clockIn = await request('/attendance/clock-in', a.token, { method: 'POST', body: '{}' });
   const clockOut = await request('/attendance/clock-out', a.token, { method: 'POST', body: '{}' });
   assert(clockIn.status === 201 && clockOut.status === 200, 'Attendance API failed');
@@ -227,7 +301,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

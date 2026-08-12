@@ -291,6 +291,95 @@ tenant-isolation smoke test ran for real against it and passed all 24 assertions
   to run against every provisioned tenant database, not just the dev one - flag this before attempting
   it in a DB-enabled session.
 
+## 2026-08-12 - Purchase.status enum conversion: `db push` proven unsafe on real data
+
+**Concrete finding, not a theoretical caveat: `prisma db push --accept-data-loss` silently corrupts
+data on a String -> enum column conversion when the table has existing rows.** This was the exact
+deferred item flagged in the Phase 2 entry above ("do not convert this column without checking actual
+data first") - checked it properly now that Postgres is available, and the naive path failed.
+
+- Reproduced directly: inserted a `Purchase` row with `status='PENDING'` (String column, matching what
+  real usage has always written), ran `prisma db push --accept-data-loss` with the schema changed to
+  `PurchaseStatus` enum (`PENDING, ORDERED, PARTIALLY_RECEIVED, RECEIVED, RETURNED`). The push succeeded
+  with no error - just the standard "There might be data loss" warning - but the schema engine resolved
+  the type change as a **drop-and-recreate of the column**. The row's status silently became `'RECEIVED'`
+  (the new column default), not `'PENDING'`. No exception, no partial-failure signal - a query for that
+  row after the push returns wrong data with total confidence.
+- Root cause: Postgres has no automatic text->enum cast, so when `db push` needs to change a column's
+  type to an enum it doesn't know how to preserve, it drops and recreates rather than failing loudly.
+- Fix verified the correct way: reset the column back to `text`, re-inserted the same `PENDING` row, then
+  applied `ALTER TABLE "Purchase" ALTER COLUMN status TYPE "PurchaseStatus" USING status::"PurchaseStatus"`
+  by hand. Postgres CAN perform this as an in-place cast (every value ever written - `'PENDING'`,
+  `'RECEIVED'` - is a member of the new enum), and the row came back with `status='PENDING'` intact.
+  Confirmed the resulting column definition is byte-for-byte identical to what `db push` produces
+  (`not null default 'RECEIVED'::"PurchaseStatus"`), so this isn't a workaround with drift risk.
+- Saved as `backend/prisma/manual-migrations/2026-08-12_purchase_status_enum.sql` +
+  `backend/prisma/manual-migrations/README.md` (new directory, new pattern: this project has no
+  `prisma migrate` history, so any future type-changing column conversion should follow the same
+  by-hand-verify-then-save-as-dated-SQL approach rather than trusting `db push`'s data-loss prompt to be
+  survivable).
+- **Platform impact, not yet resolved:** `backend/src/routes/platform.routes.ts`'s `/provision-tenant`
+  writes to whatever tenant DB `X-Tenant-DB` points at via `runWithTenantDatabase` - it does not push
+  schema itself, so schema deployment to tenant databases happens externally, via whatever runs
+  `prisma db push` (this repo's only mechanism today - `npm run prisma:push` / `db:setup`). **Any
+  already-provisioned tenant with a real `PENDING` purchase is exposed to exactly the corruption
+  reproduced above** if this schema change (or any future type-changing one) is deployed the same way.
+  This needs surfacing to whoever owns tenant deploys before this schema change ships past dev - not
+  something to silently patch around in code.
+- `npm run prisma:push` was fixed this session to point at the aarch64 engine wrapper (previously
+  undocumented/broken on this platform) - this makes the unsafe path *more* reachable, not safer. The
+  `db push` "data loss" warning must be treated as a hard stop on any non-empty/non-disposable database,
+  full stop; see `backend/prisma/manual-migrations/README.md` for the by-hand alternative.
+- Applied to `taysrpos_dev` via the verified SQL (not `db push`), confirmed `prisma db push` reports
+  "already in sync" afterward, full `test:tenant-isolation` suite (24 assertions) still passes.
+- **Follow-up, same day:** the enum originally shipped with a fifth value, `ORDERED`, intended for a
+  future requisition/order distinction. Track B's actual implementation (see below) found no distinct
+  meaning for it - `PENDING` already covers "created, not yet received" - so it was dropped before
+  anything could reference it (`prisma db push --accept-data-loss`, safe here since the dev DB had zero
+  `Purchase` rows at the time; confirmed via `SELECT count(*) FROM "Purchase" WHERE status='ORDERED'` = 0
+  before applying). `PurchaseStatus` is now `PENDING, PARTIALLY_RECEIVED, RECEIVED, RETURNED`. Updated
+  `backend/prisma/manual-migrations/2026-08-12_purchase_status_enum.sql` to match - that file is meant to
+  be the canonical reference for provisioning this enum on a tenant DB from scratch, so it must reflect
+  the final shape, not the intermediate one.
+
+## 2026-08-12 - Pre-existing crash bug: wrong ProductStock compound-unique key
+
+**Found live, by the new Track B purchase partial-receive test - a genuine pre-existing defect, not
+something introduced this session.** `ProductStock`'s real compound unique constraint is
+`[productId, warehouseId, variationId]` (Prisma-generated key name
+`productId_warehouseId_variationId`), but `purchase.routes.ts` (purchase create-as-RECEIVED, and the
+`/:id/receive` handler) and `inventory.routes.ts` (stock adjustment, warehouse transfer both legs) all
+used a two-field key `productId_warehouseId` wrapped in `as any` to suppress the type error. At runtime
+this throws `Unknown argument productId_warehouseId` and the request 500s.
+
+- **Why this was never caught before:** the only existing smoke-test coverage that touched these code
+  paths either avoided triggering them (`createdPurchase` in `tenant-isolation-smoke.ts` creates with
+  `status: 'PENDING'`, which skips the stock-upsert branch entirely) or only checked a cross-tenant
+  *rejection* (`crossTransfer` expects 404, returned before the buggy upsert is ever reached). The
+  success path of purchase receipt, purchase-created-as-received, stock adjustment, and warehouse
+  transfer had **never actually been exercised** by any test in this project, despite being core
+  stock-movement functionality. This is the same "written but never run" risk category the rest of this
+  session's TRACE entries have been flagging, just found in code that predates this session rather than
+  code written during it.
+- **Also tried and rejected:** using the correct 3-field key name with `variationId: null` explicitly.
+  This fails to typecheck (`Type 'null' is not assignable to type 'number'` on the Prisma-generated
+  compound-unique input) - this Prisma version's generated types don't accept `null` in a compound-unique
+  selector even though the underlying column is nullable, because Postgres unique constraints treat
+  multiple NULLs as distinct rows, so equality-matching on a NULL column through a unique-key shorthand
+  isn't guaranteed unique. `sale.routes.ts`'s stock-decrement code already avoids this entirely by using
+  `findFirst` with a plain multi-field filter instead of the compound-unique shorthand - that pattern is
+  correct and is what all six fixed call sites now use (`findFirst` -> `create` or `update` by `id`,
+  instead of `findUnique`/`upsert` by compound key).
+- Fixed in `purchase.routes.ts` (3 call sites: create-as-RECEIVED, `/:id/receive`, `/:id/return`) and
+  `inventory.routes.ts` (3 call sites: `/adjustment`, `/transfer` source leg, `/transfer` destination
+  leg). Verified live: the extended `tenant-isolation-smoke.ts` purchase workflow (partial receive -> full
+  receive -> partial return -> full return) now passes end-to-end with correct stock quantities and
+  supplier-balance math at every step; a separate one-off script (`scripts/tmp-verify-inventory.ts`, run
+  and deleted, not committed) confirmed `/inventory/adjustment` and `/inventory/transfer` both the
+  create-destination-row and update-existing-row branches.
+- No schema change involved - this was a pure application-code bug, so no migration/data-loss risk like
+  the `Purchase.status` entry above. Safe to have applied directly.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

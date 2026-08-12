@@ -388,3 +388,40 @@ Each time a meaningful block is finished:
 - Standalone local mode retains Restaurant access for development; deployed Platform accounts remain controlled by Super Admin.
 - Updated Platform POS sync to derive Restaurant, Invoice, and Optic module flags from account.modules as well as legacy feature flags.
 - Verified POS frontend/backend typechecks, Platform backend build, live sidebar order, hidden Restaurant controls for a non-entitled account, and no browser console errors.
+
+## 2026-08-12 - Purchase.status enum + Track B receive/return, verified against live DB (with two real bugs found and fixed)
+
+- `Purchase.status` converted from a bare `String` to a `PurchaseStatus` enum (`PENDING, ORDERED,
+  PARTIALLY_RECEIVED, RECEIVED, RETURNED`). The naive path (`prisma db push --accept-data-loss`) was
+  proven to silently corrupt existing rows - a `PENDING` row became `RECEIVED` with no error. Converted
+  instead via a hand-verified `ALTER TABLE ... USING` cast, saved as
+  `backend/prisma/manual-migrations/2026-08-12_purchase_status_enum.sql`, which must be run against any
+  tenant DB with existing purchases before that schema change is pushed there. Full writeup in TRACE.md.
+- Added `PurchaseItem.receivedQty`/`returnedQty` (additive, defaulted). `/:id/receive` now supports
+  optional per-item partial quantities (still full-receive by default, backward compatible with the
+  existing "Marquer recu" button); purchase status now tracks PENDING -> PARTIALLY_RECEIVED -> RECEIVED
+  automatically. New `POST /:id/return` handles supplier returns against already-received quantity,
+  reversing stock and supplier balance, marking the purchase RETURNED once every received unit has been
+  returned.
+- **Found and fixed a real pre-existing crash bug while testing this live**, unrelated to the enum work:
+  `ProductStock` upserts/lookups across `purchase.routes.ts` and `inventory.routes.ts` (create-purchase-
+  as-received, receive, adjustment, both legs of warehouse transfer) used a compound-unique key name that
+  doesn't exist on the model (missing `variationId`), wrapped in `as any` to hide the type error. This
+  500'd every time it actually ran - it had never been exercised successfully by any existing test.
+  Fixed all six call sites to use the same `findFirst`-then-`create`/`update` pattern `sale.routes.ts`
+  already used correctly. Full writeup in TRACE.md ("Pre-existing crash bug: wrong ProductStock
+  compound-unique key").
+- Verified: `tsc --noEmit` clean, `prisma validate`/`generate` clean, full `test:tenant-isolation` suite
+  (25 assertions including the new purchase receive/return sequence) passes against the live
+  `taysrpos_dev` Postgres database, plus a standalone one-off check of `/inventory/adjustment` and
+  `/inventory/transfer` (both create- and update-existing-row branches). Dev DB confirmed empty after
+  cleanup.
+- Not done: frontend UI for partial receive/return (API-only, matching this session's established
+  pattern for other Track completions). The originally-planned `ORDERED` enum state was dropped (not
+  just left unused) once the implementation confirmed it had no distinct meaning beyond `PENDING` - final
+  enum is `PENDING, PARTIALLY_RECEIVED, RECEIVED, RETURNED`.
+- Follow-up found, not fixed this pass: `main.tsx`'s purchase list badge compares `purchase.status`
+  against French strings (`'Recu'`/`'Retour'`) the backend has never sent - pre-existing dead code, now
+  more visibly wrong with the new reachable statuses. Needs a frontend pass alongside the eventual
+  partial-receive/return UI.
+- Verified POS frontend/backend typechecks, Platform backend build, live sidebar order, hidden Restaurant controls for a non-entitled account, and no browser console errors.
