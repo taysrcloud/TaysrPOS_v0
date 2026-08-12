@@ -1,5 +1,60 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-12 - Full ERP parity migration: Tracks B, C, D, E, F, I (additive slices)
+
+User instruction for this pass: push through the remaining tracks, additive slices only. Every item
+below is schema + CRUD with **no wiring into existing business-critical flows** (POS cart/checkout,
+sale finalize, purchase receive, payment posting) - those all stay deferred pending a DB/browser-enabled
+session, consistent with the reasoning already established for the Sale return flow in Track A's entry.
+Verified with `prisma validate`, `prisma generate`, backend + frontend `tsc`, `vite build` - schema/type
+level only, nothing applied to or tested against a real database.
+
+**Track B (Procurement):**
+- [x] `GET /api/contacts/:id/ledger` — unified purchase/sales/invoice history + balance for a contact,
+      covering both the supplier-ledger gap here and the still-unverified customer-dossier claim from
+      this file's original Phase 7 entry.
+- [ ] Purchase requisition/order/return states - still blocked on the `Purchase.status` enum conversion
+      deferred in the 2026-08-12 Phase 2 entry below.
+
+**Track C (Catalog & pricing):**
+- [x] `SellingPriceGroup`/`CustomerGroup`/`ProductGroupPrice` schema + `pricing.routes.ts` (list/create
+      groups, set per-product override price). **Not wired into the POS cart** - a customer in a group
+      does not yet get that group's price automatically; that's checkout logic, deferred.
+- [ ] Variation templates, warranty, barcode labels, bulk import, standalone discounts - not started.
+
+**Track D (Accounting):**
+- [x] `Account`/`AccountType`/`AccountTransaction` schema + `accounting.routes.ts` (accounts, manual
+      DEBIT/CREDIT posting, running balance). Documented in code as a simplified convention (correct for
+      asset-style accounts, not universally correct for liability/equity).
+- [ ] Auto-posting from Sale/Purchase/Payment/Expense/CashMovement - deliberately not built; would mean
+      editing those routes' existing money-moving logic with no database to verify against.
+
+**Track E (People/commissions):**
+- [x] `SalesCommissionAgent` schema + `commission.routes.ts` (list/create) + `Sale.commissionAgentId`.
+- [ ] Commission calculation/reporting, and the granular permission-matrix question - not started. The
+      permission matrix specifically needs a product-scope decision from the user, not more engineering.
+
+**Track F (Communications):**
+- [x] `NotificationTemplate` + `DocumentAndNote` schema + `notification.routes.ts` (list/create
+      templates; polymorphic notes/attachments by entityType+entityId, works for any entity already).
+- [ ] Trigger wiring (actually sending on low-stock/payment/order events) - not started.
+
+**Track I (Dashboard configurator):**
+- [x] `DashboardConfiguration` schema + `GET`/`PUT /api/dashboard-config` (per-user widget layout).
+- [ ] Frontend widget system - `renderDashboard()` is unchanged; this only gives a future configurable
+      dashboard somewhere to persist its layout.
+
+**Tracks G (external Connector API) and H (multi-currency):** explicitly not started. Both are gated on
+a scope decision from the user ("is this actually needed"), not a technical blocker like the rest of
+this list - see the plan file for the exact open questions.
+
+**Track J (data migration):** untouched, correctly last in sequence - the schema changed significantly
+this session and would keep changing through every deferred item above.
+
+All new tenant-scoped endpoints got matching create/cross-tenant-rejection coverage added to
+`backend/scripts/tenant-isolation-smoke.ts` (written, not run - no reachable database in this
+environment).
+
 ## 2026-08-12 - Full ERP parity migration: Track A (receipt/invoice endpoints only)
 
 - [x] Closed the long-open targeted step ("replace stale `/api/sales/:id/receipt` and

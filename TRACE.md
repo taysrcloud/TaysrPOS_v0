@@ -143,6 +143,40 @@ When POS v0 changes, note:
 - Source inspiration: none from UltimatePOS for this pass - purely a build-out of this codebase's own
   existing `baseModules`/`pageIcon` pattern into a matching dispatch-side registry.
 
+## 2026-08-12 - Tracks B/C/D/E/F/I: additive schema + CRUD batch
+
+- Workflow: given the standing instruction to keep moving through the remaining tracks with additive
+  slices only, batched the schema-safe portion of six tracks into one pass rather than one track per
+  session. The dividing line used throughout: additive (new tables/columns/endpoints, nothing existing
+  reads them) shipped; anything requiring edits to existing money-moving or checkout logic
+  (`renderRegister`, sale finalize, purchase receive, payment/expense/cash-movement posting) stayed
+  deferred, matching the reasoning already established for the Track A return-flow deferral.
+- New route files: `pricing.routes.ts` (Track C), `accounting.routes.ts` (Track D), `commission.routes.ts`
+  (Track E), `notification.routes.ts` (Track F), `dashboard.routes.ts` (Track I). New endpoint on
+  existing `contact.routes.ts`: `GET /:id/ledger` (Track B). All mounted in `index.ts` behind the same
+  `requireAuth` pattern every other route uses, with per-route `requireRole` where a write should be
+  admin/manager-only, matching the existing convention.
+- Source inspiration: `TaxRate`-adjacent group-tax shape already noted in the Phase 2 entry;
+  `SellingPriceGroup`/`CustomerGroup`/`ProductGroupPrice` mirrors old app's
+  `SellingPriceGroup.php`/`CustomerGroup.php`/`VariationGroupPrice.php` at a schema level, simplified to
+  skip the variation-level granularity (prices are per-product, not per-variation, in this pass).
+  `Account`/`AccountType`/`AccountTransaction` mirrors `app/Account.php`/`AccountType.php`/
+  `AccountTransaction.php`, simplified to a single debit-increases/credit-decreases convention instead
+  of the old app's fuller account-type-aware posting rules.
+- UI rules preserved: none of this touches `main.tsx` - every addition is backend schema + API only, no
+  frontend surface yet for any of the six tracks. Nothing here is user-visible until a future pass wires
+  it into an actual screen.
+- Platform/provisioning impact: six new models are now part of every provisioned tenant's schema once
+  this is pushed to a real database. None of them are required for existing functionality to keep
+  working (all nullable/optional relations, all separate tables) - a tenant that never uses pricing
+  groups, accounting, commissions, notifications, or the dashboard configurator sees no behavior change.
+- Verification note: this is schema/type-level only (`prisma validate`, `prisma generate`, `tsc` for
+  both workspaces, `vite build`). Every new tenant-scoped endpoint has matching
+  create/cross-tenant-rejection assertions written into `tenant-isolation-smoke.ts`, but the script
+  itself could not be executed in this environment (no reachable Postgres). Treat all six tracks'
+  "done" items as reviewed-and-typed, not applied-and-tested, until a session with database access runs
+  the smoke script for real.
+
 ## 2026-08-12 - Track A: receipt/invoice endpoints (return flow deferred)
 
 - Workflow: scoped Track A down to one of its three pieces this session after a risk review. The

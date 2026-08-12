@@ -109,4 +109,80 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res, next) => {
   }
 });
 
+const asNumber = (value: unknown) => value && typeof value === 'object' && 'toNumber' in value
+  ? (value as { toNumber: () => number }).toNumber()
+  : Number(value || 0);
+
+// Unified ledger for both roles of a contact (CUSTOMER/SUPPLIER/BOTH): purchase
+// history for suppliers, sales + invoice history for customers, current balance
+// either way. Read-only, additive - no existing route depends on this shape.
+router.get('/:id/ledger', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const contactId = Number(req.params.id);
+    if (!Number.isInteger(contactId) || contactId <= 0) {
+      return res.status(400).json({ message: 'Contact invalide' });
+    }
+
+    const contact = await prisma.contact.findFirst({ where: { id: contactId, companyId } });
+    if (!contact) return res.status(404).json({ message: 'Contact introuvable' });
+
+    const isSupplier = contact.type === 'SUPPLIER' || contact.type === 'BOTH';
+    const isCustomer = contact.type === 'CUSTOMER' || contact.type === 'BOTH';
+
+    const [purchases, sales, invoices] = await Promise.all([
+      isSupplier
+        ? prisma.purchase.findMany({
+            where: { companyId, supplierId: contactId },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([]),
+      isCustomer
+        ? prisma.sale.findMany({
+            where: { companyId, customerId: contactId },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([]),
+      isCustomer
+        ? prisma.invoice.findMany({
+            where: { companyId, customerId: contactId },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    res.json({
+      contact: toContactResponse(contact),
+      purchases: purchases.map(p => ({
+        id: p.id,
+        reference: p.reference,
+        total: asNumber(p.total),
+        status: p.status,
+        date: p.createdAt.toISOString(),
+      })),
+      sales: sales.map(s => ({
+        id: s.id,
+        ticket: s.ticketNumber || `TCK-${String(s.id).padStart(4, '0')}`,
+        total: asNumber(s.total),
+        status: s.status,
+        paymentStatus: s.paymentStatus,
+        date: s.createdAt.toISOString(),
+      })),
+      invoices: invoices.map(inv => ({
+        id: inv.id,
+        number: inv.number,
+        total: asNumber(inv.total),
+        status: inv.status,
+        date: inv.createdAt.toISOString(),
+        dueDate: inv.dueDate ? inv.dueDate.toISOString() : null,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

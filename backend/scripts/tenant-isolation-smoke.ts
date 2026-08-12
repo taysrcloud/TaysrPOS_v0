@@ -69,6 +69,12 @@ try {
   });
   assert(editedContact.status === 200 && editedContact.body.contact?.name === `API Contact Edited ${marker}` && editedContact.body.contact?.isActive === false, `Contact edit API failed: ${editedContact.status} ${JSON.stringify(editedContact.body)}`);
 
+  const ledgerA = await request(`/contacts/${a.contact.id}/ledger`, a.token);
+  assert(ledgerA.status === 200 && ledgerA.body.contact?.id === a.contact.id, `Contact ledger API failed: ${ledgerA.status} ${JSON.stringify(ledgerA.body)}`);
+
+  const crossLedger = await request(`/contacts/${b.contact.id}/ledger`, a.token);
+  assert(crossLedger.status === 404, `Cross-tenant contact ledger was not rejected (${crossLedger.status})`);
+
   const createdExpense = await request('/expenses', a.token, {
     method: 'POST',
     body: JSON.stringify({ locationId: a.location.id, category: 'TEST', amount: 12, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CASH' }),
@@ -114,6 +120,50 @@ try {
   const clockIn = await request('/attendance/clock-in', a.token, { method: 'POST', body: '{}' });
   const clockOut = await request('/attendance/clock-out', a.token, { method: 'POST', body: '{}' });
   assert(clockIn.status === 201 && clockOut.status === 200, 'Attendance API failed');
+
+  // Track C-F/I additive slices: create + list + cross-tenant read for each
+  // new resource area. Kept compact - one representative create/list pair per
+  // resource, not full CRUD coverage, since these are schema/CRUD-only passes
+  // with no consumer wiring yet.
+  const priceGroup = await request('/pricing/groups', a.token, { method: 'POST', body: JSON.stringify({ name: `Gros ${marker}` }) });
+  assert(priceGroup.status === 201 && priceGroup.body.group?.companyId === a.company.id, `Price group create failed: ${priceGroup.status} ${JSON.stringify(priceGroup.body)}`);
+
+  const customerGroup = await request('/pricing/customer-groups', a.token, { method: 'POST', body: JSON.stringify({ name: `VIP ${marker}`, priceGroupId: priceGroup.body.group.id }) });
+  assert(customerGroup.status === 201 && customerGroup.body.group?.companyId === a.company.id, `Customer group create failed: ${customerGroup.status} ${JSON.stringify(customerGroup.body)}`);
+
+  const crossPriceGroupWrite = await request(`/pricing/groups/${priceGroup.body.group.id}/prices`, b.token, {
+    method: 'PUT',
+    body: JSON.stringify({ productId: a.product.id, price: 1 }),
+  });
+  assert(crossPriceGroupWrite.status === 404, `Cross-tenant price group write was not rejected (${crossPriceGroupWrite.status})`);
+
+  const accountType = await request('/accounting/types', a.token, { method: 'POST', body: JSON.stringify({ name: `Caisse ${marker}` }) });
+  assert(accountType.status === 201, `Account type create failed: ${accountType.status} ${JSON.stringify(accountType.body)}`);
+
+  const account = await request('/accounting/accounts', a.token, { method: 'POST', body: JSON.stringify({ name: `Compte ${marker}`, accountTypeId: accountType.body.type.id, openingBalance: 100 }) });
+  assert(account.status === 201 && account.body.account?.currentBalance === 100, `Account create failed: ${account.status} ${JSON.stringify(account.body)}`);
+
+  const postedTx = await request(`/accounting/accounts/${account.body.account.id}/transactions`, a.token, { method: 'POST', body: JSON.stringify({ type: 'CREDIT', amount: 30 }) });
+  assert(postedTx.status === 201, `Account transaction post failed: ${postedTx.status} ${JSON.stringify(postedTx.body)}`);
+  const ledgerAfterTx = await request(`/accounting/accounts/${account.body.account.id}/transactions`, a.token);
+  assert(ledgerAfterTx.status === 200 && ledgerAfterTx.body.account?.currentBalance === 70, `Account balance did not update correctly after CREDIT post (${ledgerAfterTx.body.account?.currentBalance})`);
+
+  const crossAccountRead = await request(`/accounting/accounts/${account.body.account.id}/transactions`, b.token);
+  assert(crossAccountRead.status === 404, `Cross-tenant account read was not rejected (${crossAccountRead.status})`);
+
+  const commissionAgent = await request('/commission-agents', a.token, { method: 'POST', body: JSON.stringify({ name: `Agent ${marker}`, commissionRate: 5 }) });
+  assert(commissionAgent.status === 201, `Commission agent create failed: ${commissionAgent.status} ${JSON.stringify(commissionAgent.body)}`);
+
+  const notifTemplate = await request('/notifications/templates', a.token, { method: 'POST', body: JSON.stringify({ event: 'LOW_STOCK', channel: 'EMAIL', body: 'Stock bas' }) });
+  assert(notifTemplate.status === 201, `Notification template create failed: ${notifTemplate.status} ${JSON.stringify(notifTemplate.body)}`);
+
+  const docNote = await request('/notifications/notes', a.token, { method: 'POST', body: JSON.stringify({ entityType: 'CONTACT', entityId: a.contact.id, note: `Note ${marker}` }) });
+  assert(docNote.status === 201, `Document/note create failed: ${docNote.status} ${JSON.stringify(docNote.body)}`);
+
+  const dashboardSave = await request('/dashboard-config', a.token, { method: 'PUT', body: JSON.stringify({ widgets: [{ id: 'sales-today' }] }) });
+  assert(dashboardSave.status === 200 && dashboardSave.body.widgets?.length === 1, `Dashboard config save failed: ${dashboardSave.status} ${JSON.stringify(dashboardSave.body)}`);
+  const dashboardLoadB = await request('/dashboard-config', b.token);
+  assert(dashboardLoadB.status === 200 && (dashboardLoadB.body.widgets || []).length === 0, 'Tenant A dashboard config leaked into tenant B');
 
   const saveSettingsA = await request('/settings', a.token, {
     method: 'PUT',
@@ -175,7 +225,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {
