@@ -530,3 +530,22 @@ Each time a meaningful block is finished:
 - Not yet done: logging into the actual app with real/seeded credentials and clicking through to
   Reports/Payments to close out today's earlier accent-bug-fix visual-verification gap - the setup is
   ready for it, just not yet exercised against the login-gated UI. Full writeup in TRACE.md.
+
+## 2026-08-12 - Visual verification confirmed the accent fix and found two more real bugs
+
+- Seeded the demo company, created real sales via the API, and drove the actual login + navigation with
+  Puppeteer. **Confirmed the accent-bug fix works**: Paiements and Rapports both show correct totals with
+  real screenshots as proof.
+- **Found and fixed a date-parsing bug**: the backend sent dates as a French DD/MM display string, which
+  `new Date(...)` silently misreads as US MM/DD with no year (`"12/08 20:02"` -> December 8, 2001). Every
+  Today/Week/Month/Year filter on Rapports and the Dashboard was broken for real data as a result. Fixed
+  by adding a real ISO 8601 `createdAtISO` field to the API response and rewriting both period-filter
+  functions to use it instead of parsing the display string.
+- **Found and fixed a second bug in the same investigation**: the sale API response never included
+  `locationId` at all, so the Dashboard's location-scoped filtering silently excluded every real sale
+  (comparing `undefined` against a real location ID). Fixed by adding the field - it was already on the
+  underlying data, just never mapped into the response.
+- Both fixes verified live: the Dashboard went from showing a fake/mock sales chart and 0,00 MAD to
+  showing the real 90,00 MAD total and a chart with the actual sale data point. Locked into
+  `tenant-isolation-smoke.ts` as two new regression assertions. Full smoke suite (29 assertions) still
+  passes, both workspaces' `tsc` clean. Full writeup in TRACE.md.

@@ -68,6 +68,11 @@ const normalizeSale = (sale: any) => ({
   id: sale.id,
     customerId: sale.customerId,
     invoiceId: sale.invoiceId,
+    // Was missing entirely - every consumer that filters sales by location
+    // (e.g. the Dashboard's forced location scoping) silently excluded every
+    // real sale, since `undefined === locationId` is always false. Found
+    // 2026-08-12 via live browser verification. See TRACE.md.
+    locationId: sale.locationId ?? null,
   ticket: sale.ticketNumber || `TCK-${String(sale.id).padStart(4, '0')}`,
   customer: sale.customer?.fullName || 'Client comptoir',
   total: asNumber(sale.total),
@@ -78,6 +83,13 @@ const normalizeSale = (sale: any) => ({
   method: methodLabel(sale),
   status: statusLabel(sale),
   createdAt: sale.createdAt ? new Date(sale.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Maintenant',
+  // Unambiguous ISO 8601 timestamp for date arithmetic (period filters, day
+  // bucketing) on the frontend. `createdAt` above is a pre-formatted DD/MM
+  // HH:mm display string and must never be parsed with `new Date(...)` -
+  // JS reads that format as US MM/DD with no year, silently producing wrong
+  // dates for real data (verified: "12/08 20:02" -> December 8, 2001). See
+  // TRACE.md 2026-08-12.
+  createdAtISO: sale.createdAt ? new Date(sale.createdAt).toISOString() : new Date().toISOString(),
   lines: sale.items?.map((item: any) => ({
     productId: item.productId,
     variationId: item.variationId || undefined,

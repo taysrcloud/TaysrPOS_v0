@@ -196,6 +196,12 @@ export type SaleRecord = {
   method: PaymentMethod;
   status: 'Payee' | 'Credit' | 'Brouillon' | 'Suspendue' | 'Devis' | 'Retour';
   createdAt: string;
+  // Unambiguous ISO 8601 timestamp for date arithmetic (period filters, day
+  // bucketing). createdAt above is a pre-formatted display string (DD/MM
+  // HH:mm) and must never be parsed with `new Date(...)` - that string is
+  // ambiguous (JS reads it as US MM/DD) and silently produces wrong dates
+  // for real data. See TRACE.md 2026-08-12 for the bug this fixes.
+  createdAtISO?: string;
   lines?: SaleLine[];
   splitPayments?: { method: PaymentMethod; amount: number }[];
   referenceNote?: string;
@@ -1091,21 +1097,22 @@ const App = () => {
     return () => window.clearTimeout(timeout);
   }, [filter, search, restaurantEnabled, currentLocationId]);
 
-  const matchesPeriod = (createdAt: string, period: 'today' | 'week' | 'month' | 'year' | 'all') => {
+  // Takes an unambiguous ISO 8601 string (Sale.createdAtISO, Expense.date -
+  // both parse correctly with `new Date(...)`). Never pass a pre-formatted
+  // display string here - see the createdAtISO comment on SaleRecord for why.
+  const matchesPeriod = (createdAtISO: string, period: 'today' | 'week' | 'month' | 'year' | 'all') => {
     if (period === 'all') return true;
+    const parsed = new Date(createdAtISO);
+    if (Number.isNaN(parsed.getTime())) return false;
     const now = new Date();
-    const value = createdAt.toLowerCase();
     if (period === 'today') {
-      return value.includes('aujourd') || value.includes('maintenant');
+      return parsed.getFullYear() === now.getFullYear() && parsed.getMonth() === now.getMonth() && parsed.getDate() === now.getDate();
     }
     if (period === 'week') {
-      return !value.includes('lun') && !value.includes('mar') && !value.includes('mer') && !value.includes('jeu') && !value.includes('ven') && !value.includes('sam') && !value.includes('dim')
-        ? true
-        : ['aujourd', 'maintenant', 'hier', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].some(token => value.includes(token));
-    }
-    const parsed = new Date(createdAt);
-    if (Number.isNaN(parsed.getTime())) {
-      return period === 'month' || period === 'year';
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const daysSinceMonday = (startOfToday.getDay() + 6) % 7; // getDay(): 0=Sun -> shift so 0=Mon
+      const startOfWeek = new Date(startOfToday.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+      return parsed.getTime() >= startOfWeek.getTime();
     }
     if (period === 'month') {
       return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
@@ -1341,6 +1348,7 @@ const App = () => {
       method,
       status: statusName,
       createdAt: 'Maintenant',
+      createdAtISO: new Date().toISOString(),
       locationId: currentLocationId,
       lines: cart.map(line => {
         const price = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
@@ -1754,7 +1762,7 @@ const App = () => {
     const dashboardBaseSales = dashboardLocationFilter === 'ALL'
       ? sales
       : sales.filter(s => s.locationId === dashboardLocationFilter);
-    const dashboardFilteredSales = dashboardBaseSales.filter(sale => matchesPeriod(sale.createdAt, dashboardPeriod));
+    const dashboardFilteredSales = dashboardBaseSales.filter(sale => matchesPeriod(sale.createdAtISO ?? sale.createdAt, dashboardPeriod));
 
     const dashPaidSales = dashboardFilteredSales.filter(s => s.status === 'Payee');
     const dashCreditSales = dashboardFilteredSales.filter(s => s.status === 'Credit');
@@ -3678,29 +3686,7 @@ const App = () => {
   // renderPayments extracted to src/pages/PaymentsPage.tsx (Phase 1 registry work).
 
   const renderReports = () => {
-    const filterByPeriod = (list: SaleRecord[]) => {
-      if (reportPeriod === 'all') return list;
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      return list.filter(s => {
-        // Parse relative date strings from seed data
-        const ca = s.createdAt.toLowerCase();
-        if (reportPeriod === 'today') {
-          return ca.includes('aujourd') || ca.includes('maintenant');
-        }
-        if (reportPeriod === 'week') {
-          return ca.includes('aujourd') || ca.includes('maintenant') || ca.includes('hier') || ca.includes('lundi') || ca.includes('mardi') || ca.includes('mercredi') || ca.includes('jeudi') || ca.includes('vendredi') || ca.includes('samedi') || ca.includes('dimanche');
-        }
-        // For month/year, try parsing as real date, otherwise include all
-        const parsed = new Date(s.createdAt);
-        if (!isNaN(parsed.getTime())) {
-          if (reportPeriod === 'month') return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
-          if (reportPeriod === 'year') return parsed.getFullYear() === now.getFullYear();
-        }
-        // If we can't parse, include it for broader periods
-        return true;
-      });
-    };
+    const filterByPeriod = (list: SaleRecord[]) => list.filter(s => matchesPeriod(s.createdAtISO ?? s.createdAt, reportPeriod));
 
     const exportCSV = (data: SaleRecord[]) => {
       const header = 'Ticket,Date,Client,Methode,Statut,Total\n';

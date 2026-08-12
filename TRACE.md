@@ -668,6 +668,56 @@ the actual login form and navigation with Puppeteer.
   own designated demo seed, not synthetic smoke-test data) - available for manual browser exploration:
   `admin`/`admin123`, `manager`/`manager123`, `cashier`/`cashier123`.
 
+## 2026-08-12 - Two more real bugs found and fixed via live browser verification
+
+Continuing the same investigation as the accent-bug confirmation above - fixed two more, both found by
+comparing behavior across pages that share logic but didn't share the same bug symptom, which is exactly
+the kind of cross-page inconsistency a browser catches and an API-only test cannot.
+
+**Bug 1: date-parsing.** Verified directly: `new Date("12/08 20:02")` (the exact display-string format
+`normalizeSale` sends) parses as **December 8, 2001** in Chromium - JS reads DD/MM as US-convention
+MM/DD, and defaults the missing year to an unrelated baseline. Every `Today`/`Week`/`Month`/`Year` period
+filter on both Rapports (`filterByPeriod`) and the Dashboard (`matchesPeriod`) built its comparison on
+top of this string, so real sales created the same day never matched anything but "Toutes"/"all".
+
+- Fix: added `createdAtISO` to `normalizeSale`'s output (`sale.routes.ts`) - a real ISO 8601 timestamp,
+  additive alongside the existing pre-formatted `createdAt` display string (left untouched - it's still
+  used correctly in ~15 places purely for rendering, none of which needed to change). Added the same
+  field to the local optimistic-sale constructor (`localSaleFromCart`) for consistency before a real API
+  round-trip replaces it.
+- Rewrote `matchesPeriod` to do real date arithmetic for every period (today/week/month/year) against
+  `createdAtISO`, replacing the old French-relative-string heuristics (`.includes('aujourd')`, day-name
+  substrings) that were clearly written against an old mock/seed-data convention and never worked against
+  real API data. `filterByPeriod` (Rapports) now just calls the shared `matchesPeriod` instead of
+  duplicating a second, differently-broken version of the same logic.
+- Left the day-bucketing chart key (`sale.createdAt.split(' ')[0]`, two call sites) as-is - it's a string
+  grouping key operating on already-period-filtered data, not a `Date` parse, so it doesn't have this bug;
+  only a narrow multi-year edge case remains there, out of scope for this pass.
+
+**Bug 2: `normalizeSale` never included `locationId` in its output at all.** Found by contrasting Rapports
+(worked, once Bug 1 was fixed) against the Dashboard (still showed `0,00 MAD` after the date fix). Traced
+it: the Dashboard force-syncs `dashboardLocationFilter` to `currentLocationId` via a `useEffect`
+(`setDashboardLocationFilter(currentLocationId)`), then filters `sales` with
+`s.locationId === dashboardLocationFilter`. Since every real API sale had `locationId: undefined`, that
+comparison was always false, silently excluding every real sale from the Dashboard's metrics and its
+"Ventes de la periode" chart (which was rendering an entirely different, apparently mock dataset as a
+result - a curve labelled Lun-Sam with a tooltip reading "Ven ventes: 390" that had nothing to do with
+any real data in the system).
+
+- Fix: added `locationId: sale.locationId ?? null` to `normalizeSale`'s output - purely additive, the raw
+  Prisma `sale` object already carried this field (no query changed), it just was never mapped through.
+
+**Verification method for both**: seeded the project's own demo company (`backend/src/scripts/seed.ts`,
+`pos-v0-demo`), created one real product and two real `FINAL` sales via the API, then used Puppeteer to
+actually log in and click through Paiements, Rapports (multiple period filters), and the Dashboard,
+screenshotting each state before and after each fix. This is the first time in this project's history
+that a reported "the numbers don't match" claim was checked by literally looking at the rendered page
+rather than reasoning about the code - and it found bugs at every step. Locked into
+`tenant-isolation-smoke.ts` as two new assertions (`locationId` present and correct, `createdAtISO`
+parseable) so neither can silently regress. Full smoke suite (29 assertions) still passes; both
+workspaces' `tsc` clean. Demo company/seed data (`admin`/`admin123` etc.) left in the dev database
+intentionally for future manual exploration.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

@@ -124,6 +124,16 @@ try {
   // accented 'Payée', which never matched any frontend 'Payee' comparison. Assert
   // the exact unaccented string, not just that a status field is present.
   assert(createdSale.body.status === 'Payee', `Paid sale status label wrong: expected exactly 'Payee' (unaccented), got ${JSON.stringify(createdSale.body.status)}`);
+  // Regression for a 2026-08-12 bug found via live browser verification:
+  // normalizeSale omitted locationId entirely, so any frontend consumer that
+  // filters sales by location (the Dashboard forces one) silently excluded
+  // every real sale (undefined === locationId is always false).
+  assert(createdSale.body.locationId === a.location.id, `Sale response missing/wrong locationId: expected ${a.location.id}, got ${JSON.stringify(createdSale.body.locationId)}`);
+  // Regression for the same session's date-parsing bug: createdAt is a
+  // pre-formatted DD/MM display string that new Date(...) misreads as
+  // US-convention MM/DD with no year - createdAtISO must be a real,
+  // parseable ISO 8601 timestamp for any date-arithmetic consumer to use instead.
+  assert(!Number.isNaN(new Date(createdSale.body.createdAtISO).getTime()), `Sale response createdAtISO is not a parseable date: ${JSON.stringify(createdSale.body.createdAtISO)}`);
 
   // Sale partial-return workflow (Track A) - measured the read-path fan-out question
   // live before building this: there is no linked credit-note row (the existing
