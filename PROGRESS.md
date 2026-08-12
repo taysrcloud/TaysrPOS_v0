@@ -465,3 +465,25 @@ Each time a meaningful block is finished:
   show real totals instead of empty results) - no display in this environment. Judged low-risk enough to
   land without that verification since it's a one-line change matching an already-established frontend
   contract, not new frontend logic.
+
+## 2026-08-12 - Track D auto-posting, increment 1: CashMovement (user chose per-location accounts)
+
+- Asked the user how money-moving events should map to an `Account`, since the schema had no answer to
+  derive (no `Account` link anywhere on `Company`/`Location`/`CashRegisterSession`). Chose per-location:
+  `Account.locationId Int?` added (additive), `null` = company-wide fallback for events with no location.
+- New `backend/src/utils/accounting.ts` (`getOrCreateCashAccount`, `postCashTransaction`), sharing the
+  existing debit-increases/credit-decreases convention.
+- Wired CashMovement only this pass (the unambiguous case) - `IN` posts DEBIT, `OUT` posts CREDIT, inside
+  the same transaction as the movement itself.
+- **Found and fixed a real bug via the live smoke test**: the fallback account lookup matched purely on
+  `locationId: null`, which also matched an unrelated pre-existing manually-created account (manual
+  accounts never set `locationId` either) - the very first live run silently posted into the wrong
+  account. Fixed by also matching the reserved name `'Caisse'`.
+- Purchase deliberately excluded from this whole track (no cash leg exists in the model - receiving a
+  purchase only affects `supplier.balance`, an unpaid payable). Credit-sale settlement has no backend
+  endpoint at all, so credit sales can't hit the ledger even after Sale finalize posting lands next. A
+  third `Payment`-writing endpoint (`connector.routes.ts /sell`) was found to already be broken (stale
+  field names `tsc` doesn't catch through Prisma's generic client) and excluded. Full detail in TRACE.md.
+- Verified live: location cash IN/OUT nets correctly; two no-location movements land on the same
+  company-wide account without touching the unrelated manual account. Full smoke suite (27 assertions)
+  passes.

@@ -291,6 +291,38 @@ try {
   const crossAccountRead = await request(`/accounting/accounts/${account.body.account.id}/transactions`, b.token);
   assert(crossAccountRead.status === 404, `Cross-tenant account read was not rejected (${crossAccountRead.status})`);
 
+  // Track D auto-posting (2026-08-12), CashMovement first - the unambiguous
+  // case, no payment-method conditionality to get wrong. Verifies the
+  // get-or-create-per-location Account helper and the DEBIT/CREDIT direction.
+  const cashIn = await request('/register/movements', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'IN', amount: 100, locationId: a.location.id, note: 'Fond de caisse' }),
+  });
+  assert(cashIn.status === 200, `Cash movement IN failed: ${cashIn.status} ${JSON.stringify(cashIn.body)}`);
+  const locationAccountA = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(locationAccountA.currentBalance) === 100, `Location account balance after cash IN wrong: expected 100, got ${locationAccountA.currentBalance}`);
+
+  const cashOut = await request('/register/movements', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'OUT', amount: 30, locationId: a.location.id, note: 'Depot banque' }),
+  });
+  assert(cashOut.status === 200, `Cash movement OUT failed: ${cashOut.status} ${JSON.stringify(cashOut.body)}`);
+  const locationAccountAAfterOut = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Number(locationAccountAAfterOut.currentBalance) === 70, `Location account balance after cash OUT wrong: expected 70, got ${locationAccountAAfterOut.currentBalance}`);
+
+  // No locationId given: must fall back to a single company-wide 'Caisse'
+  // account (locationId: null), not create a second, different account each
+  // time - and must NOT collide with the unrelated manually-created
+  // "Compte {marker}" account above, which also has locationId: null.
+  const cashInNoLocation1 = await request('/register/movements', a.token, { method: 'POST', body: JSON.stringify({ type: 'IN', amount: 10 }) });
+  const cashInNoLocation2 = await request('/register/movements', a.token, { method: 'POST', body: JSON.stringify({ type: 'IN', amount: 5 }) });
+  assert(cashInNoLocation1.status === 200 && cashInNoLocation2.status === 200, 'Cash movement with no locationId failed');
+  const companyWideAccountsA = await prisma.account.findMany({ where: { companyId: a.company.id, locationId: null, name: 'Caisse' } });
+  assert(companyWideAccountsA.length === 1, `Expected exactly one company-wide fallback account, found ${companyWideAccountsA.length}`);
+  assert(Number(companyWideAccountsA[0].currentBalance) === 15, `Company-wide account balance wrong: expected 15, got ${companyWideAccountsA[0].currentBalance}`);
+  const manualAccountUnaffected = await prisma.account.findFirstOrThrow({ where: { id: account.body.account.id } });
+  assert(Number(manualAccountUnaffected.currentBalance) === 70, `Unrelated manual account must be unaffected by cash-movement auto-posting: expected 70, got ${manualAccountUnaffected.currentBalance}`);
+
   const commissionAgent = await request('/commission-agents', a.token, { method: 'POST', body: JSON.stringify({ name: `Agent ${marker}`, commissionRate: 5 }) });
   assert(commissionAgent.status === 201, `Commission agent create failed: ${commissionAgent.status} ${JSON.stringify(commissionAgent.body)}`);
 
@@ -365,7 +397,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
+import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
 
 const router = Router();
 
@@ -149,15 +150,24 @@ router.post('/movements', requireAuth, async (req: any, res, next) => {
 
     const companyId = req.user.companyId;
 
-    const movement = await prisma.cashMovement.create({
-      data: {
-        companyId,
-        type: parsed.type,
-        amount: parsed.amount,
-        note: parsed.note,
-        locationId: parsed.locationId,
-        sessionId: parsed.sessionId
-      }
+    const movement = await prisma.$transaction(async (tx) => {
+      const created = await tx.cashMovement.create({
+        data: {
+          companyId,
+          type: parsed.type,
+          amount: parsed.amount,
+          note: parsed.note,
+          locationId: parsed.locationId,
+          sessionId: parsed.sessionId
+        }
+      });
+
+      // Track D auto-posting: a cash movement IS a cash-drawer event by
+      // definition, no payment-method ambiguity to check like Sale/Expense.
+      const account = await getOrCreateCashAccount(tx, companyId, parsed.locationId);
+      await postCashTransaction(tx, account, parsed.type === 'IN' ? 'DEBIT' : 'CREDIT', parsed.amount, `CASHMOVEMENT-${created.id}`, parsed.note ?? undefined);
+
+      return created;
     });
 
     res.json({ success: true, movement });

@@ -454,6 +454,68 @@ string contract on the frontend side, which is why it was judged low-risk enough
 verification; a future session with browser access should still confirm Reports/Payments/Dashboard now
 show real data instead of empty results.
 
+## 2026-08-12 - Track D auto-posting, increment 1: CashMovement + per-location account model
+
+**Blocked, then unblocked by a user decision, not more measurement.** Unlike the Sale-return read-path
+question, there was no way to discover the right target-account model by inspecting live data - the
+schema had zero linkage from `Company`/`Location`/`CashRegisterSession` to any `Account`, and no
+asset/liability/equity category on `AccountType`. Asked the user directly: per-company single account,
+per-location, or payment-method mapping. **Chosen: per-location**, matching how `Warehouse` is already
+scoped per-`Location`.
+
+- Added `Account.locationId Int?` (nullable FK to `Location`) - purely additive, no data-loss `db push`.
+  `null` means a company-wide fallback account, used when a money-moving event has no `locationId` (e.g.
+  an expense recorded without a location). Deliberately NOT "the company's first location" - the existing
+  warehouse-fallback pattern's non-determinism is tolerable for stock, not for a ledger, where the same
+  untargeted event should always land in the same account over time.
+- New `backend/src/utils/accounting.ts`: `getOrCreateCashAccount(tx, companyId, locationId)` and
+  `postCashTransaction(tx, account, type, amount, reference, note?)`, sharing the exact debit-increases/
+  credit-decreases convention already documented in `accounting.routes.ts`.
+- **Found and fixed a real bug via the live smoke test, not just a status check**: the get-or-create
+  helper's first version matched the company-wide fallback purely on `{companyId, locationId: null}` -
+  but accounts created manually via `accounting.routes.ts` also never set `locationId`, so the very first
+  live run silently posted a `CashMovement`'s auto-entry into an **unrelated, pre-existing manually-created
+  account** (`Compte {marker}` from an earlier test step), inflating its balance from 70 to 85. Fixed by
+  also matching on the reserved name `'Caisse'` for the null-location case, so the auto-posting bucket
+  can never collide with a user's own generically-named account. (A location-scoped lookup didn't have
+  this problem: `accounting.routes.ts`'s create-account endpoint doesn't expose `locationId` in its zod
+  schema at all, so only this new helper ever sets a non-null one.)
+- Wired **CashMovement only** this increment (`register.routes.ts POST /movements`) - the unambiguous
+  case, no payment-method conditionality to get wrong, chosen deliberately as the first slice per the
+  advisor consultation before writing any Sale/Expense/Purchase code. `IN` posts a `DEBIT`, `OUT` posts a
+  `CREDIT`, inside the same `$transaction` as the `CashMovement` row itself (not a follow-up write).
+- **Purchase excluded from this entire track, not just deferred**: receiving a purchase only increments
+  `supplier.balance` (a payable) - there is no cash leg in this codebase's current model (no "pay
+  supplier" endpoint exists anywhere). Posting a `CREDIT` to cash for an unpaid purchase would be a
+  straight modeling error under the existing asset-account-only convention. This is a deliberate scope
+  exclusion, documented so a future session doesn't read "not done" as an oversight.
+- **Credit-sale settlement has no backend endpoint at all** (checked: `openSaleSettlement` in
+  `frontend/src/main.tsx` is a modal-opener with no dedicated backend route - `PATCH /:id/finalize`
+  handles the *initial* finalize-with-method choice, not a later payoff of an existing credit balance).
+  Credit sales therefore cannot currently generate any real cash-ledger entry at settlement time even
+  after Sale finalize posting is wired (still pending, next increment) - documented as a separate,
+  pre-existing gap, not something this track can hook into since the target code doesn't exist.
+- **Third `Payment` writer found and excluded**: `connector.routes.ts`'s `/sell` endpoint (a legacy
+  mobile-sync bridge, unrelated to the `Sale.originalSaleId`-style Track A work) creates `Payment` rows
+  too, but writes field names that don't exist on the current schema (`subTotal` vs `subtotal`, `userId`
+  on `Sale` which has no such field, `name` on `Contact` which uses `fullName`). TypeScript's excess-
+  property checking does not catch this through Prisma's generically-typed `create()` calls - `tsc`
+  reports zero errors despite the mismatch, a real soundness gap worth remembering for future "tsc clean"
+  claims about this codebase. This endpoint is very likely already non-functional at runtime,
+  independent of anything in this track; not wired into auto-posting, not fixed (out of scope), flagged
+  for a future dedicated look.
+- **Return-reversal decision made before touching Sale finalize (next increment), not after**: since
+  `AccountTransaction` has no `saleId` link (only a free-text `reference`), the plan for the next
+  increment is to compute the reversal amount directly from the same `balanceDelta` the return handler
+  already calculates, rather than looking up the original posting - avoiding a dependency on a
+  traceability feature that doesn't exist yet. `reference` will use a documented prefix convention
+  (`SALE-{id}`, `SALE-RETURN-{id}`, etc.) for at least grep-level traceability until/unless a dedicated
+  FK or `DocumentAndNote`-style polymorphic link is added.
+- Verified live: cash IN (100) then OUT (30) at a real location -> account balance 70; two no-location
+  cash movements (10, 5) both land on the SAME company-wide account, balance 15, confirmed NOT to have
+  touched the unrelated manual account (still exactly 70). Full `test:tenant-isolation` suite (27
+  assertions) passes; dev DB confirmed empty after cleanup.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

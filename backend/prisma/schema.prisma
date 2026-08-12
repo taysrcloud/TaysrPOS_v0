@@ -186,6 +186,9 @@ model Location {
   cashSessions  CashRegisterSession[]
   expenses      Expense[]
   cashMovements CashMovement[]
+  // Track D auto-posting (2026-08-12): per-location cash account, lazily
+  // get-or-created the same way "Magasin principal" warehouses are.
+  accounts      Account[]
 
   @@unique([companyId, name])
 }
@@ -748,6 +751,15 @@ model Account {
   id             Int      @id @default(autoincrement())
   companyId      Int
   accountTypeId  Int?
+  // Track D auto-posting (2026-08-12): null means a company-wide account (used
+  // as the fallback target when a money-moving event has no locationId, e.g.
+  // an expense recorded without a location). Non-null links this account to a
+  // specific Location's cash drawer. Resolution always uses findFirst-then-
+  // create (see backend/src/utils/accounting.ts), not a DB unique constraint -
+  // Postgres treats multiple NULLs as distinct, so a unique index on a
+  // nullable column can't be relied on the same way ProductStock's compound
+  // key already taught this project not to (see TRACE.md 2026-08-12).
+  locationId     Int?
   name           String
   accountNumber  String?
   openingBalance Decimal  @default(0) @db.Decimal(12, 2)
@@ -757,6 +769,7 @@ model Account {
 
   company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   accountType  AccountType?         @relation(fields: [accountTypeId], references: [id])
+  location     Location?            @relation(fields: [locationId], references: [id])
   transactions AccountTransaction[]
 
   @@unique([companyId, name])
