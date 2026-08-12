@@ -61,4 +61,33 @@ router.post('/', requireAuth, requireRole(['ADMIN']), async (req: any, res: any,
   }
 });
 
+router.put('/:id', requireAuth, requireRole(['ADMIN']), async (req: any, res: any, next: any) => {
+  try {
+    const companyId = req.user.companyId;
+    const locationId = Number(req.params.id);
+    if (!Number.isInteger(locationId) || locationId <= 0) {
+      return res.status(400).json({ message: 'Magasin invalide' });
+    }
+
+    const existing = await prisma.location.findFirst({ where: { id: locationId, companyId } });
+    if (!existing) return res.status(404).json({ message: 'Magasin introuvable' });
+
+    const parsed = z.object({
+      name: z.string().min(2),
+      address: z.string().optional().nullable(),
+      isActive: z.coerce.boolean().default(true),
+    }).parse(req.body);
+
+    const location = await prisma.location.update({
+      where: { id: locationId },
+      data: { name: parsed.name, address: parsed.address, isActive: parsed.isActive },
+    });
+
+    res.json({ success: true, location });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Magasin invalide', errors: err.issues });
+    next(err);
+  }
+});
+
 export default router;

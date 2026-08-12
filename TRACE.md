@@ -143,6 +143,35 @@ When POS v0 changes, note:
 - Source inspiration: none from UltimatePOS for this pass - purely a build-out of this codebase's own
   existing `baseModules`/`pageIcon` pattern into a matching dispatch-side registry.
 
+## 2026-08-12 - Phase 2 shared-foundation refactors (safe/additive subset only)
+
+- Workflow: this environment has no reachable Postgres (port 5432 closed) and `prisma migrate diff`
+  (the DB-less SQL-preview path) also fails - its schema-engine binary needs a postinstall download
+  Termux/Android can't do here, same failure class already logged for `bcrypt`/`puppeteer`. Split Phase
+  2's four items by what `prisma validate`/`generate`/`tsc` can actually verify (schema/type-level only)
+  versus what needs real row data to convert safely.
+- What shipped, additive only: `TaxRate` model + optional `taxRateId` on `Product`/`SaleItem`/
+  `InvoiceLine` (existing `tvaRate` snapshot columns untouched - TVA-on-receipts is a hard product rule,
+  see the Product Rules section above); `Sale.originalSaleId` + `SaleItem.returnedQty` for the future
+  return/credit-note flow; `Expense.isActive`/`updatedAt`; `PUT /:id` edit + soft-deactivate on
+  `contact`/`expense`/`location` with tenant-ownership checks (404 cross-tenant, matching the existing
+  `Product` pattern from the July 16 tenant-isolation pass); matching coverage added to
+  `tenant-isolation-smoke.ts` (written, not run - no DB here).
+- Explicitly deferred, needs a live DB: `Purchase.status` String -> enum. Checked real usage in this
+  session - only `'PENDING'`/`'RECEIVED'` are ever written today, not the five-state set Phase 2
+  originally proposed. A blind conversion would break every `PENDING` row; there's no way to confirm
+  no other values exist in real data without a database. Do not convert this column without checking
+  actual data first.
+- Also fixed along the way: `backend/tsconfig.json` only covered `src/**/*.ts`, so `npm run typecheck`
+  silently never checked `backend/scripts/` (including the isolation smoke test itself). Added
+  `scripts/**/*.ts` to `include`.
+- Source inspiration: `TaxRate`/group-tax shape follows TaysrPOS-old's `TaxRate`/`GroupSubTax` models
+  (see `ULTIMATEPOS_TAYSRPOS_DIFF_MAP.md`), simplified to a single self-referencing table instead of
+  two.
+- Platform/provisioning impact: none directly, but the deferred `Purchase.status` conversion will need
+  to run against every provisioned tenant database, not just the dev one - flag this before attempting
+  it in a DB-enabled session.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

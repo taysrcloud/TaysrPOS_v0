@@ -15,6 +15,10 @@ const expenseSchema = z.object({
   paymentMethod: z.string().default('CASH'),
 });
 
+const expenseEditSchema = expenseSchema.extend({
+  isActive: z.coerce.boolean().default(true),
+});
+
 router.get('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const companyId = req.user!.companyId;
@@ -60,6 +64,44 @@ router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
 
     res.json({ success: true, expense });
   } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const expenseId = Number(req.params.id);
+    if (!Number.isInteger(expenseId) || expenseId <= 0) {
+      return res.status(400).json({ message: 'Depense invalide' });
+    }
+
+    const existing = await prisma.expense.findFirst({ where: { id: expenseId, companyId } });
+    if (!existing) return res.status(404).json({ message: 'Depense introuvable' });
+
+    const parsed = expenseEditSchema.parse(req.body);
+    if (parsed.locationId) {
+      const location = await prisma.location.findFirst({ where: { id: parsed.locationId, companyId } });
+      if (!location) return res.status(400).json({ message: 'Magasin invalide' });
+    }
+
+    const expense = await prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        locationId: parsed.locationId,
+        reference: parsed.reference || existing.reference,
+        category: parsed.category,
+        amount: parsed.amount,
+        date: new Date(parsed.date),
+        note: parsed.note,
+        paymentMethod: parsed.paymentMethod,
+        isActive: parsed.isActive,
+      },
+    });
+
+    res.json({ success: true, expense: { ...expense, amount: Number(expense.amount), date: expense.date.toISOString().split('T')[0] } });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ message: 'Depense invalide', errors: err.issues });
     next(err);
   }
 });

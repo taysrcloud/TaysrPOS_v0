@@ -63,11 +63,35 @@ try {
   });
   assert(createdContact.status === 200 && createdContact.body.contact?.companyId === a.company.id, 'Contact create API failed');
 
+  const editedContact = await request(`/contacts/${createdContact.body.contact.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ fullName: `API Contact Edited ${marker}`, type: 'CUSTOMER', isActive: false }),
+  });
+  assert(editedContact.status === 200 && editedContact.body.contact?.name === `API Contact Edited ${marker}` && editedContact.body.contact?.isActive === false, `Contact edit API failed: ${editedContact.status} ${JSON.stringify(editedContact.body)}`);
+
   const createdExpense = await request('/expenses', a.token, {
     method: 'POST',
     body: JSON.stringify({ locationId: a.location.id, category: 'TEST', amount: 12, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CASH' }),
   });
   assert(createdExpense.status === 200 && createdExpense.body.expense?.companyId === a.company.id, 'Expense create API failed');
+
+  const editedExpense = await request(`/expenses/${createdExpense.body.expense.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ locationId: a.location.id, category: 'TEST-EDITED', amount: 24, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CARD', isActive: false }),
+  });
+  assert(editedExpense.status === 200 && editedExpense.body.expense?.category === 'TEST-EDITED' && editedExpense.body.expense?.isActive === false, `Expense edit API failed: ${editedExpense.status} ${JSON.stringify(editedExpense.body)}`);
+
+  const editedLocation = await request(`/locations/${a.location.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ name: `${a.location.name} Edited`, isActive: true }),
+  });
+  assert(editedLocation.status === 200 && editedLocation.body.location?.name === `${a.location.name} Edited`, `Location edit API failed: ${editedLocation.status} ${JSON.stringify(editedLocation.body)}`);
+
+  const createdExpenseB = await request('/expenses', b.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: b.location.id, category: 'TEST-B', amount: 5, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CASH' }),
+  });
+  assert(createdExpenseB.status === 200, 'Tenant B expense create API failed');
 
   const createdSale = await request('/sales', a.token, {
     method: 'POST',
@@ -124,6 +148,24 @@ try {
   });
   assert(crossTransfer.status === 404, `Cross-tenant warehouse transfer was not rejected (${crossTransfer.status})`);
 
+  const crossContactEdit = await request(`/contacts/${b.contact.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ fullName: 'Hijacked', type: 'CUSTOMER' }),
+  });
+  assert(crossContactEdit.status === 404, `Cross-tenant contact edit was not rejected (${crossContactEdit.status})`);
+
+  const crossExpenseEdit = await request(`/expenses/${createdExpenseB.body.expense.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ category: 'HIJACKED', amount: 1, date: new Date().toISOString().slice(0, 10), paymentMethod: 'CASH' }),
+  });
+  assert(crossExpenseEdit.status === 404, `Cross-tenant expense edit was not rejected (${crossExpenseEdit.status})`);
+
+  const crossLocationEdit = await request(`/locations/${b.location.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ name: 'Hijacked Store' }),
+  });
+  assert(crossLocationEdit.status === 404, `Cross-tenant location edit was not rejected (${crossLocationEdit.status})`);
+
   const expensesA = await request('/expenses', a.token);
   const purchasesA = await request('/purchases', a.token);
   const locationsA = await request('/locations', a.token);
@@ -133,7 +175,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'expenses CRUD', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'products read', 'sales CRUD and ownership', 'invoices CRUD', 'purchases CRUD', 'expenses CRUD', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

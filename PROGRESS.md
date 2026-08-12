@@ -1,5 +1,39 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-12 - Full ERP parity migration: Phase 2 (safe/additive subset)
+
+**No reachable Postgres in this environment** (port 5432 closed, no `psql`), and `prisma migrate diff`
+(the offline SQL-preview path) also fails here - its schema-engine binary needs a postinstall download
+this Termux/Android environment can't do, same failure class as `bcrypt`/`puppeteer`. So this pass is
+split strictly into what schema-validates/typechecks (done) versus what needs real data to convert
+safely (deferred). Verified with `prisma validate`, `prisma generate`, backend + frontend `tsc`. **Not**
+applied to or tested against a database.
+
+- [x] Added `TaxRate` model (name, rate, isGroup, parentId, tenant-scoped) + optional `taxRateId` FK on
+      `Product`/`SaleItem`/`InvoiceLine`. The existing `tvaRate` Decimal columns on all three are
+      untouched - they're historical fiscal snapshots (TRACE.md already makes TVA-on-tickets/invoices a
+      hard product rule), so `taxRateId` only lets new writes *resolve* a rate; it never replaces the
+      captured number. The plan file originally said "migrate the fields to reference it," which
+      contradicted its own snapshot requirement - corrected in the plan.
+- [x] Added `Sale.originalSaleId` (self-relation) + `SaleItem.returnedQty` for the future return/
+      credit-note flow (Track A). Nullable, nothing reads them yet.
+- [x] Added `Expense.isActive`/`updatedAt` (both additive with defaults).
+- [x] Added `PUT /:id` edit + soft-deactivate (`isActive` toggle) to `contact`, `expense`, and
+      `location` routes, all with tenant-ownership checks (404 on cross-tenant, matching the existing
+      `Product`/July-16 pattern). **Correction:** `settings.routes.ts` already had GET+PUT - it was
+      never actually missing edit, only `contact`/`expense`/`location` were.
+- [x] Extended `backend/scripts/tenant-isolation-smoke.ts` with edit + cross-tenant-edit-rejection
+      coverage for all three new endpoints, following the existing two-tenant/attack pattern. Can't
+      execute it here (no DB) - ready for the next session that has one.
+- [x] Found and fixed a real gap along the way: `backend/tsconfig.json` only included `src/**/*.ts`, so
+      `npm run typecheck` never actually checked `backend/scripts/` (including the isolation smoke test
+      itself). Added `scripts/**/*.ts` to `include`.
+- [ ] **Deferred, needs a live DB:** `Purchase.status` String -> enum. Checked actual usage this
+      session - only `'PENDING'`/`'RECEIVED'` are ever written (`purchase.routes.ts`,
+      `purchase-modals.tsx`), not the `REQUISITION/ORDERED/PARTIALLY_RECEIVED/RECEIVED/RETURNED` set
+      Phase 2 originally proposed. Converting blind would break every `PENDING` row. Next DB session:
+      confirm no other values exist in real data, design the enum to include `PENDING`, then convert.
+
 ## 2026-08-12 - Full ERP parity migration: Phase 0 + Phase 1 (partial)
 
 Full plan: `/data/data/com.termux/files/home/.claude/plans/jolly-percolating-robin.md`. Direction change
