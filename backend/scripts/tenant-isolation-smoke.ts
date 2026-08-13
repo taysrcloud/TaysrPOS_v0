@@ -749,10 +749,119 @@ try {
   const overSettleAtZero = await request(`/contacts/${a.contact.id}/settle`, a.token, { method: 'POST', body: JSON.stringify({ amount: 1, method: 'CASH' }) });
   assert(overSettleAtZero.status === 400, `Settlement at zero balance was not rejected (${overSettleAtZero.status})`);
 
+  // ── Split-payment persistence (2026-08-13) ────────────────────────────────
+  // Discovered while scoping the renderRegister extraction: POST /sales accepted
+  // a `splitPayments` array from the register but the zod schema silently
+  // dropped it (unrecognized keys are stripped by a plain z.object()) - a MULTI
+  // sale always recorded one lump Payment row for the full total under
+  // PaymentMethod.MIXED, with no real per-tender data, and the Z-report's
+  // cash-drawer reconciliation depended on exactly that missing data (it summed
+  // 0 for every MULTI sale's cash contribution). See TRACE.md's split-payment
+  // entry for the full bug cluster this closes.
+  // Product: salePrice 10, tvaRate 20% (createTenant defaults) -> qty 1 = total 12.
+  await prisma.productStock.updateMany({ where: { productId: a.product.id, warehouseId: a.warehouse.id }, data: { quantity: { increment: 100 } } });
+
+  const accountBeforeSplit = await prisma.account.findFirst({ where: { companyId: a.company.id, locationId: a.location.id } });
+  const cashBalanceBeforeSplit = accountBeforeSplit ? Number(accountBeforeSplit.currentBalance) : 0;
+
+  // A) Exact cash tender via MULTI - single split component, no change due.
+  const exactCashSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CASH', amount: 12 }] }),
+  });
+  assert(exactCashSplit.status === 201 && exactCashSplit.body.total === 12, `Exact-cash MULTI sale failed: ${exactCashSplit.status} ${JSON.stringify(exactCashSplit.body)}`);
+  assert(exactCashSplit.body.payments?.length === 1 && exactCashSplit.body.payments[0].method === 'CASH' && exactCashSplit.body.payments[0].amount === 12, `Exact-cash MULTI sale payment breakdown wrong: ${JSON.stringify(exactCashSplit.body.payments)}`);
+  const accountAfterExactCash = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(accountAfterExactCash.currentBalance) - (cashBalanceBeforeSplit + 12)) < 0.01, `Exact-cash MULTI sale did not post the expected DEBIT: ${accountAfterExactCash.currentBalance}`);
+
+  // B) Cash overpayment (change due) - the raw tendered amount (20) must NOT
+  // be recorded as the Payment amount or posted to the ledger; only the 12
+  // actually owed is real sale revenue, the other 8 is change handed back.
+  const overpayCashSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CASH', amount: 20 }] }),
+  });
+  assert(overpayCashSplit.status === 201, `Overpay-cash MULTI sale failed: ${overpayCashSplit.status} ${JSON.stringify(overpayCashSplit.body)}`);
+  assert(overpayCashSplit.body.payments?.length === 1 && overpayCashSplit.body.payments[0].amount === 12, `Overpay-cash MULTI sale recorded the raw tendered amount instead of the reconciled 12: ${JSON.stringify(overpayCashSplit.body.payments)}`);
+  const accountAfterOverpay = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(accountAfterOverpay.currentBalance) - (Number(accountAfterExactCash.currentBalance) + 12)) < 0.01, `Overpay-cash MULTI sale posted the wrong ledger amount (change must not be counted as revenue): ${accountAfterOverpay.currentBalance}`);
+
+  // C) Cash + card, both face-value, no change.
+  const cashCardSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CASH', amount: 5 }, { method: 'CARD', amount: 7 }] }),
+  });
+  assert(cashCardSplit.status === 201, `Cash+card MULTI sale failed: ${cashCardSplit.status} ${JSON.stringify(cashCardSplit.body)}`);
+  const cashRow = cashCardSplit.body.payments?.find((p: any) => p.method === 'CASH');
+  const cardRow = cashCardSplit.body.payments?.find((p: any) => p.method === 'CARD');
+  assert(cashRow?.amount === 5 && cardRow?.amount === 7, `Cash+card MULTI sale payment breakdown wrong: ${JSON.stringify(cashCardSplit.body.payments)}`);
+  // Regression for a real bug caught live 2026-08-13: methodLabel() used to
+  // read payments[0].method alone, which was safe when a MULTI sale always
+  // had exactly one MIXED row. Now that split payments create multiple rows,
+  // that picked up whichever tender happened to be inserted first (here:
+  // CARD) and mislabeled the whole sale as a pure CARD sale - verified live
+  // through the actual UI, where a real cash+card split silently vanished
+  // from the Z-report's cash-drawer total because of this exact mislabel.
+  assert(cashCardSplit.body.method === 'MULTI', `Multi-row split sale mislabeled: expected method 'MULTI', got ${JSON.stringify(cashCardSplit.body.method)}`);
+  const accountAfterCashCard = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(accountAfterCashCard.currentBalance) - (Number(accountAfterOverpay.currentBalance) + 12)) < 0.01, `Cash+card MULTI sale posted the wrong ledger total: ${accountAfterCashCard.currentBalance}`);
+
+  // D) Cash + credit split - only the cash portion hits the ledger, only the
+  // credit portion hits the customer's balance (previously the ENTIRE total
+  // was posted as a cash DEBIT for every MULTI sale regardless of a credit
+  // component, overstating cash received and never tracking the debt at all).
+  const balanceBeforeCreditSplit = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  const cashCreditSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CASH', amount: 5 }, { method: 'CREDIT', amount: 7 }] }),
+  });
+  assert(cashCreditSplit.status === 201, `Cash+credit MULTI sale failed: ${cashCreditSplit.status} ${JSON.stringify(cashCreditSplit.body)}`);
+  const balanceAfterCreditSplit = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  assert(Math.abs(balanceAfterCreditSplit - (balanceBeforeCreditSplit + 7)) < 0.01, `Cash+credit MULTI sale did not increment customer balance by the credit portion only: expected +7, got ${balanceAfterCreditSplit - balanceBeforeCreditSplit}`);
+  const accountAfterCashCredit = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(accountAfterCashCredit.currentBalance) - (Number(accountAfterCashCard.currentBalance) + 5)) < 0.01, `Cash+credit MULTI sale posted the wrong ledger amount (must exclude the credit portion): ${accountAfterCashCredit.currentBalance}`);
+
+  // E) Store-credit component excluded from the ledger DEBIT entirely - it
+  // isn't real money (Contact.storeCredit doesn't exist in the schema, this
+  // is unpersisted client-local state, flagged not fixed - see TRACE.md).
+  // Previously this exact scenario posted a phantom cash DEBIT for the full
+  // total even though nothing real was ever received.
+  const pureStoreCreditSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'STORE_CREDIT', amount: 12 }] }),
+  });
+  assert(pureStoreCreditSplit.status === 201, `Pure store-credit MULTI sale failed: ${pureStoreCreditSplit.status} ${JSON.stringify(pureStoreCreditSplit.body)}`);
+  const accountAfterStoreCredit = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(accountAfterStoreCredit.currentBalance) - Number(accountAfterCashCredit.currentBalance)) < 0.01, `Pure store-credit MULTI sale incorrectly posted a cash DEBIT for money never received: before ${accountAfterCashCredit.currentBalance}, after ${accountAfterStoreCredit.currentBalance}`);
+
+  // F) Underpayment rejected (mirrors the register UI's own disable rule on
+  // the "Valider paiement" button: diff < 0 blocks submission client-side).
+  const underpaidSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CASH', amount: 5 }] }),
+  });
+  assert(underpaidSplit.status === 400, `Underpaid MULTI sale was not rejected (${underpaidSplit.status})`);
+
+  // G) Non-cash component exceeding the total rejected - card/credit/store
+  // credit are face-value entries, there's no "change" concept for those rails.
+  const overchargedCardSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CARD', amount: 20 }] }),
+  });
+  assert(overchargedCardSplit.status === 400, `Over-charged card-only MULTI sale was not rejected (${overchargedCardSplit.status})`);
+
+  // H) A credit component with no resolvable customer (true walk-in) rejected -
+  // mirrors the register UI's own "Client comptoir ne peut pas avoir de credit" check.
+  const creditNoCustomerSplit = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'MULTI', status: 'FINAL', splitPayments: [{ method: 'CREDIT', amount: 12 }] }),
+  });
+  assert(creditNoCustomerSplit.status === 400, `Credit-only MULTI sale with no customer was not rejected (${creditNoCustomerSplit.status})`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

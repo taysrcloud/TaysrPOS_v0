@@ -21,6 +21,17 @@ const saleSchema = z.object({
   // resolves and snapshots what that MAD total equals in another currency.
   currencyId: z.coerce.number().int().positive().optional(),
   exchangeRate: z.coerce.number().positive().optional(),
+  // Split-payment breakdown for method: 'MULTI'. Was previously accepted by
+  // the frontend's payload but silently stripped here (a plain z.object()
+  // drops unrecognized keys) - the register recorded one lump Payment row
+  // for the full total under PaymentMethod.MIXED regardless of the actual
+  // cash/card/credit mix a cashier entered, and the Z-report's cash-drawer
+  // reconciliation had no real data to attribute cash correctly. See
+  // TRACE.md's split-payment persistence entry.
+  splitPayments: z.array(z.object({
+    method: z.enum(['CASH', 'CARD', 'CREDIT', 'STORE_CREDIT']),
+    amount: z.coerce.number().positive(),
+  })).optional(),
   items: z.array(z.object({
     productId: z.coerce.number().int().positive(),
     quantity: z.coerce.number().positive(),
@@ -37,6 +48,16 @@ const asNumber = (value: unknown) => value && typeof value === 'object' && 'toNu
 
 const mapMethod = (method: z.infer<typeof saleSchema>['method']): PaymentMethod => {
   if (method === 'MULTI') return PaymentMethod.MIXED;
+  return method as PaymentMethod;
+};
+
+// STORE_CREDIT isn't a real tracked rail yet (Contact.storeCredit doesn't
+// exist in the schema - the register's store-credit balance/top-up is
+// entirely local frontend state, wiped on every refresh; flagged, not
+// fixed, in this pass). MIXED is the most defensible existing enum value
+// for its Payment row: not cash, not card, not a real receivable.
+const mapSplitMethod = (method: 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT'): PaymentMethod => {
+  if (method === 'STORE_CREDIT') return PaymentMethod.MIXED;
   return method as PaymentMethod;
 };
 
@@ -61,6 +82,16 @@ const statusLabel = (sale: any) => {
 };
 
 const methodLabel = (sale: any) => {
+  // Real bug found live 2026-08-13 while verifying the split-payment fix: a
+  // MULTI sale used to always have exactly one Payment row (tagged MIXED), so
+  // reading payments[0].method alone was a safe proxy for "how was this sale
+  // paid". Split-payment persistence now creates one row per tender
+  // component, so payments[0] can be CARD or CREDIT for a sale that was
+  // genuinely split - picking that single row mislabeled the whole sale
+  // (verified live: a 36 MAD cash+card split showed up as a pure 'CARD' sale,
+  // which silently dropped its cash portion from the Z-report's cash-drawer
+  // total). Must check the row count first.
+  if ((sale.payments?.length || 0) > 1) return 'MULTI';
   const method = sale.payments?.[0]?.method;
   if (method === PaymentMethod.CASH) return 'CASH';
   if (method === PaymentMethod.CARD) return 'CARD';
@@ -91,6 +122,11 @@ const normalizeSale = (sale: any) => ({
   foreignTotal: sale.foreignTotal != null ? asNumber(sale.foreignTotal) : null,
   items: sale.items?.reduce((sum: number, item: any) => sum + asNumber(item.quantity), 0) || 0,
   method: methodLabel(sale),
+  // Real per-tender breakdown (was previously unavailable - the register's
+  // client-local `splitPayments` never round-tripped through the API and the
+  // backend never persisted more than one lump payment row for MULTI sales).
+  // Consumed by the Z-report's cash-drawer reconciliation for MULTI sales.
+  payments: sale.payments?.map((p: any) => ({ method: p.method, amount: asNumber(p.amount) })) || [],
   status: statusLabel(sale),
   createdAt: sale.createdAt ? new Date(sale.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Maintenant',
   // Unambiguous ISO 8601 timestamp for date arithmetic (period filters, day
@@ -263,7 +299,40 @@ router.post('/', async (req, res) => {
 
     const shouldFinalize = data.status === 'FINAL';
     const saleStatus = data.status === 'SUSPENDED' ? SaleStatus.SUSPENDED : data.status === 'FINAL' ? SaleStatus.FINAL : SaleStatus.DRAFT;
+    // Note: a MULTI sale with a non-zero credit component is still marked
+    // PAID here (not a real PARTIAL state, which the schema doesn't have).
+    // Contact.balance is the actual source of truth for what's still owed
+    // (same "aggregate, not per-sale" convention the settlement endpoint
+    // already relies on) - the settlement flow at /contacts/:id/settle works
+    // correctly against it regardless of this sale's own status label.
     const paymentStatus = !shouldFinalize ? PaymentStatus.UNPAID : data.method === 'CREDIT' ? PaymentStatus.UNPAID : PaymentStatus.PAID;
+
+    // Split-payment reconciliation for MULTI sales. Raw tendered amounts from
+    // the register can overpay (change due) - only CASH supports that concept
+    // in a real till; CARD/CREDIT/STORE_CREDIT are always face-value entries
+    // (there's no "change" for a card charge). Non-cash components are taken
+    // at face value and validated against total; CASH is the remainder
+    // "plug", capped at what's actually still owed after those - any cash
+    // entered above that is change handed back to the customer, not sale
+    // revenue, and must never become a Payment amount or hit the ledger.
+    let splitPayments: { method: 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT'; amount: number }[] = [];
+    if (shouldFinalize && data.method === 'MULTI') {
+      if (!data.splitPayments?.length) return res.status(400).json({ message: 'Paiement partage sans detail de reglement' });
+      const nonCash = data.splitPayments.filter(p => p.method !== 'CASH');
+      const nonCashSum = nonCash.reduce((sum, p) => sum + p.amount, 0);
+      if (nonCashSum > total + 0.01) {
+        return res.status(400).json({ message: 'Le montant carte/credit/credit magasin depasse le total du ticket' });
+      }
+      const cashOwed = Math.max(0, total - nonCashSum);
+      const cashEntry = data.splitPayments.find(p => p.method === 'CASH');
+      if (cashOwed > 0.01 && (!cashEntry || cashEntry.amount < cashOwed - 0.01)) {
+        return res.status(400).json({ message: 'Paiement insuffisant pour couvrir le total du ticket' });
+      }
+      splitPayments = [
+        ...nonCash,
+        ...(cashOwed > 0.01 ? [{ method: 'CASH' as const, amount: Math.round(cashOwed * 100) / 100 }] : []),
+      ];
+    }
 
     const sale = await prisma.$transaction(async (tx) => {
       const customerName = data.customerName || 'Client comptoir';
@@ -309,7 +378,33 @@ router.post('/', async (req, res) => {
         },
       });
 
-      if (shouldFinalize && data.method !== 'CREDIT') {
+      if (shouldFinalize && data.method === 'MULTI') {
+        for (const split of splitPayments) {
+          await tx.payment.create({ data: { saleId: created.id, method: mapSplitMethod(split.method), amount: split.amount } });
+        }
+        const creditPortion = splitPayments.filter(p => p.method === 'CREDIT').reduce((sum, p) => sum + p.amount, 0);
+        // STORE_CREDIT is excluded from the ledger DEBIT below AND from the
+        // customer receivable here - it isn't real money and isn't (yet) a
+        // real tracked balance either, so it can only be excluded, not
+        // reconciled against anything. See mapSplitMethod's comment.
+        const storeCreditPortion = splitPayments.filter(p => p.method === 'STORE_CREDIT').reduce((sum, p) => sum + p.amount, 0);
+        if (creditPortion > 0) {
+          if (!customer) throw new Error('CREDIT_REQUIRES_CUSTOMER');
+          await tx.contact.update({ where: { id: customer.id }, data: { balance: { increment: creditPortion } } });
+        }
+        // Track D auto-posting: only the portion actually received as
+        // cash/card moves into the ledger - the credit portion isn't cash
+        // (tracked instead via customer.balance above), and the store-credit
+        // portion was never real money to begin with (previously this whole
+        // branch posted the FULL total as a cash DEBIT even for a
+        // store-credit-only sale, corrupting the real "Caisse" account with
+        // phantom cash that was never received - see TRACE.md).
+        const receivedPortion = Math.max(0, total - creditPortion - storeCreditPortion);
+        if (receivedPortion > 0) {
+          const account = await getOrCreateCashAccount(tx, companyId, location.id);
+          await postCashTransaction(tx, account, 'DEBIT', receivedPortion, `SALE-${created.id}`, created.ticketNumber ?? undefined);
+        }
+      } else if (shouldFinalize && data.method !== 'CREDIT') {
         await tx.payment.create({ data: { saleId: created.id, method: mapMethod(data.method), amount: total } });
         // Track D auto-posting, increment 3: real cash/card/bank payment
         // received now - CREDIT sales post nothing here (handled below via
@@ -357,6 +452,7 @@ router.post('/', async (req, res) => {
     if (error instanceof z.ZodError) return res.status(400).json({ message: 'Ticket invalide', errors: error.issues });
     if (error?.message === 'VARIATION_NOT_FOUND') return res.status(400).json({ message: 'Une declinaison du panier est inactive ou introuvable' });
     if (error?.message === 'CUSTOMER_NOT_FOUND') return res.status(404).json({ message: 'Client introuvable' });
+    if (error?.message === 'CREDIT_REQUIRES_CUSTOMER') return res.status(400).json({ message: 'Le client comptoir ne peut pas avoir de credit' });
     console.error('Sale create error:', error);
     res.status(500).json({ message: 'Erreur lors de la validation du ticket' });
   }

@@ -1051,3 +1051,148 @@ intentionally for future manual exploration.
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.
 - Fix: normalize module arrays/objects in login and auth middleware, derive effective Restaurant visibility from entitlement plus tenant activation, protect /api/restaurant with requireModule, and reject unauthorized activation in PUT /api/settings.
 - Product rule: Super Admin grants RESTAURANT; an entitled tenant Admin/Manager may enable or disable it for their workspace. Non-entitled users never see the option.
+
+## 2026-08-13 - renderRegister extraction: measured, then deliberately deferred (not started)
+
+- Began the fourth Phase 1 page extraction per explicit user instruction ("Continue now, both" -
+  approving Kitchen/Reports and Register in the same session). Read `renderRegister` in `main.tsx`
+  (confirmed boundary: starts line 1958, ends before `renderProducts` at line 2690 - ~732 lines) and
+  read the first third of its body (lines 1958-2207) to inventory its dependencies before writing any
+  extraction code, the same discipline used for the three prior successful extractions.
+- **Measurement that changed the plan:** that first third alone already touches 40+ distinct pieces of
+  App state/handlers - register open/close, location/table selectors, the full command-bar button row
+  (Z-report, cash movements, cancel/clear, calculator, customer display, fullscreen), the customer/search/
+  catalog workflow chips, the cart table with permission-gated price/discount editing, totals breakdown,
+  suspend/draft/quote action chips, and a store-credit top-up modal - versus 4 fields for the Kitchen
+  extraction and 10 for Reports (`##2026-08-13 Phase 1: extracted renderKitchen and renderReports`
+  above). The remaining two-thirds of the function (payment modal, split payment across methods, credit
+  settlement, receipt/kitchen routing) was not yet read, but extrapolating from the first third, the full
+  `PosContextValue` surface for this one page is plausibly 80-120 fields.
+- Stopped here and consulted before writing any code (not a "ran out of time" stop - a deliberate
+  risk call). Reasoning against proceeding this session:
+  1. The safety property that made Kitchen/Reports low-risk - `usePos()` destructuring the *same
+     identifier names* used as closures in `main.tsx`, so a wrong reference is a compile error - degrades
+     as the field count grows. With ~100 same-typed fields (multiple `(v: string) => void` setters,
+     multiple `number` totals like `cartSubtotal`/`cartLineDiscount`/`cartTax`/`cartTotal`), a swap
+     between two same-typed fields still typechecks clean. `tsc` catches a missing prop, not a swapped
+     one - this exact risk is already written into this file's own Phase 1 section, and it scales
+     directly with field count.
+  2. The headless-browser verification loop used all session has a demonstrated ceiling: three separate
+     selector/assertion bugs this session were only caught by screenshot inspection, not the script's own
+     assertion (ADMIN-vs-CASHIER checkbox mis-click during Track E verification; a `sidebar` vs `tab`
+     click-target mixup; a case-sensitivity text-match miss during Kitchen verification). Those were
+     harmless on Settings toggles. Verifying the Register page combinatorially - split payment across
+     four methods, credit settlement, price-override permission gating, the kitchen auto-suspend
+     `document.getElementById`+`setTimeout` interaction, suspend/resume round-trip, Z-report - by
+     DOM-scripting alone is a materially bigger job than the extraction itself, and this is the one page
+     in the app where an unverified silent bug costs real money (per this file's own repeated framing all
+     session).
+  3. The user's "Continue now, both" approval was given before this measurement existed - the estimate at
+     the time was "two extractions, the second one bigger," not "40+ deps in a third of the file, ~100
+     projected total." Surfacing the actual number and recommending deferral is giving the user the input
+     they'd have needed to make the same call, not overriding their instruction.
+- **No edits made to `main.tsx` for this piece.** `git status` confirmed clean before writing this entry.
+  Task #24 stays pending in the task tracker with this file as the record of why.
+- **Real blocker going forward is no longer "no browser" (resolved 2026-08-12) - it's "no functional
+  test coverage for the cart/payment math."** The concrete unblocking path: add cart-math and
+  payment-flow coverage to `backend/scripts/tenant-isolation-smoke.ts` (or an equivalent frontend-logic
+  test) *before* attempting this extraction, so a swapped-field regression fails a test instead of
+  waiting to be caught in production. If a future session wants to make progress on this page without
+  that prerequisite, the lower-risk partial move is extracting the self-contained modals inside
+  `renderRegister` (variable-product picker, store-credit top-up, suspend-ticket modal) as standalone
+  components with explicit props - each is small and independently verifiable - while leaving the actual
+  cart-math and payment core inside `main.tsx` untouched until it has test coverage.
+
+## 2026-08-13 - Split-payment persistence: a real bug cluster found building the renderRegister test-coverage prerequisite
+
+Per the previous entry's own recommendation ("add cart-math/payment-flow assertions to
+tenant-isolation-smoke.ts... before attempting this extraction"), started there instead of the
+extraction itself. Reading the actual payment-submission path (`salePayload`/`completeSale` in
+`main.tsx`, `POST /api/sales` in `sale.routes.ts`) to write realistic assertions surfaced a real,
+previously-undiscovered, multi-part bug in split/MULTI payments - not a hypothetical risk, a live one.
+
+**Bug 1 - split payments were never persisted at all.** The register already collected a real
+cash/card/credit breakdown (`paymentForm`) and sent it as `payload.splitPayments` on every MULTI
+checkout. `saleSchema` never declared that field, and a plain `z.object()` silently strips unrecognized
+keys (no error) - so every split-payment sale, ever, recorded exactly one `Payment` row for the full
+total under `PaymentMethod.MIXED`, with zero record of the actual tender mix.
+**Bug 2 - the Z-report's cash-drawer reconciliation returned 0 for the cash portion of every MULTI
+sale**, not because it lacked data (it had none to lack) but because its own `reduce` only had a branch
+for `s.method === 'CASH'` and silently fell through to `return sum` for `'MULTI'`. Every split-payment
+sale a cashier ever closed out under-counted the till's expected cash by exactly its real cash portion.
+
+**Fix (`backend/src/routes/sale.routes.ts`):** `saleSchema` gained an optional `splitPayments` array.
+Reconciliation logic added before the transaction, informed by reading the actual payment-modal UI
+(`frontend/src/main.tsx` ~2300-2360) rather than assuming: CASH is the only tender with a real "change"
+concept (the UI explicitly allows overpaying in cash and shows change due), so CARD/CREDIT/STORE_CREDIT
+are taken at face value and validated against `total`, while CASH is the remainder "plug" capped at
+what's actually still owed - cash entered above that is change handed back, never sale revenue, and is
+now never recorded as a Payment amount or posted to the ledger (verified live: a 20 MAD cash tender
+against a 12 MAD total records a `Payment` of exactly 12, not 20). One `Payment` row is now created per
+real tender component instead of one lump MIXED row. The ledger DEBIT is `total - creditPortion -
+storeCreditPortion` (previously always the full `total`, regardless of how much was actually credit or
+fake store-credit) - closes a real ledger-corruption case: a MULTI sale with a credit or store-credit
+component used to post the ENTIRE total as cash received, even for a sale where zero real cash/card
+money changed hands. `normalizeSale` now returns the real `payments` breakdown so the frontend Z-report
+has real data to read instead of client-local optimistic state that never survived a page reload.
+
+**STORE_CREDIT handling, deliberately scoped down after advisor review:** `Contact.storeCredit` does
+not exist anywhere in the schema - the register's store-credit balance/top-up
+(`topupContact`/`topupAmount`, `contact.storeCredit`) is entirely local frontend state that `contact.
+routes.ts` always reports as `0`, wiped on every refresh. The first draft of this fix rejected
+STORE_CREDIT split components outright as "an honest failure" - wrong: a live UI code-path (storeCredit
+alone, or storeCredit mixed with cash) already sends it today and currently completes (wrongly, but
+completes) via the pre-fix lump-MIXED path; rejecting it would have turned that into a hard checkout
+failure with a full cart and no way forward, a live-register regression introduced by a hardening pass.
+Corrected: STORE_CREDIT is accepted, recorded as a `Payment` row (mapped to `PaymentMethod.MIXED`, code
+comment marks it as not a real tracked rail), and excluded from the ledger DEBIT - closes the "phantom
+cash for money never received" case without touching whether checkout succeeds. Building real
+STORE_CREDIT persistence (a `Contact.storeCredit` field + redemption endpoint) is a separate feature,
+correctly out of scope here, and is now flagged explicitly rather than silently left broken.
+
+**Bug 3 - found live, not in the smoke suite, while verifying the fix through the real UI (not just the
+API):** `methodLabel()` derived a sale's overall payment-method label from `sale.payments?.[0]?.method`
+alone. That was safe when a MULTI sale always had exactly one row (tagged MIXED). Once split payments
+create one row per tender, `payments[0]` is just whichever component the transaction happened to insert
+first (non-cash components before the cash "plug", per the fix above) - so a genuine cash+card split
+came back labeled `'CARD'`, not `'MULTI'`. Caught by running an actual checkout through the headless
+browser (admin/admin123, demo tenant `pos-v0-demo`, product "Cafe Expresso" temporarily stocked to 100
+- see below) with a real 20 MAD cash + 16 MAD card split (36 MAD total, 2 units): the Z-report's "Ventes
+espèces" figure came back 138 MAD instead of the independently-computed correct 158 MAD, a 20 MAD gap
+matching the split sale's cash portion exactly. Root-caused to the mislabel, fixed by checking
+`payments.length > 1` before inspecting a single row. Re-verified live after the fix: Z-report showed
+158 MAD, matching a hand-computed sum across every real PAID sale in the tenant. This is exactly the
+class of bug the previous entry warned the headless-browser loop has a ceiling on - the smoke suite's
+own assertions (which checked the `payments` array's contents but never `body.method` on a multi-row
+sale) would not have caught it; only the live click-through did. A regression assertion for this
+specific case (`cashCardSplit.body.method === 'MULTI'`) is now in the smoke suite so it can't regress
+silently again.
+
+**Bug 4 - found, flagged, deliberately NOT fixed in this pass:** the Z-report's "current shift" filter
+(`shiftSales = sales.filter(s => s.status === 'Payee' && s.id >= registerDetails.openedId)`) compares a
+`Sale.id` against `registerDetails.openedId`, which is actually a `CashRegisterSession.id` (confirmed by
+reading where `openedId` is set - `session.id` at two call sites in `main.tsx`). These are two entirely
+unrelated auto-increment sequences. Confirmed live against the demo tenant: the open session's id is 1,
+every real sale's id is 34-158, so the filter `s.id >= 1` matches literally every sale the tenant has
+ever recorded, not just the current shift - the Z-report's cash-drawer reconciliation is not bounded by
+shift at all in this tenant, and will not be bounded correctly in any real deployment either, since a
+sale's id and a register session's id have no relationship. This is a distinct root cause from bugs 1-3
+above (a real shift boundary needs either `CashRegisterSession.openedAt` compared against a sale's
+`createdAtISO`, or a `Sale.registerSessionId` FK - not a small change) and was out of the scope the
+advisor set for this pass. Flagged here for a deliberate decision, not silently left for the next person
+to rediscover.
+
+**Verification:** 8 new smoke-suite assertions (exact cash tender, cash overpayment excluded from the
+ledger as change, cash+card split rows and ledger sum, cash+credit split dividing correctly between the
+ledger DEBIT and the customer's balance, store-credit excluded from the ledger DEBIT, underpayment
+rejected, non-cash-exceeding-total rejected, credit-with-no-customer rejected) plus the `methodLabel`
+regression assertion above - 9 total, all passing, full suite (43 assertions now) passing twice in a row
+with zero orphaned rows. Backend and frontend `tsc --noEmit` clean, frontend `vite build` clean. Live
+verification through the actual rendered UI (not just the API) as described above, including catching
+and fixing bug 3, which the API-level smoke suite alone would have missed. Demo-tenant side effects
+(`Cafe Expresso` stock temporarily raised to 100 to have enough units to sell) reverted to its original
+value (-12) afterward; the one real sale created during live verification (36 MAD, ticket TCK-5389262)
+was left in the demo tenant's history, consistent with how that tenant has been used as a working
+scratch environment all session (unlike the boolean-setting reverts done for earlier verification
+passes, unwinding a real finalized sale's stock/ledger/payment rows is not a simple revert and this
+demo company already carries other test activity from earlier today).

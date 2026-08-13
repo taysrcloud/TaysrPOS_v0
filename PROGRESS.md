@@ -654,3 +654,33 @@ Each time a meaningful block is finished:
   succeeds. Full writeup in TRACE.md.
 - Register (the POS cart) deliberately not touched this pass - sequenced as its own dedicated,
   carefully-verified pass given the real-money stakes.
+
+## 2026-08-13 - renderRegister extraction measured and deferred; split-payment persistence fixed as its test-coverage prerequisite
+
+- Started the Register extraction per explicit approval, measured its real dependency surface (40+
+  App-state/handler dependencies in just the first third of the 732-line function, vs. 4 for Kitchen and
+  10 for Reports), and stopped deliberately rather than proceed - the same-identifier-name safety net
+  that made the smaller extractions low-risk degrades at that field count, and this is the one page
+  where a silent bug moves real money. No edits made to `main.tsx` for the extraction itself.
+- Built the recommended prerequisite instead (cart/payment test coverage) and it surfaced a real, live
+  bug cluster, not a hypothetical one: `POST /api/sales` silently dropped the register's real
+  cash/card/credit split (an unrecognized zod key stripped with no error), so every split-payment sale
+  ever recorded one lump payment for the full total under a generic "mixed" tag with no real tender
+  data - and the Z-report's cash-drawer reconciliation, which needed exactly that data, always counted 0
+  cash for any split-payment sale. Fixed: real per-tender payment records, cash overpayment (change)
+  correctly excluded from revenue and the ledger, a cash+credit split correctly divides between the
+  ledger and the customer's balance, store-credit (a pre-existing, never-persisted feature - flagged
+  separately, not built) excluded from the ledger without breaking checkout.
+- A second real bug was caught only by running an actual checkout through the headless browser, not by
+  the API-level test suite: a sale's payment-method label was derived from its first payment record
+  alone, which mislabeled a genuine cash+card split and silently dropped its cash portion from the
+  Z-report - fixed, with a regression test added.
+- A third, unrelated, real bug was found and deliberately left unfixed: the Z-report's "current shift"
+  boundary compares two unrelated ID sequences and doesn't actually bound anything in practice - flagged
+  for a decision, needs its own fix (a real timestamp or session-link boundary).
+- 9 new smoke-suite assertions (43 total), full suite passes twice in a row. Both workspaces typecheck
+  and build clean. Verified live end-to-end through the real UI, including reverting the one demo-tenant
+  side effect (temporary stock top-up) afterward. Full writeup in TRACE.md.
+- **The Register extraction itself is still not started** - this closes its stated prerequisite in a
+  separate commit, per the deliberate choice not to bundle a payment-path correctness fix with a
+  structural refactor of the same code.

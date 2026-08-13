@@ -208,6 +208,12 @@ export type SaleRecord = {
   createdAtISO?: string;
   lines?: SaleLine[];
   splitPayments?: { method: PaymentMethod; amount: number }[];
+  // Real per-tender breakdown returned by the backend (GET/POST /api/sales) -
+  // distinct from splitPayments above, which is optimistic client-local state
+  // set only by localSaleFromCart and never sent back by a real API response.
+  // Added so the Z-report can attribute the cash portion of a MULTI sale
+  // correctly instead of treating it as zero. See TRACE.md.
+  payments?: { method: PaymentMethod; amount: number }[];
   referenceNote?: string;
   kitchenStatus?: 'PENDING' | 'READY';
   locationId?: number;
@@ -2543,9 +2549,18 @@ const App = () => {
 
       {zReportModalOpen && (() => {
         const shiftSales = sales.filter(s => s.status === 'Payee' && s.id >= registerDetails.openedId);
-        const cashSalesToday = shiftSales.filter(s => s.method === 'CASH' || s.method === 'MULTI').reduce((sum, s) => {
+        // A MULTI sale used to contribute 0 here regardless of how much of it
+        // was actually cash - the till would look short by exactly the cash
+        // portion of every split-payment sale on every closing. Now reads the
+        // real per-tender breakdown from the backend (`payments`, added
+        // alongside the split-payment persistence fix - see TRACE.md).
+        const cashSalesToday = shiftSales.reduce((sum, s) => {
           if (s.method === 'CASH') return sum + s.total;
-          return sum; 
+          if (s.method === 'MULTI') {
+            const cashPortion = (s.payments || []).filter(p => p.method === 'CASH').reduce((a, p) => a + p.amount, 0);
+            return sum + cashPortion;
+          }
+          return sum;
         }, 0);
         const cashExpensesToday = expenses.reduce((sum, e) => sum + e.amount, 0);
         const cashInToday = cashMovements.filter(m => m.type === 'IN').reduce((sum, m) => sum + m.amount, 0);
