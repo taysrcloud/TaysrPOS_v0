@@ -167,9 +167,29 @@ model User {
   cashSessions   CashRegisterSession[]
   attendances    Attendance[]
   dashboardConfigurations DashboardConfiguration[]
+  permissions    UserPermission[]
 
   @@unique([companyId, username])
   @@unique([companyId, email])
+}
+
+// Track E (2026-08-13): per-user permission overrides on top of the existing
+// UserRole presets, not a replacement for them. Empty by default - a user
+// with zero rows here gets exactly today's requireRole() behavior. An ADMIN
+// can grant or revoke one specific action for one specific user without
+// touching the role system at all. Deliberately NOT a full per-action matrix
+// (see TRACE.md for the reasoning) - this is the smallest thing that lets a
+// real store say "this cashier can also do X" without rebuilding auth.
+model UserPermission {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String
+  granted   Boolean
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, action])
 }
 
 model Location {

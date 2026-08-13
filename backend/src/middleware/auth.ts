@@ -109,6 +109,36 @@ export const requireRole = (allowedRoles: UserRole[]) => {
     next();
   };
 };
+
+// Track E: per-user overrides on top of the role presets above, not a
+// replacement for them (see the UserPermission model comment in
+// schema.prisma for the full reasoning). DEFAULT_ROLE_PERMISSIONS is the
+// action's fallback behavior when a user has no override row - keep every
+// entry identical to what the equivalent requireRole([...]) call already
+// enforces, so migrating a route from requireRole to requirePermission is a
+// no-op for every user until an ADMIN actually grants or revokes something.
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, UserRole[]> = {
+  'devices.manage': ['ADMIN', 'MANAGER'],
+};
+
+export const requirePermission = (action: string) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+
+    const override = await prisma.userPermission.findUnique({
+      where: { userId_action: { userId: req.user.userId, action } },
+    });
+    if (override) {
+      if (override.granted) return next();
+      return res.status(403).json({ message: `Forbidden: permission '${action}' has been revoked for this user` });
+    }
+
+    const allowedRoles = DEFAULT_ROLE_PERMISSIONS[action] || [];
+    if (allowedRoles.includes(req.user.role)) return next();
+    return res.status(403).json({ message: `Forbidden: missing permission '${action}'` });
+  };
+};
+
 export interface DeviceRequest extends Request {
   device?: {
     id: number;

@@ -581,10 +581,62 @@ try {
   const pullAfterRevoke = await rawRequest(`/sync/pull?last_sync=0`, {}, deviceToken2);
   assert(pullAfterRevoke.status === 401, `Revoked device token still worked on sync/pull (${pullAfterRevoke.status})`);
 
+  // ── Track E: per-user permission overrides on top of role presets (2026-08-13) ──
+
+  const cashierPasswordHash = await bcrypt.hash('Smoke123!', 4);
+  const cashierUser = await prisma.user.create({
+    data: { companyId: a.company.id, username: `smoke-cashier-${marker}`, email: `smoke-cashier-${marker}@test.local`, passwordHash: cashierPasswordHash, fullName: 'Smoke Cashier', role: 'CASHIER' },
+  });
+  const cashierToken = jwt.sign({ userId: cashierUser.id, username: cashierUser.username, companyId: a.company.id, role: cashierUser.role }, secret, { expiresIn: '10m' });
+
+  const cashierDenied = await request('/settings/devices', cashierToken);
+  assert(cashierDenied.status === 403, `CASHIER should be denied devices.manage by role default (${cashierDenied.status})`);
+
+  const emptyOverrides = await request(`/settings/permissions/${cashierUser.id}`, a.token);
+  assert(emptyOverrides.status === 200 && Array.isArray(emptyOverrides.body) && emptyOverrides.body.length === 0, `New user should have zero permission overrides: ${JSON.stringify(emptyOverrides.body)}`);
+
+  // A non-ADMIN (CASHIER here) must never be able to manage permissions,
+  // even its own - this is the un-overridable backstop against a user
+  // granting itself more access.
+  const cashierSelfGrant = await request(`/settings/permissions/${cashierUser.id}`, cashierToken, { method: 'PUT', body: JSON.stringify({ action: 'devices.manage', granted: true }) });
+  assert(cashierSelfGrant.status === 403, `Non-ADMIN was able to call the permission-management endpoint (${cashierSelfGrant.status})`);
+
+  // Cross-tenant: tenant B's admin cannot manage tenant A's user permissions.
+  const crossGrant = await request(`/settings/permissions/${cashierUser.id}`, b.token, { method: 'PUT', body: JSON.stringify({ action: 'devices.manage', granted: true }) });
+  assert(crossGrant.status === 404, `Cross-tenant permission grant was not rejected (${crossGrant.status})`);
+
+  const grant = await request(`/settings/permissions/${cashierUser.id}`, a.token, { method: 'PUT', body: JSON.stringify({ action: 'devices.manage', granted: true }) });
+  assert(grant.status === 200 && grant.body.granted === true, `Permission grant failed: ${grant.status} ${JSON.stringify(grant.body)}`);
+
+  const cashierAllowed = await request('/settings/devices', cashierToken);
+  assert(cashierAllowed.status === 200, `CASHIER with an explicit grant should now pass devices.manage (${cashierAllowed.status})`);
+
+  const listedOverrides = await request(`/settings/permissions/${cashierUser.id}`, a.token);
+  assert(listedOverrides.status === 200 && listedOverrides.body.some((o: any) => o.action === 'devices.manage' && o.granted === true), `Granted override not listed: ${JSON.stringify(listedOverrides.body)}`);
+
+  // An explicit granted:false override must block a role that would
+  // otherwise pass by default - not just fail to grant beyond the role.
+  const denyOverride = await request(`/settings/permissions/${a.user.id}`, a.token, { method: 'PUT', body: JSON.stringify({ action: 'devices.manage', granted: false }) });
+  assert(denyOverride.status === 200 && denyOverride.body.granted === false, `Explicit deny override failed: ${denyOverride.status}`);
+  const adminNowDenied = await request('/settings/devices', a.token);
+  assert(adminNowDenied.status === 403, `ADMIN should be blocked by an explicit deny override even though role would normally allow it (${adminNowDenied.status})`);
+  const undoAdminDeny = await request(`/settings/permissions/${a.user.id}/devices.manage`, a.token, { method: 'DELETE' });
+  assert(undoAdminDeny.status === 200, `Removing the ADMIN deny override failed: ${undoAdminDeny.status}`);
+  const adminRestored = await request('/settings/devices', a.token);
+  assert(adminRestored.status === 200, `ADMIN should regain access once the deny override is removed (${adminRestored.status})`);
+
+  const revokeOverride = await request(`/settings/permissions/${cashierUser.id}/devices.manage`, a.token, { method: 'DELETE' });
+  assert(revokeOverride.status === 200, `Permission revoke failed: ${revokeOverride.status}`);
+  const cashierDeniedAgain = await request('/settings/devices', cashierToken);
+  assert(cashierDeniedAgain.status === 403, `CASHIER should be denied again after override removal (${cashierDeniedAgain.status})`);
+
+  const actionsList = await request('/settings/permissions/actions', a.token);
+  assert(actionsList.status === 200 && actionsList.body.actions.some((entry: any) => entry.action === 'devices.manage'), `Permission actions list missing devices.manage: ${JSON.stringify(actionsList.body)}`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

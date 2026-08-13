@@ -577,3 +577,17 @@ Each time a meaningful block is finished:
   now, up from 29). Also fixed an unrelated regression hit along the way: yesterday's Prisma version bump
   broke this environment's `db push` workaround in a way that needed a one-line env-var fix. Full
   writeup in TRACE.md.
+
+## 2026-08-13 - Track E: per-user permission overrides (the recommended hybrid model)
+
+- Built exactly what was recommended and approved: the 6 role presets stay untouched, plus a sparse
+  `UserPermission` override table an ADMIN can use to grant or revoke one action for one user. Zero
+  regression risk - empty by default, identical to today's behavior until an override exists. Migrated
+  one real call site as proof (the Track G device-management endpoints), not all ~25 at once - that
+  big-bang rewrite was explicitly identified as the highest-risk move available, so further migrations
+  wait for real per-store need rather than happening preemptively.
+- Deliberate backstop: managing overrides is itself ADMIN-only and not itself overridable, closing off a
+  privilege-escalation loop where a granted user could hand out more access.
+- Verified live: default role denial, grant, revoke, cross-tenant rejection, and the sharper case of an
+  explicit deny overriding a role that would normally pass. 32 assertions now (up from 31), full suite
+  clean twice in a row, both workspaces typecheck clean. Full writeup in TRACE.md.

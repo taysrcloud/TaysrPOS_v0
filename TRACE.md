@@ -826,6 +826,48 @@ intentionally for future manual exploration.
   Admin UI in Settings for the new activation-code endpoints (API-only, matching this session's
   established pattern of shipping backend-first, UI later once browser-available sessions pick it up).
 
+## 2026-08-13 - Track E: per-user permission overrides on top of role presets
+
+- Implemented exactly the hybrid model recommended and explicitly approved by the user, not the full
+  UltimatePOS-style permission matrix the project's own original docs warned against building: the 6
+  `UserRole` presets stay completely unchanged, and a new sparse `UserPermission { userId, action,
+  granted }` table lets an ADMIN grant or revoke one specific action for one specific user without
+  touching the role system. Empty by default - a user with zero override rows gets exactly today's
+  `requireRole()` behavior, so the mechanism is zero-regression-risk to introduce.
+- `requirePermission(action)` middleware checks the override table first (explicit grant or explicit
+  deny both short-circuit), then falls back to a `DEFAULT_ROLE_PERMISSIONS` map keyed by action.
+  Deliberately did **not** retrofit all ~25 existing `requireRole()` call sites at once - that was the
+  identified highest-regression-risk move available in this codebase (hundreds of gated actions, no
+  visual UI, one wrong swap silently grants or denies the wrong thing). Instead migrated exactly one
+  real call site as the first concrete usage and end-to-end proof: the three device-management endpoints
+  (`POST/GET/DELETE /api/settings/devices`) built earlier today for Track G, chosen because it's low
+  business risk (activation codes, not money) and something a store owner might plausibly want to
+  delegate to a trusted non-admin employee. `DEFAULT_ROLE_PERMISSIONS['devices.manage'] =
+  ['ADMIN','MANAGER']` reproduces the exact `requireRole(['ADMIN','MANAGER'])` behavior it replaced, so
+  nothing changes for any existing user until an ADMIN actually creates an override.
+- **Deliberate backstop against privilege escalation:** the permission-*management* endpoints themselves
+  (`GET/PUT/DELETE /api/settings/permissions/...`) are gated with `requireRole(['ADMIN'])` directly, not
+  `requirePermission()`. Letting that be delegated would let a MANAGER (or anyone granted any permission)
+  grant themselves more access - the role system stays the un-overridable root of trust for who can hand
+  out overrides, even though overrides can now bypass the role system everywhere else.
+- Verified live end-to-end against the real dev DB: a CASHIER correctly denied by role default, granted
+  access via an explicit override, verified working, then denied again after the override was removed. A
+  non-ADMIN (the CASHIER) correctly blocked from calling the permission-management endpoints at all, even
+  to grant itself something. Cross-tenant: one company's ADMIN cannot manage another company's user
+  permissions (404). The sharper case - an explicit `granted: false` override blocking an ADMIN from an
+  action their role would normally allow, then restoring access once the override is removed - also
+  verified live, since a grant-only override system wouldn't actually prove the override table is
+  checked *before* the role fallback rather than just supplementing it.
+- Locked into `tenant-isolation-smoke.ts` as a new block (32 assertions total, up from 31). Full suite
+  passes twice in a row with zero orphaned rows (the new `UserPermission` rows cascade-delete via `User`
+  the same way `Device` rows cascade via `Company`/`Location`). Both workspaces' `tsc` clean. Schema
+  change is additive only (`db push` succeeded without needing `--accept-data-loss` this time - no
+  existing table's shape changed).
+- **Not done, by design:** no other route was migrated from `requireRole` to `requirePermission` yet.
+  The mechanism is real and proven, but per the same reasoning that ruled out a big-bang rewrite,
+  further migrations should happen action-by-action, only where a real store has actually asked for
+  finer control than its current role grants - not preemptively.
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.

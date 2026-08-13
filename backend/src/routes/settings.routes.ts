@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
-import { requireAuth, requireRole, AuthRequest, hasModuleAccess } from '../middleware/auth.js';
+import { requireAuth, requireRole, requirePermission, DEFAULT_ROLE_PERMISSIONS, AuthRequest, hasModuleAccess } from '../middleware/auth.js';
 
 const router = Router();
 const settingsSchema = z.record(z.string(), z.any());
@@ -14,7 +14,7 @@ const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const generateActivationCode = () =>
   Array.from({ length: 8 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join('');
 
-router.post('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+router.post('/devices', requireAuth, requirePermission('devices.manage'), async (req: AuthRequest, res, next) => {
   try {
     const locationId = Number(req.body?.locationId);
     if (!Number.isInteger(locationId)) return res.status(400).json({ message: 'locationId requis' });
@@ -34,7 +34,7 @@ router.post('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (r
   } catch (error) { next(error); }
 });
 
-router.get('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+router.get('/devices', requireAuth, requirePermission('devices.manage'), async (req: AuthRequest, res, next) => {
   try {
     const devices = await prisma.device.findMany({
       where: { companyId: req.user!.companyId },
@@ -55,7 +55,7 @@ router.get('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (re
   } catch (error) { next(error); }
 });
 
-router.delete('/devices/:id', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+router.delete('/devices/:id', requireAuth, requirePermission('devices.manage'), async (req: AuthRequest, res, next) => {
   try {
     const id = Number(req.params.id);
     const device = await prisma.device.findFirst({ where: { id, companyId: req.user!.companyId } });
@@ -118,6 +118,52 @@ router.put('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: Auth
       },
     });
     res.json({ success: true, companyId: company.id, settings: company.settings });
+  } catch (error) { next(error); }
+});
+
+// Track E: managing overrides is itself gated by requireRole(['ADMIN']) directly,
+// not requirePermission - letting this be delegated would let a MANAGER grant
+// themselves (or anyone) more access, a privilege-escalation loop the role
+// system is deliberately kept as the un-overridable backstop against.
+
+router.get('/permissions/actions', requireAuth, requireRole(['ADMIN']), async (_req: AuthRequest, res) => {
+  res.json({ actions: Object.entries(DEFAULT_ROLE_PERMISSIONS).map(([action, roles]) => ({ action, defaultRoles: roles })) });
+});
+
+router.get('/permissions/:userId', requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res, next) => {
+  try {
+    const userId = Number(req.params.userId);
+    const user = await prisma.user.findFirst({ where: { id: userId, companyId: req.user!.companyId } });
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+    const overrides = await prisma.userPermission.findMany({ where: { userId }, orderBy: { action: 'asc' } });
+    res.json(overrides.map(o => ({ action: o.action, granted: o.granted })));
+  } catch (error) { next(error); }
+});
+
+const permissionSchema = z.object({ action: z.string().min(1), granted: z.boolean() });
+
+router.put('/permissions/:userId', requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res, next) => {
+  try {
+    const userId = Number(req.params.userId);
+    const user = await prisma.user.findFirst({ where: { id: userId, companyId: req.user!.companyId } });
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+    const { action, granted } = permissionSchema.parse(req.body);
+    const override = await prisma.userPermission.upsert({
+      where: { userId_action: { userId, action } },
+      create: { userId, action, granted },
+      update: { granted },
+    });
+    res.json({ action: override.action, granted: override.granted });
+  } catch (error) { next(error); }
+});
+
+router.delete('/permissions/:userId/:action', requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res, next) => {
+  try {
+    const userId = Number(req.params.userId);
+    const user = await prisma.user.findFirst({ where: { id: userId, companyId: req.user!.companyId } });
+    if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+    await prisma.userPermission.deleteMany({ where: { userId, action: String(req.params.action) } });
+    res.json({ success: true });
   } catch (error) { next(error); }
 });
 
