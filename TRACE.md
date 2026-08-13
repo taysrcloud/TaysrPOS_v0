@@ -1196,3 +1196,87 @@ was left in the demo tenant's history, consistent with how that tenant has been 
 scratch environment all session (unlike the boolean-setting reverts done for earlier verification
 passes, unwinding a real finalized sale's stock/ledger/payment rows is not a simple revert and this
 demo company already carries other test activity from earlier today).
+
+## 2026-08-13 - RegisterPage extraction: the full dependency audit and the move itself
+
+With the split-payment prerequisite committed (`ca2e3e7`) and the test suite green, resumed the
+`renderRegister` extraction per explicit user approval ("Proceed now"). Finished the full-body read
+(the earlier entry had only read the first third) and then, before writing any code, audited every
+free identifier the function references against the *entire* file - not just a sample - specifically
+because the previous entry's whole concern was that a same-typed-field swap between two of the ~90
+candidates would pass `tsc` silently.
+
+**Audit method:** for every candidate identifier, `grep -n '\bidentifier\b' main.tsx`, filter to hits
+outside the `renderRegister` line range, and check **both the bare name and its setter** (e.g.
+`topupContact` and `setTopupContact` separately) - the bare-name check alone missed real cases. Concrete
+example: `topupContact`/`topupAmount` looked register-exclusive by bare name (only the declaration line
+outside range), but the Contacts page's "Recharger" button calls `setTopupContact(contact)` directly -
+a bare-name-only audit would have relocated this state into `RegisterPage.tsx` as page-local, silently
+breaking that button on a completely different, unrelated page the first time someone clicked it. Caught
+before any code was written by checking every setter's outside-range usage too. `actualCash` was a
+similar near-miss for a different reason: bare-name hits at lines 267/386-387 turned out to be a
+same-named field on the unrelated `RegisterHistory` type (false positive), but a real hit at the credit-
+settlement flow on the Contacts page (`setActualCash` bumping the register's counted-cash figure when a
+customer pays down credit from that page) confirmed it genuinely must thread, not relocate.
+
+**Result of the audit - two categories, not one:**
+- **Relocated to `RegisterPage.tsx` as page-local state** (confirmed zero usage anywhere else in the
+  file, bare name and setter both): the calculator (`calcOpen/calcDisplay/calcPrev/calcOp` + the
+  `calcPress` function, previously a sibling closure defined *after* `renderRegister`), the Z-report's
+  denomination counter, the cash-movement form, the line-price-override form, the open-register form, the
+  payment/cash-movement/z-report modal-open booleans, `suspendType` (but not `suspendNote` - see below),
+  `selectedCategory` (with `registerProducts` now computed locally from context's `visibleProducts` +
+  `search` + local `selectedCategory`), and the entire Transactions-modal cluster
+  (`transactionsTab`/`transactionTabs`/`currentTransactions`/`currentTransactionsTotal`/
+  `currentTransactionsDue`/`latestSuspendedSale` - `transactionsModalOpen` itself still threads, since
+  `resumeSale` in `App` closes it on resume). Also found and dropped one genuinely dead variable in the
+  same cluster, `latestDraftLikeSale` - declared, never read anywhere.
+- **Threaded via `PosContextValue`** (~48 new fields - full list in `frontend/src/context/PosContext.tsx`,
+  ordered to match `RegisterPage`'s `usePos()` destructure so the two lists are diffable by eye): every
+  piece of state a same-page-elsewhere `App` function (`completeSale`, `salePayload`,
+  `localSaleFromCart`, `recordDraft`, `addToCart`, `clearCart`, `loadProducts`, the Contacts page's
+  settlement/top-up/message flows, the app shell's fullscreen-aware sidebar) reads via closure rather
+  than receives as a parameter. Notably `suspendNote`/`selectedTable` thread (read by `localSaleFromCart`
+  via closure) while `suspendType` doesn't (passed as a plain argument to `recordDraft(suspendType)`,
+  never read via closure) - the parameter-vs-closure distinction, not just "is it used elsewhere", is
+  what actually determines relocatable vs. threaded.
+
+**The move itself, mechanically:** extracted the JSX body via `sed -n '1966,2674p' main.tsx` into a
+scratch file, then reassembled `RegisterPage.tsx` as `header + that file + footer` via `cat` - the JSX
+itself was never opened in an editor or retyped, only concatenated. Verified this mechanically after the
+fact (the safety check `tsc` can't do): re-extracted the JSX region from the final `RegisterPage.tsx` and
+diffed it against the original scratch file. Not byte-identical on the first pass - `cmp` found a
+difference at character 40 of line 1, which turned out to be `main.tsx`'s file-wide CRLF line endings
+(the original extraction preserved them; the new file, after two small edits via the Edit tool, had been
+resaved LF-only). Stripped `\r` from both sides and re-diffed: identical. This is the concrete form of
+the "identifier-set diff" safeguard discussed in the previous entry - it caught nothing wrong here, which
+is itself the point: a real swapped identifier would have shown up as a genuine content diff surviving
+the CRLF strip, not merely a line-ending artifact.
+
+**Verification, matching the five-point minimum agreed before starting:**
+1. Cart totals after adding 2 units of a known product (15 MAD, 20% tax) read exactly `36,00 MAD` -
+   same figure the split-payment work's live check produced pre-extraction.
+2. A real cash(20)+card(16) split checkout completed and persisted two `Payment` rows
+   (`CASH:20, CARD:16`) - confirmed both via the rendered post-checkout page and a direct DB read.
+3. The Z-report's "Ventes espèces" figure read `178,00 MAD` after the above - exactly the pre-extraction
+   baseline of `158,00 MAD` (captured in the split-payment entry above) plus this run's `20 MAD` cash
+   portion. This is a real before/after regression comparison against a previously-captured number, not
+   a fresh guess, and it confirms the `methodLabel`/cash-attribution fix from the previous entry survived
+   the extraction intact.
+4. Suspend → resume round-trip: cart cleared after suspending (`Sauvegarder`), then reappeared correctly
+   after `Reprendre` from the suspended-tickets list - exercises `setSuspendType`/`setSuspendNote`/
+   `recordDraft`/`resumeSale`, four of the fields flagged as highest same-typed-swap risk.
+5. Edit-line price-override modal: opened via the row's edit icon, overrode the unit price to 12 MAD,
+   confirmed the cart row recomputed to `12,00 MAD` price / `12,00 MAD` line total (1 unit) after
+   applying - exercises `editLineForm`'s three string fields plus `setCart`.
+All five passed on the first run. Backend `tenant-isolation-smoke.ts` (43 assertions) still passes
+after a mid-session Postgres restart (the Termux-hosted server was killed by the OS during verification -
+an environment hiccup unrelated to this change, logged as `FATAL: terminating connection due to
+unexpected postmaster exit`; restarted with `pg_ctl start`, backend reconnected without needing its own
+restart). Both workspaces `tsc --noEmit` clean, `vite build` clean. Demo-tenant stock top-up (product 43,
+"Cafe Expresso") reverted to its original `-12` afterward; the two real sales created during this and the
+split-payment verification pass were left in the tenant's history, same rationale as before.
+
+**Not done in this pass, deliberately:** no attempt to shrink `PosContextValue` further than the audit
+required - every threaded field earned its place by a confirmed cross-page usage, not by convenience.
+Task #26 (Z-report shift-boundary bug) remains open and is unrelated to this extraction.

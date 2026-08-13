@@ -684,3 +684,32 @@ Each time a meaningful block is finished:
 - **The Register extraction itself is still not started** - this closes its stated prerequisite in a
   separate commit, per the deliberate choice not to bundle a payment-path correctness fix with a
   structural refactor of the same code.
+
+## 2026-08-13 - Phase 1: extracted renderRegister (POS cart/checkout) - the last of the four pages
+
+Per explicit user approval to proceed once the split-payment prerequisite landed. Finished reading the
+full 730-line function, then audited every identifier it references against the whole file - both the
+bare name and its setter function separately, since a setter-only cross-page usage (e.g. the Contacts
+page's "Recharger" button calling `setTopupContact` directly) doesn't show up if only the bare state
+name is checked. That distinction caught two real near-misses before any code was written: `topupContact`
+and `actualCash` both looked page-exclusive by bare-name grep alone but are genuinely used from other,
+unrelated pages via their setters.
+
+Result: about a dozen pieces of state (the calculator, the cash-movement/edit-line/open-register forms,
+several modal-open booleans, the whole Transactions-tab cluster) were confirmed truly exclusive to this
+page and relocated as local state in the new `RegisterPage.tsx`; roughly 48 fields that other parts of
+the app genuinely read or write were threaded through `PosContextValue` instead. The JSX itself was moved
+by literal extraction and reassembly, never retyped, and the move was verified mechanically afterward by
+diffing the extracted JSX region against the original - a real identifier swap would show up as a content
+difference surviving that diff; the only difference found was a line-ending artifact (confirmed harmless).
+
+Verified live against five specific scenarios agreed before starting: cart totals, a real cash+card split
+checkout (persisted correctly, confirmed against the database), the Z-report's cash figure matching a
+previously-captured baseline plus the new split's cash portion exactly, a suspend/resume round-trip, and
+the price-override modal. All five passed on the first run. Full suite (43 backend assertions) still
+green after an unrelated mid-verification Postgres restart (the Termux-hosted server was killed by the
+OS, not by this work). Both workspaces typecheck and build clean.
+
+This closes Phase 1's page-extraction work - all four planned pages (Registers/Payments, Kitchen/Reports,
+and now Register) are out of `main.tsx`. Full writeup, including the complete relocate-vs-thread
+classification and the reasoning behind each, is in TRACE.md.
