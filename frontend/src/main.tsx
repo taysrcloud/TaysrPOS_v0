@@ -61,12 +61,14 @@ import { productImage } from './components/productImage';
 import { PosContext, type PosContextValue } from './context/PosContext';
 import { RegistersPage } from './pages/RegistersPage';
 import { PaymentsPage } from './pages/PaymentsPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { KitchenPage } from './pages/KitchenPage';
 import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
 type EnabledModule = 'POS' | 'RESTAURANT';
 type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
-type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
+export type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
 type CashMovement = {
   id: number;
@@ -122,7 +124,7 @@ type ProductVariation = {
   attributes?: Record<string, string>;
 };
 
-type Product = {
+export type Product = {
   id: number;
   name: string;
   sku: string;
@@ -287,7 +289,7 @@ type PurchaseRecord = {
   locationId?: number;
 };
 
-type Location = {
+export type Location = {
   id: number;
   name: string;
   address: string;
@@ -416,12 +418,38 @@ const typeLabel: Record<ProductType, string> = {
   BUNDLE: 'Pack',
 };
 
-const methodLabel: Record<PaymentMethod, string> = {
+export const methodLabel: Record<PaymentMethod, string> = {
   CASH: 'Especes',
   CARD: 'Carte',
   CREDIT: 'Crédit',
   STORE_CREDIT: 'Crédit Magasin',
   MULTI: 'Paiement multiple',
+};
+
+// Takes an unambiguous ISO 8601 string (Sale.createdAtISO, Expense.date -
+// both parse correctly with `new Date(...)`). Never pass a pre-formatted
+// display string here - see the createdAtISO comment on SaleRecord for why.
+// Module-level: pure function of its two arguments, no component state -
+// promoted out of App so it can be imported directly by extracted pages
+// (RegistersPage-style) instead of needing a PosContext field.
+export const matchesPeriod = (createdAtISO: string, period: 'today' | 'week' | 'month' | 'year' | 'all') => {
+  if (period === 'all') return true;
+  const parsed = new Date(createdAtISO);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const now = new Date();
+  if (period === 'today') {
+    return parsed.getFullYear() === now.getFullYear() && parsed.getMonth() === now.getMonth() && parsed.getDate() === now.getDate();
+  }
+  if (period === 'week') {
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const daysSinceMonday = (startOfToday.getDay() + 6) % 7; // getDay(): 0=Sun -> shift so 0=Mon
+    const startOfWeek = new Date(startOfToday.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+    return parsed.getTime() >= startOfWeek.getTime();
+  }
+  if (period === 'month') {
+    return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
+  }
+  return parsed.getFullYear() === now.getFullYear();
 };
 
 const generateESCPOS = (sale: SaleRecord, settings: any): Uint8Array => {
@@ -1175,29 +1203,6 @@ const App = () => {
     const timeout = window.setTimeout(loadProducts, 180);
     return () => window.clearTimeout(timeout);
   }, [filter, search, restaurantEnabled, currentLocationId]);
-
-  // Takes an unambiguous ISO 8601 string (Sale.createdAtISO, Expense.date -
-  // both parse correctly with `new Date(...)`). Never pass a pre-formatted
-  // display string here - see the createdAtISO comment on SaleRecord for why.
-  const matchesPeriod = (createdAtISO: string, period: 'today' | 'week' | 'month' | 'year' | 'all') => {
-    if (period === 'all') return true;
-    const parsed = new Date(createdAtISO);
-    if (Number.isNaN(parsed.getTime())) return false;
-    const now = new Date();
-    if (period === 'today') {
-      return parsed.getFullYear() === now.getFullYear() && parsed.getMonth() === now.getMonth() && parsed.getDate() === now.getDate();
-    }
-    if (period === 'week') {
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const daysSinceMonday = (startOfToday.getDay() + 6) % 7; // getDay(): 0=Sun -> shift so 0=Mon
-      const startOfWeek = new Date(startOfToday.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
-      return parsed.getTime() >= startOfWeek.getTime();
-    }
-    if (period === 'month') {
-      return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
-    }
-    return parsed.getFullYear() === now.getFullYear();
-  };
 
   const visibleProducts = useMemo(() => products.filter(product => restaurantEnabled || product.type !== 'MENU_ITEM'), [products, restaurantEnabled]);
   const lowStockProducts = useMemo(() => visibleProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert), [visibleProducts]);
@@ -3700,517 +3705,9 @@ const App = () => {
 
   // renderPayments extracted to src/pages/PaymentsPage.tsx (Phase 1 registry work).
 
-  const renderReports = () => {
-    const filterByPeriod = (list: SaleRecord[]) => list.filter(s => matchesPeriod(s.createdAtISO ?? s.createdAt, reportPeriod));
+  // renderReports extracted to src/pages/ReportsPage.tsx (Phase 1 registry work).
 
-    const exportCSV = (data: SaleRecord[]) => {
-      const header = 'Ticket,Date,Client,Methode,Statut,Total\n';
-      const rows = data.map(s => `${s.ticket},"${s.createdAt}","${s.customer}",${methodLabel[s.method]},${s.status},${s.total.toFixed(2)}`).join('\n');
-      const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `rapport-ventes-${reportPeriod}-${new Date().toISOString().slice(0,10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
-    const paidSales = filterByPeriod(sales.filter(s => s.status === 'Payee'));
-    
-    // Aggregation calculations
-    const salesByDate = {} as Record<string, number>;
-    const profitByDate = {} as Record<string, number>;
-    const salesByCashier = {} as Record<string, { name: string; sales: number; count: number }>;
-    
-    let totalMargin = 0;
-    let totalNet = 0;
-    let totalTax = 0;
-    let totalGross = 0;
-
-    paidSales.forEach(sale => {
-      const day = sale.createdAt.split(' ')[0] || sale.createdAt;
-      salesByDate[day] = (salesByDate[day] || 0) + sale.total;
-      
-      const cashier = sale.cashierName || 'Inconnu';
-      if (!salesByCashier[cashier]) salesByCashier[cashier] = { name: cashier, sales: 0, count: 0 };
-      salesByCashier[cashier].sales += sale.total;
-      salesByCashier[cashier].count += 1;
-      
-      totalGross += sale.total;
-
-      let saleCost = 0;
-      let saleTax = 0;
-      let saleNet = 0;
-      if (sale.lines && sale.lines.length > 0) {
-        sale.lines.forEach(line => {
-          const product = products.find(p => p.id === line.productId);
-          const currentPrice = line.unitPrice ?? (product?.salePrice || 0);
-          const cost = product?.purchasePrice || 0;
-          const taxRate = product?.tvaRate || 0;
-          const netPrice = currentPrice / (1 + taxRate / 100);
-          
-          saleCost += cost * line.quantity;
-          saleNet += netPrice * line.quantity;
-          saleTax += (currentPrice - netPrice) * line.quantity;
-        });
-      } else {
-        // Fallback for mock data without lines
-        saleNet = sale.total / 1.2;
-        saleCost = saleNet * 0.7; // assume 30% margin
-        saleTax = sale.total - saleNet;
-      }
-      
-      profitByDate[day] = (profitByDate[day] || 0) + (saleNet - saleCost);
-      totalMargin += (saleNet - saleCost);
-      totalNet += saleNet;
-      totalTax += saleTax;
-    });
-
-    const activeDays = Object.keys(salesByDate).sort();
-    const salesVsProfitData = activeDays.map(day => ({
-      name: day === 'Aujourd' ? "Aujourd'hui" : day,
-      Ventes: Number(salesByDate[day].toFixed(2)),
-      Profit: Number(profitByDate[day].toFixed(2))
-    }));
-
-    const cashierPerformance = Object.values(salesByCashier).sort((a, b) => b.sales - a.sales);
-
-    const salesByMethod = paidSales.reduce((acc, sale) => {
-      acc[sale.method] = (acc[sale.method] || 0) + sale.total;
-      return acc;
-    }, {} as Partial<Record<PaymentMethod, number>>);
-
-    const productCounts = paidSales.reduce((acc, sale) => {
-      sale.lines?.forEach(line => {
-        acc[line.name] = (acc[line.name] || 0) + line.quantity;
-      });
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const topProductsData = Object.entries(productCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([name, quantite]) => ({ name, quantite }));
-
-    const renderTabNav = () => (
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
-        <button 
-          onClick={() => setReportsTab('synthese')}
-          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'synthese' ? '#0f172a' : 'transparent', color: reportsTab === 'synthese' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
-          <BarChart3 size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Synthèse
-        </button>
-        <button 
-          onClick={() => setReportsTab('ventes')}
-          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'ventes' ? '#0f172a' : 'transparent', color: reportsTab === 'ventes' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
-          <TrendingUp size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Ventes
-        </button>
-        <button 
-          onClick={() => setReportsTab('produits')}
-          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'produits' ? '#0f172a' : 'transparent', color: reportsTab === 'produits' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
-          <Package size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Produits
-        </button>
-        <button 
-          onClick={() => setReportsTab('paiements')}
-          style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'paiements' ? '#0f172a' : 'transparent', color: reportsTab === 'paiements' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
-          <Banknote size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Paiements
-        </button>
-      </div>
-    );
-
-    return (
-      <section style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-        <PageHeader 
-          icon={BarChart3}
-          title="Tableau de bord" 
-          subtitle="Tableau de bord financier" 
-          action={
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <select 
-                value={dashboardLocationFilter} 
-                onChange={e => setDashboardLocationFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 500, color: '#334155' }}
-              >
-                <option value="ALL">Tous les magasins</option>
-                {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
-              </select>
-              {/* Old date filter removed */}
-              <button 
-                className="ghost-action" 
-                onClick={() => exportCSV(paidSales)}
-                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-              >
-                <Download size={16} /> Exporter CSV
-              </button>
-            </div>
-          } 
-        />
-
-        {renderTabNav()}
-        {/* Beautiful Date Filter Bar */}
-        <div style={{ display: 'flex', alignItems: 'center', background: '#fff', padding: '0.5rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '2rem', gap: '0.5rem', width: 'fit-content', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <div style={{ padding: '0 1rem', color: '#64748b', fontWeight: 600, fontSize: '0.9rem', borderRight: '1px solid #e2e8f0' }}>Période</div>
-          {[
-            { id: 'all', label: 'Toutes' },
-            { id: 'today', label: "Aujourd'hui" },
-            { id: 'week', label: 'Cette semaine' },
-            { id: 'month', label: 'Ce mois' },
-            { id: 'year', label: 'Cette année' },
-          ].map(period => (
-            <button
-              key={period.id}
-              onClick={() => setReportPeriod(period.id as any)}
-              style={{
-                padding: '0.5rem 1rem',
-                borderRadius: '8px',
-                border: 'none',
-                background: reportPeriod === period.id ? '#f1f5f9' : 'transparent',
-                color: reportPeriod === period.id ? '#0f172a' : '#64748b',
-                fontWeight: reportPeriod === period.id ? 700 : 500,
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              {period.label}
-            </button>
-          ))}
-        </div>
-
-
-        {reportsTab === 'synthese' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginBottom: '2rem' }}>
-            {/* KPI Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
-              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #3b82f6', padding: '1.5rem' }}>
-                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Chiffre d'Affaire (TTC)</p>
-                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#0f172a' }}>{formatMoney(totalGross)}</h3>
-              </div>
-              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #10b981', padding: '1.5rem' }}>
-                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Marge Brute Estimée</p>
-                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#10b981' }}>{formatMoney(totalMargin)}</h3>
-              </div>
-              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #f59e0b', padding: '1.5rem' }}>
-                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Panier Moyen</p>
-                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#f59e0b' }}>{formatMoney(paidSales.length > 0 ? totalGross / paidSales.length : 0)}</h3>
-              </div>
-              <div className="panel" style={{ background: '#fff', borderLeft: '4px solid #8b5cf6', padding: '1.5rem' }}>
-                <p style={{ color: '#64748b', margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>Tickets Encaissés</p>
-                <h3 style={{ fontSize: '2rem', margin: '0.5rem 0 0 0', color: '#0f172a' }}>{paidSales.length}</h3>
-              </div>
-            </div>
-
-            {/* Main Trend Chart */}
-            <div className="panel wide-panel">
-              <div className="panel-title compact"><div><p>Tendances</p><h2>Ventes & Profit par Jour</h2></div></div>
-              <div style={{ minHeight: '300px', marginTop: '1rem', padding: '1rem 0' }}>
-                {salesVsProfitData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ComposedChart data={salesVsProfitData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                      <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                      <Bar yAxisId="left" dataKey="Ventes" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                      <Line yAxisId="left" type="monotone" dataKey="Profit" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée de vente disponible.</div>
-                )}
-              </div>
-            </div>
-
-            {/* Secondary Row: Top Products & Cashier Performance */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
-              {/* Top Products */}
-              <div className="panel">
-                <div className="panel-title compact"><div><p>Palmarès</p><h2>Top Articles Vendus</h2></div></div>
-                <div style={{ minHeight: '250px', marginTop: '1rem', padding: '1rem 0' }}>
-                  {topProductsData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart layout="vertical" data={topProductsData} margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                        <XAxis type="number" hide />
-                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} width={150} tick={{ fill: '#334155', fontSize: 12, fontWeight: 600 }} />
-                        <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                        <Bar dataKey="quantite" name="Quantité" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={20} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ width: '100%', textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>Aucune donnée disponible.</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Cashier Performance */}
-              <div className="panel">
-                <div className="panel-title compact"><div><p>Équipe</p><h2>Performance Caissiers</h2></div></div>
-                <div className="cart-table" style={{ marginTop: '1rem' }}>
-                  <div className="cart-head" style={{ gridTemplateColumns: '1fr auto auto' }}>
-                    <span>Caissier</span>
-                    <span>Tickets</span>
-                    <span>Ventes (TTC)</span>
-                  </div>
-                  {cashierPerformance.map(cashier => (
-                    <div className="cart-row" key={cashier.name} style={{ gridTemplateColumns: '1fr auto auto' }}>
-                      <span style={{ fontWeight: 600, color: '#334155' }}>{cashier.name}</span>
-                      <span style={{ color: '#64748b', textAlign: 'center' }}>{cashier.count}</span>
-                      <span style={{ fontWeight: 700, color: '#10b981', textAlign: 'right' }}>{formatMoney(cashier.sales)}</span>
-                    </div>
-                  ))}
-                  {cashierPerformance.length === 0 && <div className="pos-empty">Aucune donnée disponible.</div>}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-
-        {reportsTab === 'ventes' && (
-          <div className="panel wide-panel">
-            <div className="panel-title compact"><div><p>Détails</p><h2>Journal des Ventes</h2></div></div>
-            <div className="cart-table" style={{ marginTop: '1rem' }}>
-              <div className="cart-head">
-                <span>Réf Ticket</span>
-                <span>Date</span>
-                <span>Client</span>
-                <span>Mode Paiement</span>
-                <span>Total</span>
-              </div>
-              {paidSales.map(sale => (
-                <div className="cart-row" key={sale.id}>
-                  <span><strong>{sale.ticket}</strong></span>
-                  <span>{sale.createdAt}</span>
-                  <span>{sale.customer}</span>
-                  <span><span style={{ background: '#f1f5f9', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem', fontWeight: 600 }}>{methodLabel[sale.method]}</span></span>
-                  <span style={{ fontWeight: 700, color: '#10b981' }}>{formatMoney(getSaleDueAmount(sale))}</span>
-                </div>
-              ))}
-              {paidSales.length === 0 && <div className="pos-empty">Aucune vente enregistrée.</div>}
-            </div>
-          </div>
-        )}
-
-        {reportsTab === 'produits' && (
-          <div className="workspace-grid" style={{ padding: 0 }}>
-            <div className="panel">
-              <div className="panel-title compact"><div><p>Palmarès</p><h2>Top Articles (Quantités)</h2></div></div>
-              <div className="cart-table" style={{ marginTop: '1rem' }}>
-                <div className="cart-head"><span>Produit</span><span>Qte Vendue</span></div>
-                {topProductsData.map((item) => (
-                  <div className="cart-row" key={item.name} style={{ gridTemplateColumns: '1fr auto' }}>
-                    <span style={{ fontWeight: 600 }}>{item.name}</span>
-                    <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.25rem 0.75rem', borderRadius: '999px', fontWeight: 700 }}>{item.quantite}x</span>
-                  </div>
-                ))}
-                {topProductsData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun article vendu</span>}
-              </div>
-            </div>
-            
-            <div className="panel">
-              <div className="panel-title compact"><div><p>Indicateurs</p><h2>Qualité Stock</h2></div></div>
-              <div className="summary-list" style={{ marginTop: '1rem' }}>
-                <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
-                  <span style={{ color: '#64748b' }}>Articles au catalogue</span>
-                  <strong style={{ fontSize: '1.5rem', display: 'block', marginTop: '0.25rem' }}>{visibleProducts.length}</strong>
-                </div>
-                <div style={{ padding: '1rem', background: lowStockProducts.length > 0 ? '#fef2f2' : '#f0fdf4', borderRadius: '8px' }}>
-                  <span style={{ color: lowStockProducts.length > 0 ? '#ef4444' : '#16a34a' }}>Alertes stock bas</span>
-                  <strong style={{ fontSize: '1.5rem', display: 'block', marginTop: '0.25rem', color: lowStockProducts.length > 0 ? '#ef4444' : '#16a34a' }}>{lowStockProducts.length}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {reportsTab === 'paiements' && (
-          <div className="panel" style={{ maxWidth: '600px' }}>
-            <div className="panel-title compact"><div><p>Flux Financier</p><h2>Répartition des paiements</h2></div></div>
-            <div className="cart-table" style={{ marginTop: '1rem' }}>
-              <div className="cart-head" style={{ gridTemplateColumns: '1fr auto' }}><span>Méthode</span><span>Montant Encaissé</span></div>
-              {(Object.entries(salesByMethod) as [PaymentMethod, number][]).map(([method, total]) => (
-                <div className="cart-row" key={method} style={{ gridTemplateColumns: '1fr auto' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
-                    {method === 'CASH' && <Banknote size={16} color="#10b981" />}
-                    {method === 'CARD' && <CreditCard size={16} color="#3b82f6" />}
-                    {method === 'CREDIT' && <ClipboardList size={16} color="#f59e0b" />}
-                    {method === 'MULTI' && <ReceiptText size={16} color="#8b5cf6" />}
-                    {methodLabel[method]}
-                  </span>
-                  <strong style={{ color: '#0f172a' }}>{formatMoney(total)}</strong>
-                </div>
-              ))}
-              {Object.keys(salesByMethod).length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun encaissement</span>}
-            </div>
-          </div>
-        )}
-      </section>
-    );
-  };
-
-  const renderKitchen = () => {
-    const kitchenSales = [...draftSales, ...sales].filter(s => 
-      (!s.locationId || s.locationId === currentLocationId) &&
-      (s.status === 'Suspendue' || s.status === 'Payee') && 
-      s.kitchenStatus !== 'READY' &&
-      s.lines?.some(l => products.find(p => p.id === l.productId)?.isKitchenItem)
-    ).sort((a, b) => b.id - a.id); // Newest first
-
-    let filteredKitchenSales = kitchenSales;
-    if (kitchenFilter === 'drinks') {
-      filteredKitchenSales = kitchenSales.map(sale => ({
-        ...sale,
-        lines: sale.lines?.filter(l => {
-          const p = products.find(prod => prod.id === l.productId);
-          return p?.isKitchenItem && p.category === 'Boissons';
-        })
-      })).filter(sale => sale.lines && sale.lines.length > 0);
-    } else if (kitchenFilter === 'food') {
-      filteredKitchenSales = kitchenSales.map(sale => ({
-        ...sale,
-        lines: sale.lines?.filter(l => {
-          const p = products.find(prod => prod.id === l.productId);
-          return p?.isKitchenItem && p.category !== 'Boissons';
-        })
-      })).filter(sale => sale.lines && sale.lines.length > 0);
-    }
-
-    const readyCount = [...draftSales, ...sales].filter(s => s.kitchenStatus === 'READY').length;
-
-    return (
-      <section style={{ padding: '1.5rem', background: '#e2e8f0', minHeight: '100vh', display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
-        {/* Left Side: Orders Grid */}
-        <div className="panel wide-panel" style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: '16px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div className="panel-title compact" style={{ borderBottom: '1px solid #1e293b', paddingBottom: '1rem', marginBottom: '1.5rem', padding: '1.5rem 1.5rem 0' }}>
-            <div>
-              <p style={{ color: '#38bdf8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>KDS - Kitchen Display System</p>
-              <h2 style={{ color: '#f8fafc', fontSize: '1.75rem' }}>Bons de préparation</h2>
-            </div>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <span style={{ background: '#1e293b', padding: '0.5rem 1rem', borderRadius: '8px', color: '#94a3b8', fontSize: '0.9rem', fontWeight: 600 }}>
-                {filteredKitchenSales.length} {filteredKitchenSales.length > 1 ? 'Commandes affichées' : 'Commande affichée'}
-              </span>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', padding: '0 1.5rem 1.5rem', overflowY: 'auto' }}>
-            {filteredKitchenSales.length === 0 ? (
-              <div style={{ width: '100%', padding: '4rem', textAlign: 'center', color: '#64748b' }}>
-                <Utensils size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-                <h3 style={{ fontSize: '1.5rem', fontWeight: 600, color: '#94a3b8' }}>Aucune commande à préparer</h3>
-                <p>En attente de nouveaux tickets ou changez les filtres...</p>
-              </div>
-            ) : (
-              filteredKitchenSales.map((sale, idx) => {
-                const isUrgent = idx > 5; // Simulate urgency for older tickets
-                const ticketItems = (sale.lines || []).filter(l => products.find(p => p.id === l.productId)?.isKitchenItem);
-                
-                return (
-                  <div key={sale.id} style={{ 
-                    flex: '1 1 300px',
-                    maxWidth: '400px',
-                    background: isUrgent ? '#450a0a' : '#1e293b', 
-                    borderRadius: '12px', 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    borderTop: `6px solid ${isUrgent ? '#ef4444' : '#3b82f6'}`,
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.3)'
-                  }}>
-                    <div style={{ padding: '1.25rem', borderBottom: `1px dashed ${isUrgent ? '#7f1d1d' : '#334155'}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                        <strong style={{ fontSize: '1.5rem', color: '#fff', letterSpacing: '0.05em' }}>{sale.ticket}</strong>
-                        <span style={{ background: isUrgent ? '#ef4444' : '#3b82f6', color: '#fff', padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700 }}>
-                          {sale.status === 'Payee' ? 'PAYÉ' : 'EN COURS'}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: isUrgent ? '#fca5a5' : '#94a3b8', fontSize: '0.9rem', fontWeight: 500 }}><Clock size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }}/> {sale.createdAt}</span>
-                        <span style={{ color: '#fbbf24', fontSize: '0.95rem', fontWeight: 600 }}>{sale.referenceNote || 'Table / Comptoir'}</span>
-                      </div>
-                    </div>
-                    
-                    <div style={{ padding: '1.25rem', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {ticketItems.map(line => (
-                        <div key={line.productId} style={{ 
-                          display: 'flex', 
-                          alignItems: 'flex-start', 
-                          gap: '0.75rem',
-                          background: isUrgent ? '#7f1d1d' : '#0f172a',
-                          padding: '0.75rem',
-                          borderRadius: '8px'
-                        }}>
-                          <strong style={{ 
-                            background: '#fff', 
-                            color: '#0f172a', 
-                            minWidth: '28px', 
-                            height: '28px', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            borderRadius: '6px',
-                            fontSize: '1rem'
-                          }}>{line.quantity}</strong>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '1.1rem', color: '#f8fafc', fontWeight: 600, lineHeight: 1.2 }}>{line.name}</div>
-                            {line.note && <em style={{ color: '#fcd34d', fontSize: '0.9rem', display: 'block', marginTop: '0.25rem', fontWeight: 500 }}>âeeï{line.note}</em>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <div style={{ padding: '1.25rem', borderTop: `1px solid ${isUrgent ? '#7f1d1d' : '#334155'}` }}>
-                      <button className="primary-action" onClick={() => markKitchenReady(sale.id)} style={{ 
-                        width: '100%', 
-                        padding: '1rem', 
-                        background: '#10b981', 
-                        color: '#fff', 
-                        border: 'none', 
-                        fontSize: '1.1rem',
-                        fontWeight: 700,
-                        borderRadius: '8px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                        cursor: 'pointer'
-                      }}>
-                        <CheckCircle size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '8px' }}/>
-                        Marquer Prêt
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Right Side: Supervision Cuisine */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div className="dashboard-sidebar-block" style={{ padding: '1.5rem', background: '#0f172a', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-            <h3 style={{ margin: '0 0 1rem', fontSize: '1.1rem', color: '#e2e8f0', borderBottom: '1px solid #1e293b', paddingBottom: '0.5rem' }}>Service en cours</h3>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', background: '#1e293b', padding: '1rem', borderRadius: '12px' }}>
-              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.8rem', fontWeight: 800, color: '#f59e0b' }}>{kitchenSales.length}</span><span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>En attente</span></div>
-              <div style={{ textAlign: 'center' }}><span style={{ display: 'block', fontSize: '1.8rem', fontWeight: 800, color: '#10b981' }}>{readyCount}</span><span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Terminées</span></div>
-            </div>
-
-            <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Filtres de Catégories</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '1.5rem' }}>
-              <button onClick={() => setKitchenFilter('all')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'all' ? '#3b82f6' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Tout afficher</span></button>
-              <button onClick={() => setKitchenFilter('food')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'food' ? '#f59e0b' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Plats uniquement</span></button>
-              <button onClick={() => setKitchenFilter('drinks')} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: kitchenFilter === 'drinks' ? '#0ea5e9' : '#1e293b', color: '#fff', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Boissons uniquement</span></button>
-            </div>
-
-            {kitchenSales.length > 5 && (
-              <div style={{ background: '#450a0a', padding: '1rem', borderRadius: '12px', borderLeft: '4px solid #ef4444' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fca5a5', fontWeight: 700, marginBottom: '0.5rem' }}><AlertTriangle size={18} /> Alertes</div>
-                <p style={{ margin: 0, fontSize: '0.9rem', color: '#fecaca' }}>{kitchenSales.length - 5} commandes en attente depuis longtemps !</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-    );
-  };
+  // renderKitchen extracted to src/pages/KitchenPage.tsx (Phase 1 registry work).
           const renderTables = () => {
     let allTables: any[] = [];
     tableGroups.forEach(g => {
@@ -4837,9 +4334,9 @@ const App = () => {
     'Ventes': renderSales,
     'Factures': renderFactures,
     'Paiements': () => <PaymentsPage />,
-    'Rapports': renderReports,
+    'Rapports': () => <ReportsPage />,
     'Tables': () => (restaurantEnabled ? renderTables() : renderDashboard()),
-    'Cuisine': () => (restaurantEnabled ? renderKitchen() : renderDashboard()),
+    'Cuisine': () => (restaurantEnabled ? <KitchenPage /> : renderDashboard()),
     'Parametres': renderSettings,
     'Caisses': () => <RegistersPage />,
   };
@@ -4850,6 +4347,10 @@ const App = () => {
     sales, paymentFilter, setPaymentFilter, getSaleDueAmount,
     setReceiptSale, setInvoiceSale, resumeSale, openSaleSettlement,
     registerLogs, currentLocationId,
+    products, visibleProducts, lowStockProducts, locations,
+    reportsTab, setReportsTab, reportPeriod, setReportPeriod,
+    dashboardLocationFilter, setDashboardLocationFilter,
+    draftSales, kitchenFilter, setKitchenFilter, markKitchenReady,
   };
 
   if (authChecking) {

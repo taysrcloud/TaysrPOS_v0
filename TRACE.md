@@ -751,6 +751,41 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Phase 1: extracted renderKitchen and renderReports out of main.tsx
+
+- Previously deferred pending browser access (now available). Pure structural refactor, no intended
+  behavior change - followed the established pattern from the earlier `RegistersPage`/`PaymentsPage`
+  extraction exactly: named-export component, `usePos()` destructuring the exact identifier names used
+  as closures before (a wrong reference is a compile error, not a silently swapped prop), registered in
+  `pageRenderers` in place of the old closure call.
+- **`matchesPeriod` promoted from an App-internal closure to a module-level pure function** (next to
+  `formatMoney`/`methodLabel`), since it turned out to have zero dependency on component state - it only
+  ever touched its own two arguments. This was the one real decision the earlier structure-mapping pass
+  flagged as needing resolution before Reports could extract cleanly; confirmed correct by a clean
+  `tsc` immediately after the move (if it had secretly closed over anything, that would have been a
+  compile error, not a runtime surprise).
+- `PosContextValue` grew by ten fields across the two pages (`products`, `visibleProducts`,
+  `lowStockProducts`, `locations`, `reportsTab`/`setReportsTab`, `reportPeriod`/`setReportPeriod`,
+  `dashboardLocationFilter`/`setDashboardLocationFilter` for Reports; `draftSales`, `kitchenFilter`/
+  `setKitchenFilter`, `markKitchenReady` for Kitchen). `Product` and `Location` types had to be exported
+  from `main.tsx` for the first time - neither was needed outside the file until now.
+- `renderKitchen`'s call site had restaurant-module gating baked in
+  (`restaurantEnabled ? renderKitchen() : renderDashboard()`) - preserved exactly, just swapping the
+  closure call for `<KitchenPage />`.
+- **Verified live through the actual rendered UI**, not just `tsc`: Reports renders correctly with real
+  aggregated data (174 MAD CA, 75 MAD margin, 5 tickets, matching the session's accumulated demo data),
+  tab-switching works. Kitchen doesn't even appear in the sidebar for this demo company (restaurant
+  module disabled) - toggled `restaurantEnabled` on temporarily via the Settings API to actually reach
+  and screenshot the real `KitchenPage` component (not just confirm the dashboard-fallback branch),
+  confirmed it renders pixel-correct (KDS dark theme, empty-state messaging, category filters, service
+  counters), then reverted the setting back to `false` afterward so the demo company's configuration
+  wasn't left changed by a verification step.
+- Full suite still 34/34 (no backend changes this pass), both workspaces typecheck clean, fresh build
+  succeeds.
+- **Not done, deliberately, same session:** `renderRegister` (the POS cart, ~700 lines) - explicitly the
+  highest-stakes remaining extraction, sequenced as its own dedicated pass with its own thorough
+  verification given a silent bug there costs real money.
+
 ## 2026-08-13 - Frontend: currency management and per-user permissions in Settings
 
 - Two new Settings tabs, backed entirely by endpoints built earlier today (`currency.routes.ts` for

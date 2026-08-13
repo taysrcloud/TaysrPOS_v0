@@ -640,3 +640,17 @@ Each time a meaningful block is finished:
   checkbox states, and - via an accidental but useful test-script mistake - confirmed an explicit deny
   override correctly beats a role default through the actual UI, not just the API. Full suite still
   34/34, both workspaces typecheck clean. Full writeup in TRACE.md.
+
+## 2026-08-13 - Phase 1: extracted Kitchen and Reports pages out of main.tsx
+
+- Previously deferred pending browser access, now unblocked and done. Pure structural refactor
+  following the established `RegistersPage`/`PaymentsPage` pattern exactly - no intended behavior
+  change. Promoted `matchesPeriod` from an App-internal closure to a module-level pure function along
+  the way, the one real decision blocking a clean Reports extraction.
+- Verified live through the actual rendered UI: Reports shows correct real aggregated data and its tabs
+  work; Kitchen doesn't even appear in this demo company's nav (restaurant module off), so temporarily
+  enabled it via the Settings API to actually screenshot the real component rendering correctly, then
+  reverted the setting afterward. Full suite still 34/34, both workspaces typecheck clean, fresh build
+  succeeds. Full writeup in TRACE.md.
+- Register (the POS cart) deliberately not touched this pass - sequenced as its own dedicated,
+  carefully-verified pass given the real-money stakes.
