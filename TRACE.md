@@ -751,6 +751,28 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Credit-sale settlement endpoint (closes a gap flagged twice earlier this session)
+
+- Both the original migration audit and Track D's writeup flagged this: a `CREDIT` sale increments
+  `Contact.balance` on finalize (and a return correctly reverses it), but nothing anywhere ever recorded
+  the customer actually paying that balance back down in cash. `POST /api/contacts/:id/settle`.
+- **Operates at the customer level, not per-sale.** `Contact.balance` is already an aggregate across all
+  of a customer's outstanding sales (that's how the CREDIT-finalize increment itself works - it's not
+  tracked per-sale anywhere), so there's no per-sale "amount still owed" to settle against without
+  inventing new tracking. Matches the existing (rougher) precedent already in `connector.routes.ts`'s
+  `contactapi-payment` handler, done properly here.
+- Reduces `Contact.balance`, posts a Track D `DEBIT` (cash received) to the resolved location account via
+  the existing `getOrCreateCashAccount`/`postCashTransaction` helpers, and logs an audit trail via
+  `DocumentAndNote` (entityType `'contact'`) rather than `Payment` - `Payment.saleId` is a required FK to
+  one specific sale, and this is deliberately not tied to one.
+- Rejects over-payment (amount > current balance) and settlement at a zero balance, both with a clear
+  message rather than silently clamping or creating a negative balance.
+- Verified live: a credit sale for a real customer, a rejected over-payment, a partial settlement with
+  exact balance and cash-account math, a final settlement zeroing the balance, and settlement-at-zero
+  correctly rejected afterward. Locked into `tenant-isolation-smoke.ts` (34 assertions now, up from 33,
+  including a cross-tenant rejection check). Full suite passes twice in a row with zero orphaned rows.
+  Both workspaces' `tsc` clean.
+
 ## 2026-08-13 - Track H: multi-currency for Sale + Purchase
 
 - Scope question resolved before building: in a Moroccan retail context, customers almost always pay in

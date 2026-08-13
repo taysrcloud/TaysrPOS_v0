@@ -605,3 +605,12 @@ Each time a meaningful block is finished:
   that editing a currency's rate later does not retroactively change an already-recorded sale's
   snapshotted rate (same immutability guarantee as tax rates). 33 assertions now (up from 32), full suite
   clean twice in a row, both workspaces typecheck clean. Full writeup in TRACE.md.
+
+## 2026-08-13 - Credit-sale settlement endpoint
+
+- Closed a gap flagged twice earlier this session: a CREDIT sale increments a customer's balance on
+  finalize but nothing ever recorded them paying it back down. `POST /api/contacts/:id/settle` -
+  customer-level (balance is already an aggregate, not tracked per-sale), posts Track D auto-posting,
+  rejects over-payment and settling a zero balance. Verified live: partial settlement, full settlement,
+  both rejection cases, cross-tenant rejection. 34 assertions now (up from 33), full suite clean twice in
+  a row. Full writeup in TRACE.md.

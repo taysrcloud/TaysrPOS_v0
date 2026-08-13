@@ -713,10 +713,46 @@ try {
   const crossUpdate = await request(`/currencies/${eurId}`, b.token, { method: 'PUT', body: JSON.stringify({ rate: 1 }) });
   assert(crossUpdate.status === 404, `Cross-tenant currency update was not rejected (${crossUpdate.status})`);
 
+  // ── Credit-sale settlement (2026-08-13) ──────────────────────────────────
+  // Discovered gap: a CREDIT sale increments Contact.balance on finalize but
+  // nothing ever paid it back down. Operates at the customer level (balance
+  // is already an aggregate across all their sales), not per-sale.
+
+  const settleCreditSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'CREDIT', status: 'FINAL' }),
+  });
+  assert(settleCreditSale.status === 201, `Credit sale for settlement test failed: ${settleCreditSale.status} ${JSON.stringify(settleCreditSale.body)}`);
+  const creditSaleTotal = Number(settleCreditSale.body.total);
+
+  const balanceBeforeSettle = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
+  const cashAccountBeforeSettle = await prisma.account.findFirst({ where: { companyId: a.company.id, locationId: a.location.id } });
+  const cashBalanceBeforeSettle = cashAccountBeforeSettle ? Number(cashAccountBeforeSettle.currentBalance) : 0;
+
+  const overSettle = await request(`/contacts/${a.contact.id}/settle`, a.token, { method: 'POST', body: JSON.stringify({ amount: balanceBeforeSettle + 1000, method: 'CASH' }) });
+  assert(overSettle.status === 400, `Over-settlement (more than owed) was not rejected (${overSettle.status})`);
+
+  const crossSettle = await request(`/contacts/${a.contact.id}/settle`, b.token, { method: 'POST', body: JSON.stringify({ amount: 1, method: 'CASH' }) });
+  assert(crossSettle.status === 404, `Cross-tenant settlement was not rejected (${crossSettle.status})`);
+
+  const partialAmount = Math.round((creditSaleTotal / 2) * 100) / 100;
+  const partialSettle = await request(`/contacts/${a.contact.id}/settle`, a.token, { method: 'POST', body: JSON.stringify({ amount: partialAmount, method: 'CASH', note: 'Acompte smoke test' }) });
+  assert(partialSettle.status === 200 && Math.abs(Number(partialSettle.body.contact.balance) - (balanceBeforeSettle - partialAmount)) < 0.01, `Partial settlement math wrong: ${JSON.stringify(partialSettle.body)}`);
+
+  const cashAccountAfterPartial = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
+  assert(Math.abs(Number(cashAccountAfterPartial.currentBalance) - (cashBalanceBeforeSettle + partialAmount)) < 0.01, `Settlement did not post the expected DEBIT to the cash account: expected ${cashBalanceBeforeSettle + partialAmount}, got ${cashAccountAfterPartial.currentBalance}`);
+
+  const remaining = Number(partialSettle.body.contact.balance);
+  const finalSettle = await request(`/contacts/${a.contact.id}/settle`, a.token, { method: 'POST', body: JSON.stringify({ amount: remaining, method: 'CASH' }) });
+  assert(finalSettle.status === 200 && Math.abs(Number(finalSettle.body.contact.balance)) < 0.01, `Final settlement should zero the balance: ${JSON.stringify(finalSettle.body)}`);
+
+  const overSettleAtZero = await request(`/contacts/${a.contact.id}/settle`, a.token, { method: 'POST', body: JSON.stringify({ amount: 1, method: 'CASH' }) });
+  assert(overSettleAtZero.status === 400, `Settlement at zero balance was not rejected (${overSettleAtZero.status})`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {
