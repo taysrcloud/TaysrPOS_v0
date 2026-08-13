@@ -633,10 +633,90 @@ try {
   const actionsList = await request('/settings/permissions/actions', a.token);
   assert(actionsList.status === 200 && actionsList.body.actions.some((entry: any) => entry.action === 'devices.manage'), `Permission actions list missing devices.manage: ${JSON.stringify(actionsList.body)}`);
 
+  // ── Track H: multi-currency, Sale + Purchase (2026-08-13) ──────────────────
+  // total/subtotal/taxTotal stay in MAD always - currencyId/exchangeRate/
+  // foreignTotal are purely additive record-keeping, resolved and snapshotted
+  // at write time from a company-scoped Currency the same way tvaRate snapshots
+  // from TaxRate.
+
+  const createEur = await request('/currencies', a.token, { method: 'POST', body: JSON.stringify({ code: 'eur', name: 'Euro', symbol: '€', rate: 10.85 }) });
+  assert(createEur.status === 201 && createEur.body.currency?.code === 'EUR', `Currency create failed (also proves lowercase->uppercase code normalization): ${createEur.status} ${JSON.stringify(createEur.body)}`);
+  const eurId = createEur.body.currency.id as number;
+
+  const dupCurrency = await request('/currencies', a.token, { method: 'POST', body: JSON.stringify({ code: 'EUR', name: 'Euro dup', rate: 11 }) });
+  assert(dupCurrency.status === 409, `Duplicate currency code was not rejected (${dupCurrency.status})`);
+
+  const currenciesB = await request('/currencies', b.token);
+  assert(currenciesB.status === 200 && !currenciesB.body.currencies.some((c: any) => c.id === eurId), 'Tenant A currency leaked into tenant B list');
+
+  // A sale in a foreign currency: total/subtotal/taxTotal computed from items
+  // exactly as any other sale (in MAD); exchangeRate/foreignTotal are the
+  // additive snapshot. quantity 2 x a.product's salePrice (10) = 20 subtotal,
+  // a.product has no configured tvaRate override so the schema default (20%)
+  // applies -> taxTotal 4, total 24.
+  const eurSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ productId: a.product.id, quantity: 2 }], method: 'CASH', status: 'FINAL', currencyId: eurId }),
+  });
+  assert(eurSale.status === 201, `Foreign-currency sale create failed: ${eurSale.status} ${JSON.stringify(eurSale.body)}`);
+  assert(Number(eurSale.body.total) === 24, `Foreign-currency sale total should stay in MAD unchanged: expected 24, got ${eurSale.body.total}`);
+  assert(eurSale.body.currencyId === eurId && Number(eurSale.body.exchangeRate) === 10.85, `Sale currency/rate not recorded: ${JSON.stringify(eurSale.body)}`);
+  assert(Math.abs(Number(eurSale.body.foreignTotal) - 24 / 10.85) < 0.01, `Sale foreignTotal math wrong: expected ~${(24 / 10.85).toFixed(2)}, got ${eurSale.body.foreignTotal}`);
+
+  // Per-transaction exchangeRate override (today's rate differs from the
+  // Currency row's stored one) must win over the stored rate.
+  const eurSaleOverride = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ productId: a.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL', currencyId: eurId, exchangeRate: 11 }),
+  });
+  assert(eurSaleOverride.status === 201 && Number(eurSaleOverride.body.exchangeRate) === 11, `Per-transaction exchangeRate override was not honored: ${JSON.stringify(eurSaleOverride.body)}`);
+
+  const badCurrencySale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ productId: a.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL', currencyId: 999999 }),
+  });
+  assert(badCurrencySale.status === 400, `Invalid currencyId on sale was not rejected (${badCurrencySale.status})`);
+
+  // Cross-tenant: tenant B cannot tag its own sale with tenant A's currency.
+  const crossCurrencySale = await request('/sales', b.token, {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ productId: b.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL', currencyId: eurId }),
+  });
+  assert(crossCurrencySale.status === 400, `Cross-tenant currency use on a sale was not rejected (${crossCurrencySale.status})`);
+
+  // Purchase side: a supplier invoice priced as "500 EUR equivalent" ->
+  // total (MAD) is still exactly what the client sends (unchanged behavior),
+  // foreignTotal is the computed equivalent using the stored 10.85 rate.
+  const eurPurchase = await request('/purchases', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'PENDING', items: [{ productId: a.product.id, quantity: 10, unitCost: 542.5 }], total: 5425, currencyId: eurId }),
+  });
+  assert(eurPurchase.status === 201 || eurPurchase.status === 200, `Foreign-currency purchase create failed: ${eurPurchase.status} ${JSON.stringify(eurPurchase.body)}`);
+  assert(Number(eurPurchase.body.purchase.total) === 5425, `Purchase total should stay client-supplied MAD unchanged: got ${eurPurchase.body.purchase.total}`);
+  assert(Number(eurPurchase.body.purchase.foreignTotal) === 500, `Purchase foreignTotal math wrong: expected 500 (5425/10.85), got ${eurPurchase.body.purchase.foreignTotal}`);
+
+  const badCurrencyPurchase = await request('/purchases', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'PENDING', items: [{ productId: a.product.id, quantity: 1, unitCost: 10 }], total: 10, currencyId: 999999 }),
+  });
+  assert(badCurrencyPurchase.status === 400, `Invalid currencyId on purchase was not rejected (${badCurrencyPurchase.status})`);
+
+  const updateEur = await request(`/currencies/${eurId}`, a.token, { method: 'PUT', body: JSON.stringify({ rate: 11.2 }) });
+  assert(updateEur.status === 200 && Number(updateEur.body.currency.rate) === 11.2, `Currency rate update failed: ${updateEur.status} ${JSON.stringify(updateEur.body)}`);
+  // The earlier sale's snapshotted exchangeRate must NOT retroactively change
+  // when the Currency's current rate is edited later - same historical-
+  // immutability guarantee as tvaRate.
+  const eurSaleAfterRateChange = await request(`/sales`, a.token);
+  const persistedSale = eurSaleAfterRateChange.body.sales?.find((s: any) => s.id === eurSale.body.id);
+  assert(persistedSale && Number(persistedSale.exchangeRate) === 10.85, `Editing Currency.rate retroactively changed an already-recorded sale's snapshotted exchangeRate: ${JSON.stringify(persistedSale)}`);
+
+  const crossUpdate = await request(`/currencies/${eurId}`, b.token, { method: 'PUT', body: JSON.stringify({ rate: 1 }) });
+  assert(crossUpdate.status === 404, `Cross-tenant currency update was not rejected (${crossUpdate.status})`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

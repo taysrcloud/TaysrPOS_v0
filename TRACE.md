@@ -751,6 +751,52 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Track H: multi-currency for Sale + Purchase
+
+- Scope question resolved before building: in a Moroccan retail context, customers almost always pay in
+  MAD but suppliers importing goods often invoice in EUR/USD - Sale and Purchase needed different
+  treatment, so this was worth asking rather than assuming. User chose both, same pass.
+- **Design principle: `total`/`subtotal`/`taxTotal` on Sale and Purchase stay in the company currency
+  (MAD) always, computed exactly as before with zero change to that logic.** `currencyId`/
+  `exchangeRate`/`foreignTotal` are purely additive record-keeping - the recorded equivalent in another
+  currency, not a replacement source of truth. This was the deciding factor over the alternative
+  (letting a foreign amount drive the MAD total): every existing consumer of `total` - Track D
+  auto-posting, PDF receipts, Dashboard/Reports, supplier-balance increments, the Hanout Express sync
+  ingestion built yesterday - keeps reading it completely unchanged, so this carries zero regression risk
+  to four tracks' worth of already-verified money math.
+- New `Currency` model (company-scoped: `code`, `name`, `symbol`, `rate` - manually maintained, no live
+  FX API, matching how `TaxRate.rate` is already manually configured rather than fetched). Each
+  Sale/Purchase resolves and snapshots the rate at write time into its own `exchangeRate` field - same
+  resolve-then-snapshot pattern as `TaxRate` -> `tvaRate`, so editing a `Currency`'s current rate later
+  never rewrites an already-recorded document's historical rate. Verified this specific guarantee live,
+  not just assumed it: created a sale, changed the `Currency`'s rate afterward, re-fetched the sale, and
+  confirmed its `exchangeRate` was untouched.
+- A per-transaction `exchangeRate` override is accepted and takes precedence over the `Currency`'s
+  stored rate (today's actual FX rate can differ from whatever was last typed into the currency record) -
+  verified live.
+- `backend/src/routes/currency.routes.ts`: list/create/update, company-scoped, `ADMIN`/`MANAGER` for
+  writes. Sale and Purchase creation both accept optional `currencyId` (+ optional `exchangeRate`
+  override); an invalid or cross-tenant `currencyId` is rejected with 400 before the transaction starts,
+  same place location/warehouse/table are already validated.
+- Verified live end-to-end against the real dev DB: EUR currency created (lowercase code normalizes to
+  uppercase, duplicate code rejected), a 2-unit sale correctly computed `total=24` MAD unchanged with
+  `foreignTotal` correctly derived at the stored 10.85 rate, a second sale with an explicit rate override
+  correctly used 11 instead, an invalid `currencyId` rejected on both Sale and Purchase, cross-tenant
+  currency use rejected, a purchase framed as "500 EUR equivalent" correctly kept `total=5425` MAD
+  (client-supplied, unchanged from today's behavior) with `foreignTotal=500` computed correctly, and
+  Track D's existing ledger posting confirmed completely unaffected (both currency-tagged sales still
+  posted their exact MAD amounts). Locked into `tenant-isolation-smoke.ts` (33 assertions now, up from
+  32). Full suite passes twice in a row with zero orphaned rows. Both workspaces' `tsc` clean. Schema
+  change applied additively, no `--accept-data-loss` needed.
+- **Not built this pass, deliberately:** no frontend currency picker/display anywhere (API-only, matching
+  this session's established backend-first pattern - useful today for anyone integrating directly, e.g.
+  a future accounting export or admin tool). Purchase's write direction stays "client sends the MAD
+  total, currency is additive metadata" rather than "client sends the foreign total and MAD is derived" -
+  decided this way for symmetry and to avoid inventing an asymmetric contract; if real usage later shows
+  purchasers want to type the foreign invoice amount and have MAD computed, that's naturally a frontend
+  concern (the form does that math client-side before submitting the same MAD-total shape this API
+  already expects), not a backend contract change. No live FX rate lookup - manual only, by design.
+
 ## 2026-08-13 - Track G: real device auth + sync for Hanout Express (not the legacy Connector module)
 
 - **Corrects a stale assumption from the 2026-08-12 plan/baseline.** That doc treated

@@ -20,6 +20,9 @@ router.get('/', requireAuth, async (req: any, res, next) => {
       reference: p.reference,
       supplier: p.supplier?.fullName || 'Inconnu',
       total: Number(p.total),
+      currencyId: p.currencyId ?? null,
+      exchangeRate: p.exchangeRate != null ? Number(p.exchangeRate) : null,
+      foreignTotal: p.foreignTotal != null ? Number(p.foreignTotal) : null,
       status: p.status,
       date: p.createdAt.toISOString().split('T')[0],
       items: p.items.length,
@@ -42,7 +45,13 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
         quantity: z.number(),
         unitCost: z.number()
       })),
-      total: z.number()
+      total: z.number(),
+      // Track H: optional foreign-currency record, e.g. a supplier invoice
+      // priced in EUR/USD. total above stays the MAD figure (unchanged,
+      // still client-supplied exactly as before) - this snapshots what it
+      // equals in another currency, same treatment as Sale.
+      currencyId: z.coerce.number().int().positive().optional(),
+      exchangeRate: z.coerce.number().positive().optional(),
     }).parse(req.body);
 
     const companyId = (req as any).user.companyId;
@@ -58,6 +67,17 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
       if (!location) return res.status(404).json({ error: 'Magasin introuvable' });
     }
 
+    let currencyId: number | undefined;
+    let exchangeRate: number | undefined;
+    let foreignTotal: number | undefined;
+    if (parsed.currencyId) {
+      const currency = await prisma.currency.findFirst({ where: { id: parsed.currencyId, companyId } });
+      if (!currency) return res.status(400).json({ error: 'Devise invalide' });
+      exchangeRate = parsed.exchangeRate ?? Number(currency.rate);
+      currencyId = currency.id;
+      foreignTotal = Math.round((parsed.total / exchangeRate) * 100) / 100;
+    }
+
     const purchase = await prisma.$transaction(async (tx) => {
       const created = await tx.purchase.create({
         data: {
@@ -65,6 +85,9 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res
           supplierId: parsed.supplierId,
           reference: `ACH-${Math.floor(Math.random() * 10000)}`,
           total: parsed.total,
+          currencyId,
+          exchangeRate,
+          foreignTotal,
           status: parsed.status,
           items: {
             create: parsed.items.map(i => ({

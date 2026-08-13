@@ -16,6 +16,11 @@ const saleSchema = z.object({
   discountRate: z.coerce.number().min(0).max(100).default(0),
   locationId: z.coerce.number().int().positive().optional(),
   tableId: z.coerce.number().int().positive().optional(),
+  // Track H: optional foreign-currency record. total/subtotal/taxTotal stay
+  // in MAD always (computed from items exactly as before) - this just
+  // resolves and snapshots what that MAD total equals in another currency.
+  currencyId: z.coerce.number().int().positive().optional(),
+  exchangeRate: z.coerce.number().positive().optional(),
   items: z.array(z.object({
     productId: z.coerce.number().int().positive(),
     quantity: z.coerce.number().positive(),
@@ -79,6 +84,11 @@ const normalizeSale = (sale: any) => ({
   subtotal: asNumber(sale.subtotal),
   taxTotal: asNumber(sale.taxTotal),
   discountTotal: asNumber(sale.discountTotal),
+  // Track H: null unless a foreign currency was recorded at creation. total
+  // above always stays the MAD figure - this is purely the equivalent.
+  currencyId: sale.currencyId ?? null,
+  exchangeRate: sale.exchangeRate != null ? asNumber(sale.exchangeRate) : null,
+  foreignTotal: sale.foreignTotal != null ? asNumber(sale.foreignTotal) : null,
   items: sale.items?.reduce((sum: number, item: any) => sum + asNumber(item.quantity), 0) || 0,
   method: methodLabel(sale),
   status: statusLabel(sale),
@@ -232,6 +242,21 @@ router.post('/', async (req, res) => {
     const discountTotal = lineDiscount + orderDiscount;
     const taxTotal = rawLines.reduce((sum, line) => sum + line.lineTax, 0);
     const total = Math.max(0, subtotal - discountTotal + taxTotal);
+
+    // Track H: resolve + snapshot the foreign-currency equivalent before the
+    // transaction starts, same place location/warehouse/table are validated.
+    // total stays in MAD - this is purely the recorded equivalent.
+    let currencyId: number | undefined;
+    let exchangeRate: number | undefined;
+    let foreignTotal: number | undefined;
+    if (data.currencyId) {
+      const currency = await prisma.currency.findFirst({ where: { id: data.currencyId, companyId } });
+      if (!currency) return res.status(400).json({ message: 'Devise invalide' });
+      exchangeRate = data.exchangeRate ?? asNumber(currency.rate);
+      currencyId = currency.id;
+      foreignTotal = Math.round((total / exchangeRate) * 100) / 100;
+    }
+
     const shouldFinalize = data.status === 'FINAL';
     const saleStatus = data.status === 'SUSPENDED' ? SaleStatus.SUSPENDED : data.status === 'FINAL' ? SaleStatus.FINAL : SaleStatus.DRAFT;
     const paymentStatus = !shouldFinalize ? PaymentStatus.UNPAID : data.method === 'CREDIT' ? PaymentStatus.UNPAID : PaymentStatus.PAID;
@@ -260,6 +285,9 @@ router.post('/', async (req, res) => {
           discountTotal,
           taxTotal,
           total,
+          currencyId,
+          exchangeRate,
+          foreignTotal,
           tableId: data.tableId,
           finalizedAt: shouldFinalize ? new Date() : null,
           items: {

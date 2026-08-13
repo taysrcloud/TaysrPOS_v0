@@ -591,3 +591,17 @@ Each time a meaningful block is finished:
 - Verified live: default role denial, grant, revoke, cross-tenant rejection, and the sharper case of an
   explicit deny overriding a role that would normally pass. 32 assertions now (up from 31), full suite
   clean twice in a row, both workspaces typecheck clean. Full writeup in TRACE.md.
+
+## 2026-08-13 - Track H: multi-currency for Sale + Purchase
+
+- Asked which side needed it first (Moroccan retail: customers pay in MAD, suppliers often invoice in
+  EUR/USD) - user chose both in the same pass. Built a new `Currency` model plus optional
+  `currencyId`/`exchangeRate`/`foreignTotal` on Sale and Purchase, with `total` staying in MAD always so
+  every existing money-math consumer (Track D ledger posting, receipts, Dashboard, Hanout sync) keeps
+  working completely unchanged - this was the key design call that made the whole feature zero-risk to
+  add.
+- Verified live: currency CRUD, foreign-total math on both a sale and a purchase, a per-transaction rate
+  override beating the stored rate, invalid/cross-tenant currency rejection, and - the sharper check -
+  that editing a currency's rate later does not retroactively change an already-recorded sale's
+  snapshotted rate (same immutability guarantee as tax rates). 33 assertions now (up from 32), full suite
+  clean twice in a row, both workspaces typecheck clean. Full writeup in TRACE.md.
