@@ -261,6 +261,10 @@ export type RegisterHistory = {
   id: number;
   userId?: number;
   openedAt: string;
+  // Full ISO timestamp, distinct from the display-formatted openedAt above -
+  // safe to compare against a Sale's own createdAtISO for shift-boundary
+  // purposes. See TRACE.md's Z-report shift-boundary entry.
+  openedAtISO?: string;
   closedAt: string;
   cashierName: string;
   initialCash: number;
@@ -744,7 +748,7 @@ const App = () => {
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [adjustmentForm, setAdjustmentForm] = useState<{ productId: number | null, type: 'Perte' | 'Casse' | 'Inventaire' | 'Vol', quantity: string, reason: string }>({ productId: null, type: 'Casse', quantity: '', reason: '' });
   const [stockView, setStockView] = useState<'STOCK' | 'HISTORY'>('STOCK');
-  const [registerDetails, setRegisterDetails] = useState({ openedAt: '', initialCash: 0, openedId: 0 });
+  const [registerDetails, setRegisterDetails] = useState({ openedAt: '', openedAtISO: '', initialCash: 0, openedId: 0 });
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1177,12 +1181,13 @@ const App = () => {
       setRegisterStatus('OPEN');
       setRegisterDetails({
         openedAt: scopedOpenSession.openedAt,
+        openedAtISO: scopedOpenSession.openedAtISO || '',
         initialCash: scopedOpenSession.initialCash,
         openedId: scopedOpenSession.id,
       });
     } else {
       setRegisterStatus('CLOSED');
-      setRegisterDetails(current => ({ ...current, openedAt: '', initialCash: 0, openedId: 0 }));
+      setRegisterDetails(current => ({ ...current, openedAt: '', openedAtISO: '', initialCash: 0, openedId: 0 }));
     }
   }, [currentUser?.id, registerLogs, currentLocationId]);
 

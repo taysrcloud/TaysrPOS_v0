@@ -133,7 +133,11 @@ export const RegisterPage = () => {
                   });
                   if (!response.ok) throw new Error('API unavailable');
                   const session = (await response.json()).session;
-                  setRegisterDetails({ openedAt: new Date().toLocaleString('fr-FR'), initialCash: amount, openedId: session.id });
+                  // openedAtISO comes straight from the server's own session.openedAt
+                  // (a real ISO timestamp, not the locale-formatted display string) -
+                  // it's the shift-boundary source of truth for the Z-report below,
+                  // not just a display value. See TRACE.md's Z-report shift-boundary entry.
+                  setRegisterDetails({ openedAt: new Date().toLocaleString('fr-FR'), openedAtISO: session.openedAt, initialCash: amount, openedId: session.id });
                   setRegisterStatus('OPEN');
                   setStatus('Caisse ouverte avec succes');
                 } catch {
@@ -675,7 +679,15 @@ export const RegisterPage = () => {
       )}
 
       {zReportModalOpen && (() => {
-        const shiftSales = sales.filter(s => s.status === 'Payee' && s.id >= registerDetails.openedId);
+        // Was `s.id >= registerDetails.openedId` - registerDetails.openedId is a
+        // CashRegisterSession id, not a Sale id. Those are two unrelated
+        // auto-increment sequences, so that comparison didn't actually bound
+        // "sales since this shift opened" at all (verified live: it matched
+        // every sale the tenant had ever recorded). Real boundary is a
+        // timestamp comparison against the session's own openedAtISO - both
+        // sides are real ISO 8601 strings, safe to compare lexicographically.
+        // See TRACE.md's Z-report shift-boundary entry.
+        const shiftSales = sales.filter(s => s.status === 'Payee' && !!s.createdAtISO && !!registerDetails.openedAtISO && s.createdAtISO >= registerDetails.openedAtISO);
         // A MULTI sale used to contribute 0 here regardless of how much of it
         // was actually cash - the till would look short by exactly the cash
         // portion of every split-payment sale on every closing. Now reads the

@@ -1280,3 +1280,45 @@ split-payment verification pass were left in the tenant's history, same rational
 **Not done in this pass, deliberately:** no attempt to shrink `PosContextValue` further than the audit
 required - every threaded field earned its place by a confirmed cross-page usage, not by convenience.
 Task #26 (Z-report shift-boundary bug) remains open and is unrelated to this extraction.
+
+## 2026-08-13 - Fixed the Z-report shift-boundary bug (task #26)
+
+Real fix, not just a comparison-operator swap. `registerDetails.openedId` is a `CashRegisterSession.id`;
+comparing a `Sale.id` against it (`s.id >= registerDetails.openedId`) never bounded anything, since the
+two are unrelated auto-increment sequences. The correct boundary is a timestamp comparison, and that
+needed a real fix on *both* sides, not just the comparison itself:
+
+- `Sale.createdAtISO` already existed (added in an earlier session for the same class of problem -
+  `createdAt` is a pre-formatted display string, unsafe to parse or compare).
+- The session side had no equivalent. `GET /register/sessions`' existing `openedAt` field is
+  deliberately truncated and space-separated for display
+  (`s.openedAt.toISOString().replace('T', ' ').substring(0, 16)`) - comparing it directly against a
+  real ISO string would have been a *second*, more subtle bug: since `' '` (space) sorts before `'T'`
+  lexicographically, a naive string comparison between the two different formats would evaluate as
+  "session opened before every sale" unconditionally, for any session on any day. Would have looked
+  like a fix, produced a plausible-looking number, and been wrong in a different way. Caught by tracing
+  the actual field format before writing the comparison, not by testing after the fact.
+
+**Fix:** added a genuine full-precision `openedAtISO` field alongside the existing display `openedAt`
+in `GET /register/sessions`'s response (additive, existing `openedAt` untouched) and in the frontend's
+`registerDetails` state (both where it's set from `POST /register/open`'s response - which already
+returns a real ISO timestamp via Prisma's default JSON serialization, so no backend change was needed
+there - and where it's set from the "already open on page load" effect in `main.tsx`, reading the new
+`GET /sessions` field). `RegisterPage.tsx`'s Z-report block now filters
+`s.createdAtISO >= registerDetails.openedAtISO`, both real ISO 8601 strings, safe to compare
+lexicographically.
+
+**Verified live, not just by inspection - this bug specifically needed a real "before vs after" check**
+since a plausible-but-wrong number is easy to miss by eye: before the fix, the demo tenant's Z-report
+read `178,00 MAD` (every historical sale's cash ever recorded - see the RegisterPage extraction entry
+above, where this exact figure was captured as a baseline without yet knowing it was wrong). Queried the
+database directly for the actual open session's `openedAt` and computed the correct answer independently
+(only sales created at or after that moment: two sales, 20 MAD cash each, in-shift correct total = 40
+MAD). Reloaded the Z-report in the browser after the fix: read exactly `40,00 MAD`, with `Ventes
+globales` correctly showing `72,00 MAD` (both in-shift sales' totals) rather than every sale ever made.
+Confirmed the 7 sales that predate this session are now correctly excluded.
+
+New smoke assertions (`POST /register/open` returns a parseable ISO `session.openedAt`; `GET
+/register/sessions` returns a matching, full-precision, parseable `openedAtISO` containing `'T'`, not the
+truncated display format) - 44 total now, full suite passes twice in a row. Both workspaces typecheck and
+build clean.

@@ -21,6 +21,13 @@ router.get('/sessions', requireAuth, async (req: any, res, next) => {
       id: s.id,
       userId: s.userId,
       openedAt: s.openedAt.toISOString().replace('T', ' ').substring(0, 16),
+      // Full, untruncated ISO timestamp - the display-formatted openedAt above
+      // (space-separated, minute precision) is not safe to compare against a
+      // sale's own createdAtISO for shift-boundary purposes: at minimum it
+      // truncates precision, and 'T' vs ' ' as the date/time separator sorts
+      // differently in a naive string comparison. See TRACE.md's Z-report
+      // shift-boundary entry.
+      openedAtISO: s.openedAt.toISOString(),
       closedAt: s.closedAt ? s.closedAt.toISOString().replace('T', ' ').substring(0, 16) : null,
       cashierName: s.user.fullName,
       initialCash: Number(s.openingCash),

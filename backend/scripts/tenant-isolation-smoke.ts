@@ -858,10 +858,34 @@ try {
   });
   assert(creditNoCustomerSplit.status === 400, `Credit-only MULTI sale with no customer was not rejected (${creditNoCustomerSplit.status})`);
 
+  // ── Register session openedAtISO (2026-08-13) ────────────────────────────
+  // Regression for the Z-report shift-boundary bug: the frontend used to
+  // compare a Sale.id against registerDetails.openedId, which is actually a
+  // CashRegisterSession.id - two unrelated ID sequences, so the "current
+  // shift" filter didn't bound anything in practice. Fix needs a real
+  // timestamp on both sides (Sale.createdAtISO already existed; the session
+  // side needed a genuine full-precision ISO field, since GET /sessions'
+  // existing `openedAt` is deliberately truncated/space-separated for
+  // display and isn't safe to compare against an ISO string directly).
+  const openedSession = await request('/register/open', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ initialCash: 500, locationId: a.location.id }),
+  });
+  assert(openedSession.status === 200 && openedSession.body.session?.id, `Register open failed: ${openedSession.status} ${JSON.stringify(openedSession.body)}`);
+  const rawOpenedAt = openedSession.body.session.openedAt;
+  assert(!Number.isNaN(new Date(rawOpenedAt).getTime()), `POST /register/open session.openedAt is not a parseable ISO timestamp: ${JSON.stringify(rawOpenedAt)}`);
+
+  const sessionsAfterOpen = await request('/register/sessions', a.token);
+  const listedSession = sessionsAfterOpen.body.sessions?.find((s: any) => s.id === openedSession.body.session.id);
+  assert(listedSession, `Newly-opened session did not appear in GET /register/sessions`);
+  assert(typeof listedSession.openedAtISO === 'string' && !Number.isNaN(new Date(listedSession.openedAtISO).getTime()), `GET /register/sessions openedAtISO is missing or not a parseable ISO timestamp: ${JSON.stringify(listedSession.openedAtISO)}`);
+  assert(listedSession.openedAtISO.includes('T'), `openedAtISO should be a real ISO string (contains 'T'), got ${JSON.stringify(listedSession.openedAtISO)} - the display-only openedAt field uses a space separator instead`);
+  assert(Math.abs(new Date(listedSession.openedAtISO).getTime() - new Date(rawOpenedAt).getTime()) < 1000, `openedAtISO from the sessions list should match the moment reported at open time: ${listedSession.openedAtISO} vs ${rawOpenedAt}`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

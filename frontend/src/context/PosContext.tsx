@@ -83,8 +83,8 @@ export interface PosContextValue {
   completeSale: (method: PaymentMethod) => Promise<void>;
   registerStatus: 'OPEN' | 'CLOSED';
   setRegisterStatus: (status: 'OPEN' | 'CLOSED') => void;
-  registerDetails: { openedAt: string; initialCash: number; openedId: number };
-  setRegisterDetails: Dispatch<SetStateAction<{ openedAt: string; initialCash: number; openedId: number }>>;
+  registerDetails: { openedAt: string; openedAtISO: string; initialCash: number; openedId: number };
+  setRegisterDetails: Dispatch<SetStateAction<{ openedAt: string; openedAtISO: string; initialCash: number; openedId: number }>>;
   suspendNote: string;
   setSuspendNote: (value: string) => void;
   suspendModalOpen: boolean;

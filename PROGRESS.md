@@ -713,3 +713,19 @@ OS, not by this work). Both workspaces typecheck and build clean.
 This closes Phase 1's page-extraction work - all four planned pages (Registers/Payments, Kitchen/Reports,
 and now Register) are out of `main.tsx`. Full writeup, including the complete relocate-vs-thread
 classification and the reasoning behind each, is in TRACE.md.
+
+## 2026-08-13 - Fixed the Z-report shift-boundary bug
+
+The Z-report's "current shift" filter compared a sale's id against a register session's id - two
+unrelated counters - so it never actually bounded anything to the current shift; it silently included
+every sale a tenant had ever made. Fixed by adding a real, full-precision ISO timestamp to the register
+session data (both what the open-register call returns and what the sessions list returns - the
+existing list field was already truncated for display purposes and would have been a second, more
+subtle bug if reused directly for this comparison) and comparing that against each sale's own real
+timestamp instead of comparing unrelated ID sequences.
+
+Verified live with a real before/after comparison: the demo tenant's Z-report read 178 MAD before the
+fix (every historical cash sale ever recorded) and exactly 40 MAD after - the correct total for only the
+two sales made since the currently open shift began, independently confirmed against the database.
+44 backend assertions now, full suite passes twice in a row. Both workspaces typecheck and build clean.
+Full writeup in TRACE.md.
