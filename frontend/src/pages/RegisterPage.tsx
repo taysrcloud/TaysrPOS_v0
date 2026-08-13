@@ -4,7 +4,7 @@ import {
   ImageIcon, Lock, Mail, Maximize2, Monitor, Package, Pause, Percent, Plus, ReceiptText, RotateCcw,
   Search, ShoppingCart, Store, Trash2, Users, Wallet, XCircle,
 } from 'lucide-react';
-import { formatMoney } from '../main';
+import { formatMoney, linePrice } from '../main';
 import type { DenominationCounts, PaymentMethod, Product, SaleRecord } from '../main';
 import { usePos } from '../context/PosContext';
 
@@ -24,7 +24,7 @@ export const RegisterPage = () => {
     topupContact, setTopupContact, topupAmount, setTopupAmount,
     messageContact, setMessageContact, messageContent, setMessageContent,
     selectedVariableProduct, setSelectedVariableProduct, visibleProducts, getSaleDueAmount,
-    setInvoiceSale, openSaleSettlement,
+    setInvoiceSale, openSaleSettlement, groupPrices,
   } = usePos();
 
   // Register-exclusive state relocated from App - confirmed via a full-file
@@ -263,7 +263,7 @@ export const RegisterPage = () => {
           <div className="cart-table">
             <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
             {cart.length === 0 ? <div className="pos-empty"><ShoppingCart size={34} /><strong>Votre panier est vide</strong><span>Scannez un code-barres ou cliquez sur un produit.</span></div> : cart.map(line => {
-              const currentPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+              const currentPrice = linePrice(line, groupPrices);
               const lineNet = Math.max(0, (currentPrice - line.discount) * line.quantity);
               return <div className="cart-row" key={line.uniqueId}>
                 <span>
@@ -532,7 +532,13 @@ export const RegisterPage = () => {
               <button className="primary-action" onClick={() => {
                 setCart(current => current.map(line => {
                   if (line.uniqueId === editingLineId) {
-                    const basePrice = line.variation ? line.variation.salePrice : line.product.salePrice;
+                    // Deliberately excludes line.customPrice (unlike linePrice()) - this
+                    // is the "true" underlying price used to decide whether the typed
+                    // value differs from it at all. Including the line's own existing
+                    // override here would make it impossible to ever clear one: typing
+                    // the real base/group/variation price back in would still compare
+                    // unequal against the stale override instead of matching it.
+                    const basePrice = line.variation?.salePrice ?? groupPrices[line.product.id] ?? line.product.salePrice;
                     const priceNum = Number(editLineForm.price || basePrice);
                     return { ...line, customPrice: priceNum !== basePrice ? priceNum : undefined, discount: Number(editLineForm.discount || 0), note: editLineForm.note || undefined };
                   }

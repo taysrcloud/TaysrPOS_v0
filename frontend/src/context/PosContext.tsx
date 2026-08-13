@@ -109,6 +109,7 @@ export interface PosContextValue {
   setMessageContent: (value: string) => void;
   selectedVariableProduct: Product | null;
   setSelectedVariableProduct: (product: Product | null) => void;
+  groupPrices: Record<number, number>;
 }
 
 export const PosContext = createContext<PosContextValue | null>(null);

@@ -2,10 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth, requireRole, AuthRequest } from '../middleware/auth.js';
+import { resolveCustomerGroupPrices } from '../utils/pricing.js';
 
 // Track C (catalog/pricing depth): CustomerGroup + SellingPriceGroup + per-product
-// price overrides. CRUD only in this pass - resolving a customer's group price
-// into the POS cart is register-adjacent and deferred (see schema.prisma comment).
+// price overrides.
 const router = Router();
 
 const asNumber = (value: unknown) => value && typeof value === 'object' && 'toNumber' in value
@@ -93,6 +93,26 @@ router.post('/customer-groups', requireAuth, requireRole(['ADMIN', 'MANAGER']), 
     res.status(201).json({ success: true, group });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ message: 'Groupe client invalide', errors: err.issues });
+    next(err);
+  }
+});
+
+// Track C: resolve a customer's group price overrides so the POS cart can
+// show/charge the same price the backend will actually charge at checkout
+// (sale.routes.ts uses the same resolver at write time - keep both call
+// sites on this one function so they can't drift apart).
+router.get('/resolve/:customerId', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const customerId = Number(req.params.customerId);
+    if (!Number.isInteger(customerId) || customerId <= 0) return res.status(400).json({ message: 'Client invalide' });
+
+    const contact = await prisma.contact.findFirst({ where: { id: customerId, companyId } });
+    if (!contact) return res.status(404).json({ message: 'Client introuvable' });
+
+    const prices = await resolveCustomerGroupPrices(prisma, companyId, customerId);
+    res.json({ prices: Object.fromEntries(prices) });
+  } catch (err) {
     next(err);
   }
 });

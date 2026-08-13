@@ -348,6 +348,73 @@ try {
   });
   assert(crossPriceGroupWrite.status === 404, `Cross-tenant price group write was not rejected (${crossPriceGroupWrite.status})`);
 
+  // ── Group pricing resolution into the cart (2026-08-13) ───────────────────
+  // Track C's actual cart wiring: assign a contact to a CustomerGroup, give
+  // the linked SellingPriceGroup an override for a.product, and confirm a
+  // sale for that customer is priced from the override - the same resolver
+  // sale.routes.ts uses and /pricing/resolve/:customerId exposes for the
+  // frontend cart display, so both stay in lockstep by construction.
+  const groupProductPrice = await request(`/pricing/groups/${priceGroup.body.group.id}/prices`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ productId: a.product.id, price: 7 }),
+  });
+  assert(groupProductPrice.status === 200, `Group product price set failed: ${groupProductPrice.status} ${JSON.stringify(groupProductPrice.body)}`);
+
+  const assignCustomerGroup = await request(`/contacts/${a.contact.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ type: 'CUSTOMER', fullName: a.contact.fullName, creditLimit: 0, isActive: true, customerGroupId: customerGroup.body.group.id }),
+  });
+  assert(assignCustomerGroup.status === 200 && assignCustomerGroup.body.contact?.customerGroupId === customerGroup.body.group.id, `Contact customerGroupId assignment failed: ${assignCustomerGroup.status} ${JSON.stringify(assignCustomerGroup.body)}`);
+
+  const groupPricedSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL' }),
+  });
+  assert(groupPricedSale.status === 201 && groupPricedSale.body.lines?.[0]?.unitPrice === 7, `Group-priced sale did not resolve the override (expected unitPrice 7): ${JSON.stringify(groupPricedSale.body)}`);
+
+  // A selected variation's own price must win over the group override - the
+  // group price has no variation dimension in the schema. Uses a dedicated
+  // throwaway product rather than a.product: adding a variation to a shared
+  // fixture product creates a second, variation-scoped ProductStock row for
+  // it, which would make later a.product stock assertions elsewhere in this
+  // script (queried without a variationId filter) non-deterministic.
+  const variationProduct = await prisma.product.create({ data: { companyId: a.company.id, sku: `SKU-VAR-${marker}`, name: `Variation Product ${marker}`, salePrice: 10, trackStock: true } });
+  const variationProductGroupPrice = await request(`/pricing/groups/${priceGroup.body.group.id}/prices`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ productId: variationProduct.id, price: 7 }),
+  });
+  assert(variationProductGroupPrice.status === 200, `Group product price set (variation product) failed: ${variationProductGroupPrice.status} ${JSON.stringify(variationProductGroupPrice.body)}`);
+  const groupPriceVariation = await prisma.productVariation.create({ data: { productId: variationProduct.id, name: 'Grande', salePrice: 30, isActive: true } });
+  const variationBeatsGroupSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: a.contact.id, locationId: a.location.id, items: [{ productId: variationProduct.id, variationId: groupPriceVariation.id, quantity: 1 }], method: 'CASH', status: 'FINAL' }),
+  });
+  assert(variationBeatsGroupSale.status === 201 && variationBeatsGroupSale.body.lines?.[0]?.unitPrice === 30, `Variation price should win over group price (expected unitPrice 30): ${JSON.stringify(variationBeatsGroupSale.body)}`);
+
+  const resolvePrices = await request(`/pricing/resolve/${a.contact.id}`, a.token);
+  assert(resolvePrices.status === 200 && resolvePrices.body.prices?.[String(a.product.id)] === 7, `/pricing/resolve did not return the expected override: ${JSON.stringify(resolvePrices.body)}`);
+
+  const crossResolvePrices = await request(`/pricing/resolve/${a.contact.id}`, b.token);
+  assert(crossResolvePrices.status === 404, `Cross-tenant /pricing/resolve was not rejected (${crossResolvePrices.status})`);
+
+  const crossGroupAssign = await request(`/contacts/${b.contact.id}`, b.token, {
+    method: 'PUT',
+    body: JSON.stringify({ type: 'CUSTOMER', fullName: b.contact.fullName, creditLimit: 0, isActive: true, customerGroupId: customerGroup.body.group.id }),
+  });
+  assert(crossGroupAssign.status === 400, `Cross-tenant customerGroupId assignment was not rejected (${crossGroupAssign.status})`);
+
+  // Revert a.contact's group assignment - every later block in this script
+  // reuses a.contact as the customer on a.product sales assuming the base
+  // salePrice (10). Leaving the group assignment in place would silently
+  // reprice every one of those sales to the group override (7) and break
+  // their unrelated ledger/balance math, exactly as it did the first time
+  // this block was written (see TRACE.md's group-pricing entry).
+  const revertCustomerGroup = await request(`/contacts/${a.contact.id}`, a.token, {
+    method: 'PUT',
+    body: JSON.stringify({ type: 'CUSTOMER', fullName: a.contact.fullName, creditLimit: 0, isActive: true, customerGroupId: null }),
+  });
+  assert(revertCustomerGroup.status === 200 && !revertCustomerGroup.body.contact?.customerGroupId, `Failed to revert a.contact's customerGroupId after the group-pricing test block: ${JSON.stringify(revertCustomerGroup.body)}`);
+
   const accountType = await request('/accounting/types', a.token, { method: 'POST', body: JSON.stringify({ name: `Caisse ${marker}` }) });
   assert(accountType.status === 201, `Account type create failed: ${accountType.status} ${JSON.stringify(accountType.body)}`);
 
@@ -882,10 +949,30 @@ try {
   assert(listedSession.openedAtISO.includes('T'), `openedAtISO should be a real ISO string (contains 'T'), got ${JSON.stringify(listedSession.openedAtISO)} - the display-only openedAt field uses a space separator instead`);
   assert(Math.abs(new Date(listedSession.openedAtISO).getTime() - new Date(rawOpenedAt).getTime()) < 1000, `openedAtISO from the sessions list should match the moment reported at open time: ${listedSession.openedAtISO} vs ${rawOpenedAt}`);
 
+  // ── Sale line variationId + note (2026-08-13) ─────────────────────────────
+  // The backend has always fully supported a per-line variationId (prices
+  // from the variation, not the base product, writes SaleItem.variationId)
+  // and note (writes SaleItem.notes) - salePayload() in the frontend just
+  // never sent either field. Regression for that payload fix: submit a sale
+  // with both fields and confirm they land correctly, priced from the
+  // variation rather than the base product.
+  const testVariation = await prisma.productVariation.create({
+    data: { productId: a.product.id, name: 'Grande', salePrice: 25.5, isActive: true },
+  });
+  const variationSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ locationId: a.location.id, items: [{ productId: a.product.id, variationId: testVariation.id, quantity: 2, note: 'test note' }], method: 'CASH', status: 'FINAL' }),
+  });
+  assert(variationSale.status === 201, `Sale with variationId failed: ${variationSale.status} ${JSON.stringify(variationSale.body)}`);
+  const variationLine = variationSale.body.lines?.[0];
+  assert(variationLine?.variationId === testVariation.id, `Sale line variationId not persisted: ${JSON.stringify(variationLine)}`);
+  assert(variationLine?.unitPrice === 25.5, `Sale line priced from base product (10) instead of variation (25.5): ${JSON.stringify(variationLine)}`);
+  assert(variationLine?.note === 'test note', `Sale line note not persisted: ${JSON.stringify(variationLine)}`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)'],
+    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)', 'sale line variationId + note persisted and priced from the variation, not the base product', 'group pricing resolution in the cart (customer group override applies, a selected variation still wins over the group price, /pricing/resolve matches the sale-time resolver, ownership on both the resolve endpoint and contact customerGroupId assignment)'],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {

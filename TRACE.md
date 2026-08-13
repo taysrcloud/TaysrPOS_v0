@@ -1322,3 +1322,106 @@ New smoke assertions (`POST /register/open` returns a parseable ISO `session.ope
 /register/sessions` returns a matching, full-precision, parseable `openedAtISO` containing `'T'`, not the
 truncated display format) - 44 total now, full suite passes twice in a row. Both workspaces typecheck and
 build clean.
+
+## 2026-08-13 - Sale payload was silently dropping variationId and note
+
+Investigating before starting Track C's group-pricing-in-cart work (advisor call, see PROGRESS.md), found
+`salePayload()` in `main.tsx` sent only `{ productId, quantity, discount }` per cart line - never
+`variationId` or `note` - even though the backend has always fully supported both: `sale.routes.ts`'s
+`rawLines` computation looks up the variation, prices from `variation.salePrice` (falling back to the
+base product only when no variation is given), writes `SaleItem.variationId`, and throws
+`VARIATION_NOT_FOUND` on an invalid one; `note` writes straight to `SaleItem.notes`. Every variable-product
+sale had therefore always been priced and recorded as the base product, silently ignoring whatever
+variation was actually selected in the cart.
+
+Distinguished from a second, superficially similar gap found in the same investigation: the "Modifier le
+prix" manual price override (`line.customPrice`) has no payload field at all, and that's *correct* -
+`saleSchema`'s `items` has no price field by design, since a client-supplied price on a POS endpoint would
+let a compromised or modified client set its own price with no server check. Fixing that for real needs a
+permission-gated server-side field (the UI already gates the override button on
+`ACTION:OVERRIDE_PRICE` from Track E's permission system, but a client-side UI gate is not an
+authorization boundary - the endpoint would need to re-check the permission itself). Deliberately left
+unfixed and separately flagged - not folded into this pass.
+
+**Fix:** one-line change to `salePayload()`'s `items` mapping - added `variationId: line.variation?.id`
+and `note: line.note`, both fields `CartLine` already carries.
+
+**Verified live**, since the demo tenant had zero products with any variation (`SELECT count(*) FROM
+"ProductVariation"` = 0) - a temporary script created a real variation on the demo product
+(`salePrice: 25.5` against the base product's `10`), logged in as the real demo admin (swapping the
+password hash out and back in a `finally` block so the account's real credentials were never disturbed),
+POSTed a sale with `variationId` + `note` through the actual `/api/sales` endpoint, and confirmed all
+three: `SaleItem.variationId` set correctly, `unitPrice` read `25.5` (the variation's price, not the base
+product's `10`), and `notes` persisted. Script and its test variation both deleted after; confirmed
+`ProductVariation` count back to 0 and the admin's original password hash restored. Regression assertion
+added to `tenant-isolation-smoke.ts` (45 total now), full suite passes twice in a row. Frontend typecheck
+clean.
+
+## 2026-08-13 - Group pricing resolved into the POS cart (Track C)
+
+Built the actual resolution the previous entry's fix was a prerequisite for: a customer assigned to a
+`CustomerGroup` with a linked `SellingPriceGroup` now gets that group's `ProductGroupPrice` override
+applied automatically, both in the cart's displayed total and in what checkout actually charges.
+
+**Precedence rule** (same on both sides, deliberately): a manual price override (`line.customPrice`)
+always wins first; then a selected variation's own `salePrice` (`ProductGroupPrice` has no variation
+dimension in the schema, so a variation's own price stands regardless of the customer's group); then the
+customer's resolved group-price override for the base product; then the product's own `salePrice`.
+
+**Shared resolver, not two implementations:** `backend/src/utils/pricing.ts`'s
+`resolveCustomerGroupPrices()` is the single source of truth, called from two places - `sale.routes.ts`
+at write time (so the actual charge is correct) and a new `GET /pricing/resolve/:customerId` (so the cart
+can show the same number before checkout). Deliberately architected this way so the cart's displayed price
+and the sale's charged price can't drift apart from each other. Returns an empty map (not an error) for a
+customer with no group, or a group with no linked price group - both are valid "no override" states, not
+failure states.
+
+**Closed a real prerequisite gap along the way:** `contact.routes.ts` had no way to assign a customer to a
+group at all - `customerGroupId` wasn't in `contactSchema`/`contactEditSchema`. Added it, plus
+`assertCustomerGroupOwnership()` (a cross-tenant check on both `POST /contacts` and `PUT /contacts/:id`,
+since `customerGroupId` is a foreign key into another tenant-scoped table and both handlers previously
+spread the parsed body straight into Prisma with no check on this specific field).
+
+**Frontend:** new `linePrice(line, groupPrices)` helper is now the single place cart/checkout math reads a
+line's price from, replacing several duplicated inline expressions (`cartSubtotal`/`cartTax`,
+`updateLineDiscount`'s discount cap, `localSaleFromCart`). A new `groupPrices` state, refetched via
+`GET /pricing/resolve/:customerId` whenever the selected customer changes, backs it. Contacts page gained
+a group-assignment dropdown per customer row (`updateContactGroup()`), populated from a new
+`GET /pricing/customer-groups` fetch.
+
+**Self-caught bug before shipping:** the edit-line-price modal's `basePrice` (used to detect whether a
+cashier's typed price differs from the "true" underlying price, to decide whether to set/clear
+`line.customPrice`) was initially wired to the same `linePrice()` helper as everywhere else - wrong here
+specifically, since `linePrice()` itself reads `line.customPrice` first, which would make an existing
+override impossible to ever clear (typing the real price back in would still compare unequal against the
+stale override `linePrice()` was itself reading). Caught in self-review before running anything; reverted
+to a hand-written expression that deliberately excludes `customPrice`.
+
+**Test-authoring bugs caught by the existing suite's own assertions failing on re-run** (both fixed, both
+were bugs in the new test code, not the product): (1) the "variation beats group price" assertion
+initially added a `ProductVariation` to the shared `a.product` fixture, which silently created a second
+`ProductStock` row (compound-unique on `[productId, warehouseId, variationId]`) and broke an unrelated,
+later stock assertion further down the same script run that queried without a `variationId` filter -
+fixed by using a dedicated throwaway product instead of the shared fixture. (2) the group-pricing block
+assigned `a.contact` to the test `CustomerGroup` and never reverted it, so every later block reusing
+`a.contact` as the customer on an `a.product` sale (the split-payment tests) silently repriced from the
+base `salePrice` (10) to the group override (7), corrupting their ledger-DEBIT assertions - fixed with an
+explicit revert (`customerGroupId: null`) at the end of the block, with a comment explaining the general
+rule: any state change to a shared tenant fixture must be reverted before later blocks reuse it, or a
+dedicated throwaway fixture must be used instead.
+
+**Verified live end-to-end through the actual rendered UI**, not just the API - seeded a real
+`SellingPriceGroup`/`CustomerGroup`/`ProductGroupPrice` (group price 9.50 vs. the demo product's base
+15.00) directly against the demo tenant (companyId 45), then drove a real headless-Chromium session
+through the actual app: assigned Ahmed Hanout to the group via the new Contacts dropdown, selected him as
+the cart customer in POS, added the group-priced product, and confirmed the cart line read 9,50 MAD (not
+15,00 MAD), with the TVA and total computed correctly off that price. Screenshots captured at each step.
+All test fixtures and the customer's group assignment reverted afterward; confirmed zero orphaned rows.
+Note for future sessions: mid-verification, Postgres, the backend, and the Vite dev server were all found
+to have been silently killed (matching this environment's documented "Termux OS can kill background
+processes" risk) - all three needed a manual restart before the browser run could succeed; not caused by
+this change.
+
+Two new assertion blocks added (variationId/note + group pricing); `tenant-isolation-smoke.ts` now carries
+200 `assert()` calls across 38 named coverage areas, full suite passes twice in a row. Both workspaces
+typecheck and build clean.

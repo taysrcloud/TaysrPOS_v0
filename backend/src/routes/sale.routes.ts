@@ -5,6 +5,7 @@ import { PaymentMethod, PaymentStatus, ProductType, SaleChannel, SaleStatus } fr
 import { prisma } from '../utils/prisma.js';
 import { generateInvoicePDF, generateReceiptPDF, type PdfCompany } from '../utils/pdf.js';
 import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
+import { resolveCustomerGroupPrices } from '../utils/pricing.js';
 
 const router = Router();
 
@@ -259,6 +260,11 @@ router.post('/', async (req, res) => {
     });
     if (products.length !== productIds.length) return res.status(400).json({ message: 'Un produit du panier est introuvable' });
 
+    // Track C: a customer's selling-price-group override applies to the base
+    // product price only - a selected variation's own salePrice still wins
+    // (ProductGroupPrice has no variation dimension in the schema).
+    const groupPrices = await resolveCustomerGroupPrices(prisma, companyId, data.customerId, productIds);
+
     const productMap = new Map(products.map(product => [product.id, product]));
     const rawLines = data.items.map(item => {
       const product = productMap.get(item.productId)!;
@@ -270,7 +276,9 @@ router.post('/', async (req, res) => {
         throw new Error('VARIATION_NOT_FOUND');
       }
 
-      const unitPrice = variation?.salePrice != null ? asNumber(variation.salePrice) : asNumber(product.salePrice);
+      const unitPrice = variation?.salePrice != null
+        ? asNumber(variation.salePrice)
+        : (groupPrices.get(item.productId) ?? asNumber(product.salePrice));
       const tvaRate = asNumber(product.tvaRate);
       const lineNet = Math.max(0, (unitPrice - item.discount) * item.quantity);
       const lineTax = lineNet * tvaRate / 100;

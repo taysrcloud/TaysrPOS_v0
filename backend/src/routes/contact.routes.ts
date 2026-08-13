@@ -15,6 +15,8 @@ const contactSchema = z.object({
   ice: z.string().optional().nullable(),
   creditLimit: z.coerce.number().min(0).default(0),
   balance: z.coerce.number().default(0),
+  // Track C: assigns this customer to a CustomerGroup for POS group pricing.
+  customerGroupId: z.coerce.number().int().positive().optional().nullable(),
 });
 
 // Same fields as create, minus balance (never edited directly - it's a derived ledger
@@ -35,6 +37,7 @@ const toContactResponse = (contact: {
   ice: string | null;
   isActive: boolean;
   createdAt: Date;
+  customerGroupId?: number | null;
 }) => ({
   id: contact.id,
   name: contact.fullName,
@@ -49,7 +52,17 @@ const toContactResponse = (contact: {
   address: contact.address || '',
   taxId: contact.ice || '',
   isActive: contact.isActive,
+  customerGroupId: contact.customerGroupId ?? undefined,
 });
+
+// Track C: a customerGroupId is a foreign key into another tenant-scoped table -
+// POST/PUT both spread the parsed body straight into Prisma, so without this
+// check a caller could attach a CustomerGroup belonging to a different company.
+const assertCustomerGroupOwnership = async (companyId: number, customerGroupId: number | null | undefined) => {
+  if (!customerGroupId) return true;
+  const group = await prisma.customerGroup.findFirst({ where: { id: customerGroupId, companyId } });
+  return !!group;
+};
 
 router.get('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
@@ -72,6 +85,10 @@ router.post('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const parsed = contactSchema.parse(req.body);
     const companyId = req.user!.companyId;
+
+    if (!(await assertCustomerGroupOwnership(companyId, parsed.customerGroupId))) {
+      return res.status(400).json({ message: 'Groupe client invalide' });
+    }
 
     const contact = await prisma.contact.create({
       data: {
@@ -98,6 +115,10 @@ router.put('/:id', requireAuth, async (req: AuthRequest, res, next) => {
     if (!existing) return res.status(404).json({ message: 'Contact introuvable' });
 
     const parsed = contactEditSchema.parse(req.body);
+    if (!(await assertCustomerGroupOwnership(companyId, parsed.customerGroupId))) {
+      return res.status(400).json({ message: 'Groupe client invalide' });
+    }
+
     const contact = await prisma.contact.update({
       where: { id: contactId },
       data: parsed,

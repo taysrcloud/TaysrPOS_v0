@@ -729,3 +729,30 @@ fix (every historical cash sale ever recorded) and exactly 40 MAD after - the co
 two sales made since the currently open shift began, independently confirmed against the database.
 44 backend assertions now, full suite passes twice in a row. Both workspaces typecheck and build clean.
 Full writeup in TRACE.md.
+
+## 2026-08-13 - Fixed a silent variationId/note drop in the sale payload
+
+While starting Track C's group-pricing work, found the cart's sale-submission payload never sent
+`variationId` or a line's `note`, even though the backend has always fully supported both - every
+variable-product sale was silently priced and recorded as the base product regardless of which variation
+was actually selected. One-line fix; verified live against a real created variation (priced correctly
+from the variation, not the base product). A related but separate gap - the manual price override has no
+payload field at all - was deliberately left unfixed, since the backend correctly refuses a client-sent
+price by design; a real fix needs a permission-gated server-side field, not payload wiring. 45 backend
+assertions now, full suite passes twice in a row. Full writeup in TRACE.md.
+
+## 2026-08-13 - Group pricing resolved into the POS cart (Track C)
+
+A customer assigned to a `CustomerGroup` linked to a `SellingPriceGroup` now gets that group's
+per-product price override applied automatically, in both the cart's displayed price and what checkout
+actually charges - resolved through one shared backend function so the two can't drift apart. Precedence:
+manual override > selected variation's own price > group override > base price. Also closed a
+prerequisite gap: contacts had no way to be assigned to a group at all (`customerGroupId` now settable,
+with cross-tenant ownership checks). Frontend: Contacts page gained a per-customer group-assignment
+dropdown; the cart's price math was consolidated into one `linePrice()` helper used everywhere instead of
+several duplicated inline expressions. Two test-authoring bugs (stale shared-fixture pollution, not
+product bugs) were caught by the existing suite's own assertions failing on re-run and fixed. Verified
+live end-to-end through the actual rendered UI, not just the API: a real headless-browser session assigned
+a demo customer to a seeded price group and confirmed the POS cart showed the group-override price, not
+the base price. All test fixtures reverted afterward, zero orphaned rows. Full suite passes twice in a
+row. Full writeup in TRACE.md.

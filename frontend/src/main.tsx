@@ -159,6 +159,13 @@ export type Contact = {
   address?: string;
   rewardPoints?: number;
   storeCredit?: number;
+  customerGroupId?: number;
+};
+
+export type CustomerGroup = {
+  id: number;
+  name: string;
+  priceGroupId: number | null;
 };
 
 type ProductForm = {
@@ -184,6 +191,18 @@ type ProductForm = {
 };
 
 export type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
+
+// Track C: resolves a cart line's effective unit price. Precedence, most
+// specific first: a manual price override always wins (a cashier who
+// overrode a price must never silently lose it just because a customer
+// with a group got attached afterward); then a selected variation's own
+// price (ProductGroupPrice has no variation dimension in the schema); then
+// the customer's resolved group-price override for the base product, if
+// any; then the product's own salePrice. groupPrices is keyed by productId,
+// fetched from /api/pricing/resolve/:customerId whenever the selected
+// customer changes - see PosContext's groupPrices field.
+export const linePrice = (line: CartLine, groupPrices: Record<number, number>): number =>
+  line.customPrice ?? line.variation?.salePrice ?? groupPrices[line.product.id] ?? line.product.salePrice;
 type SaleLine = { id?: number; productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; returnedQty?: number; note?: string; };
 export type SaleRecord = {
   invoiceId?: number;
@@ -701,6 +720,8 @@ const App = () => {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [customer, setCustomer] = useState<Contact>({ id: 0, name: 'Client comptoir', type: 'Client', phone: '-', balance: 0, creditLimit: 0, lastActivity: 'Aujourd hui' });
+  const [groupPrices, setGroupPrices] = useState<Record<number, number>>({});
+  const [customerGroups, setCustomerGroups] = useState<CustomerGroup[]>([]);
   const [selectedVariableProduct, setSelectedVariableProduct] = useState<Product | null>(null);
   const [sales, setSales] = useState<SaleRecord[]>([]);
     const [invoices, setInvoices] = useState<any[]>([]);
@@ -967,6 +988,17 @@ const App = () => {
     }
   };
 
+  const loadCustomerGroups = async () => {
+    try {
+      const response = await apiFetch('/api/pricing/customer-groups');
+      if (!response.ok) throw new Error('API unavailable');
+      const data = await response.json();
+      if (Array.isArray(data.groups)) setCustomerGroups(data.groups);
+    } catch {
+      // Expected when the API/database is offline; group-assignment dropdown just stays empty.
+    }
+  };
+
   const loadLocations = async () => {
     try {
       const response = await apiFetch(`/api/locations`);
@@ -1069,6 +1101,36 @@ const App = () => {
     }
   };
 
+  // Track C: assigns/unassigns a customer's pricing group from the Contacts
+  // list. contactEditSchema requires the full contact body, not a partial
+  // patch, so this resends the fields already known client-side.
+  const updateContactGroup = async (contact: Contact, customerGroupId: number | null) => {
+    try {
+      const response = await apiFetch(`/api/contacts/${contact.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: contact.type,
+          fullName: contact.name,
+          phone: contact.phone,
+          email: '',
+          address: contact.address,
+          creditLimit: contact.creditLimit,
+          isActive: true,
+          customerGroupId,
+        }),
+      });
+      if (!response.ok) throw new Error('API unavailable');
+      const payload = await response.json();
+      const updated: Contact = payload.contact;
+      setContacts(current => current.map(c => c.id === updated.id ? updated : c));
+      if (customer.id === updated.id) setCustomer(updated);
+      setStatus('Groupe tarifaire mis a jour');
+    } catch {
+      setStatus('Erreur: Impossible de mettre a jour le groupe tarifaire');
+    }
+  };
+
   const markKitchenReady = async (saleId: number) => {
         const stockUpdate = (p: Product) => {
           if (!p.trackStock) return p;
@@ -1158,7 +1220,8 @@ const App = () => {
         loadLocations(),
         loadExpenses(),
         loadPurchases(),
-        loadSessions()
+        loadSessions(),
+        loadCustomerGroups()
       ]);
       setDataLoading(false);
     };
@@ -1196,19 +1259,39 @@ const App = () => {
     return () => window.clearTimeout(timeout);
   }, [filter, search, restaurantEnabled, currentLocationId]);
 
+  // Track C: refetch the selected customer's group-price overrides whenever
+  // they change, so the cart's displayed totals stay in lockstep with what
+  // sale.routes.ts will actually charge at checkout (both read the same
+  // resolver server-side - see backend/src/utils/pricing.ts).
+  useEffect(() => {
+    if (!customer.id) { setGroupPrices({}); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await apiFetch(`/api/pricing/resolve/${customer.id}`);
+        if (!response.ok) throw new Error('API unavailable');
+        const data = await response.json();
+        if (!cancelled) setGroupPrices(data.prices || {});
+      } catch {
+        if (!cancelled) setGroupPrices({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customer.id]);
+
   const visibleProducts = useMemo(() => products.filter(product => restaurantEnabled || product.type !== 'MENU_ITEM'), [products, restaurantEnabled]);
   const lowStockProducts = useMemo(() => visibleProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert), [visibleProducts]);
   const cartSubtotal = useMemo(() => cart.reduce((sum, line) => {
-    const unitPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+    const unitPrice = linePrice(line, groupPrices);
     return sum + unitPrice * line.quantity;
-  }, 0), [cart]);
+  }, 0), [cart, groupPrices]);
   const cartLineDiscount = useMemo(() => cart.reduce((sum, line) => sum + line.discount * line.quantity, 0), [cart]);
   const orderDiscount = useMemo(() => cartSubtotal * (discountRate / 100) + (loyaltyPointsUsed * companySettings.amountPerPoint), [cartSubtotal, discountRate, loyaltyPointsUsed, companySettings.amountPerPoint]);
   const cartTax = useMemo(() => cart.reduce((sum, line) => {
-    const unitPrice = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+    const unitPrice = linePrice(line, groupPrices);
     const lineNet = Math.max(0, (unitPrice - line.discount) * line.quantity);
     return sum + (lineNet * line.product.tvaRate) / 100;
-  }, 0), [cart]);
+  }, 0), [cart, groupPrices]);
   const cartTotal = useMemo(() => Math.max(0, cartSubtotal - cartLineDiscount - orderDiscount + cartTax), [cartSubtotal, cartLineDiscount, orderDiscount, cartTax]);
 
   useEffect(() => {
@@ -1290,7 +1373,7 @@ const App = () => {
 
   const updateLineDiscount = (uniqueId: string, value: string) => {
     const discount = Math.max(0, Number(value || 0));
-    setCart(current => current.map(line => line.uniqueId === uniqueId ? { ...line, discount: Math.min(discount, line.variation ? line.variation.salePrice : line.product.salePrice) } : line));
+    setCart(current => current.map(line => line.uniqueId === uniqueId ? { ...line, discount: Math.min(discount, linePrice(line, groupPrices)) } : line));
   };
   // Barcode Scanner Integration
   const barcodeBufferRef = useRef('');
@@ -1399,7 +1482,7 @@ const App = () => {
       locationId: currentLocationId,
       pointsEarned: companySettings.loyaltyEnabled ? Math.floor(cartTotal / companySettings.pointsPerAmount) : 0,
       pointsUsed: loyaltyPointsUsed,
-      items: cart.map(line => ({ productId: line.product.id, quantity: line.quantity, discount: line.discount })),
+      items: cart.map(line => ({ productId: line.product.id, variationId: line.variation?.id, quantity: line.quantity, discount: line.discount, note: line.note })),
     };
     if (method === 'MULTI') {
       payload.splitPayments = [
@@ -1427,7 +1510,7 @@ const App = () => {
       createdAtISO: new Date().toISOString(),
       locationId: currentLocationId,
       lines: cart.map(line => {
-        const price = line.customPrice ?? (line.variation ? line.variation.salePrice : line.product.salePrice);
+        const price = linePrice(line, groupPrices);
         return {
           productId: line.product.id,
           variationId: line.variation?.id,
@@ -2165,7 +2248,18 @@ const App = () => {
                   <small style={{ color: '#7c3aed', fontWeight: 600 }}>
                     {invoiceableSales.length > 0 ? `${invoiceableSales.length} ticket(s) a facturer` : 'Pas de ticket a facturer'}
                   </small>
-                </span> 
+                  {customerGroups.length > 0 && (
+                    <select
+                      value={contact.customerGroupId || ''}
+                      onChange={e => updateContactGroup(contact, e.target.value ? Number(e.target.value) : null)}
+                      style={{ marginTop: '0.25rem', fontSize: '0.75rem', padding: '0.15rem 0.3rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}
+                      title="Groupe tarifaire"
+                    >
+                      <option value="">Sans groupe tarifaire</option>
+                      {customerGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  )}
+                </span>
                 : <span>{Number.isNaN(new Date(contact.lastActivity).getTime()) ? contact.lastActivity : new Date(contact.lastActivity).toLocaleDateString('fr-FR')}</span>}
               <span style={{ display: 'flex', gap: '0.5rem' }}>
                 {contact.balance > 0 && <button className="row-action" onClick={() => { setSettlingContact(contact); setSettlementAmount(String(contact.balance)); }} style={{ color: '#10b981', background: '#d1fae5', border: 'none' }}>Regler</button>}
@@ -3616,6 +3710,7 @@ const App = () => {
     topupContact, setTopupContact, topupAmount, setTopupAmount,
     messageContact, setMessageContact, messageContent, setMessageContent,
     selectedVariableProduct, setSelectedVariableProduct,
+    groupPrices,
   };
 
   if (authChecking) {
