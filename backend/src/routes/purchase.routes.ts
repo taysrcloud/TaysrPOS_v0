@@ -34,6 +34,46 @@ router.get('/', requireAuth, async (req: any, res, next) => {
   }
 });
 
+// Detail view with full per-item receivedQty/returnedQty - needed to build a
+// partial receive/return quantity picker in the UI. The list endpoint above
+// only returns an item *count*, not enough to drive that.
+router.get('/:id', requireAuth, async (req: any, res, next) => {
+  try {
+    const companyId = req.user.companyId;
+    const purchase = await prisma.purchase.findFirst({
+      where: { id: Number(req.params.id), companyId },
+      include: { supplier: true, items: { include: { product: true } } },
+    });
+    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
+
+    res.json({
+      purchase: {
+        id: purchase.id,
+        reference: purchase.reference,
+        supplier: purchase.supplier?.fullName || null,
+        supplierId: purchase.supplierId,
+        status: purchase.status,
+        total: Number(purchase.total),
+        currencyId: purchase.currencyId ?? null,
+        exchangeRate: purchase.exchangeRate != null ? Number(purchase.exchangeRate) : null,
+        foreignTotal: purchase.foreignTotal != null ? Number(purchase.foreignTotal) : null,
+        date: purchase.createdAt.toISOString(),
+        items: purchase.items.map(item => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          quantity: Number(item.quantity),
+          unitCost: Number(item.unitCost),
+          receivedQty: Number(item.receivedQty),
+          returnedQty: Number(item.returnedQty),
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req, res, next) => {
   try {
     const parsed = z.object({

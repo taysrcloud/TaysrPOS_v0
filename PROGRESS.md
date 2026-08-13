@@ -614,3 +614,18 @@ Each time a meaningful block is finished:
   rejects over-payment and settling a zero balance. Verified live: partial settlement, full settlement,
   both rejection cases, cross-tenant rejection. 34 assertions now (up from 33), full suite clean twice in
   a row. Full writeup in TRACE.md.
+
+## 2026-08-13 - Frontend: partial purchase receive/return and sale return
+
+- Found and fixed two real, previously-undiscovered bugs: both "Retourner" buttons in the app
+  (purchases and sales) were pure local-state mutations that never called the backend, despite the real
+  endpoints existing and working since 2026-08-12. Also fixed the purchase-status badge, which compared
+  against French strings the API never actually sends.
+- Built proper partial-quantity receive/return UI for both (new `PurchaseDetailModal` and
+  `SaleReturnModal` components), backed by a new `GET /api/purchases/:id` detail endpoint and new
+  `id`/`returnedQty` fields on the sale API response - neither existed before, both were needed to
+  target a specific line item.
+- Verified live through the actual rendered UI with the headless-browser tooling, not just the API: a
+  partial purchase receive and a partial sale return, both confirmed correct in the UI and the database.
+  Full suite still 34/34, both workspaces typecheck clean, fresh build succeeds. Full writeup in
+  TRACE.md.

@@ -751,6 +751,52 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Frontend: partial purchase receive/return and sale return, both real bugs
+
+- Confirmed a finding from an earlier exploration pass this session, in the actual code, not just from
+  memory: `handleReturnPurchase` and `handleReturnSale` in `main.tsx` were **both 100% local-state
+  mutations with zero API calls** - the "Retourner" buttons had never once hit the backend, despite
+  `POST /purchases/:id/return` and `POST /sales/:id/return` existing and working server-side since
+  Track B/A (2026-08-12). Separately, `PurchaseRecord.status` was typed as a French union
+  (`'Recu'|'Retour'|...`) the API never actually sends - it sends the real `PurchaseStatus` enum
+  (`PENDING`/`PARTIALLY_RECEIVED`/`RECEIVED`/`RETURNED`) unmodified (`purchase.routes.ts` has no
+  French-label translation, unlike `sale.routes.ts`'s `statusLabel()`). Every comparison against those
+  French strings silently always failed: the status badge always fell to a plain default class, and the
+  purchase-return action button (gated on `status === 'Recu'`) never rendered for any real API-sourced
+  purchase.
+- **Purchase side:** added `purchaseStatusLabel`/`purchaseStatusBadgeClass` helpers (`purchase-modals.tsx`)
+  mapping the real enum to French display text. Added `GET /api/purchases/:id` (full item detail with
+  `receivedQty`/`returnedQty` - the list endpoint only ever returned an item *count*, not enough to
+  drive a quantity picker). New `PurchaseDetailModal` component: per-line quantity inputs for both
+  receive (default = remaining) and return (default = 0, capped at returnable), calling the real
+  `PUT /:id/receive` / `POST /:id/return` endpoints. Deleted `handleReturnPurchase` entirely (dead,
+  wrong logic) rather than patching it.
+- **Sale side:** added `id`/`returnedQty` to `normalizeSale`'s `lines` output (`sale.routes.ts`) - neither
+  existed in the API response before, and both are required to target a specific `SaleItem` for a
+  partial return. New `SaleReturnModal` component (`sale-modals.tsx`), same per-line quantity-picker
+  pattern, calling the real `POST /:id/return`. The "Retourner" button's gating condition changed from a
+  bare `sale.status === 'Payee'` check to computing returnability directly from the lines
+  (`quantity - returnedQty > 0` on any line) - the old check couldn't distinguish "fully returned,
+  nothing left" from "partially returned, more available" since both map to the same `'Retour'` display
+  status. Deleted `handleReturnSale` entirely, same reasoning as the purchase side.
+- **Verified live through the actual rendered UI, not just the API**, using the headless-browser
+  tooling: logged in, navigated to Achats, opened a real `PENDING` purchase, entered a partial receive
+  quantity (4 of 10), submitted, and confirmed both the modal (now showing `PARTIALLY_RECEIVED` /
+  "Partiellement reçu" with a `Retourner` action newly available) and the underlying database
+  (`receivedQty=4`, supplier balance +20, purchase status `PARTIALLY_RECEIVED`) updated correctly.
+  Separately, navigated to Ventes, opened a real `FINAL` sale's receipt, clicked `Retourner`, entered a
+  partial return quantity (1 of 3), submitted, and confirmed the sale correctly moved to
+  `PARTIALLY_RETURNED` with `SaleItem.returnedQty=1` while `Sale.total` correctly stayed at its original
+  historical value (immutable, as designed - only the returned-quantity tracking changed). Screenshots
+  captured at every step.
+- One unrelated environment gotcha hit and worth noting: the backend dev server was running via plain
+  `tsx` (no watch mode), so the new `GET /:id` route and the `returnedQty` field change weren't live until
+  the server was manually restarted - it returned a stale 404 on first attempt. Not a code bug; just a
+  reminder that this project's dev-server invocation doesn't auto-reload.
+- Full suite re-run after these changes: 34/34 `tenant-isolation-smoke.ts` assertions still pass
+  (unaffected - these were pure frontend + response-shape additions, no behavior change to the core
+  return/receive math), both workspaces' `tsc` clean, fresh `vite build` succeeds.
+
 ## 2026-08-13 - Credit-sale settlement endpoint (closes a gap flagged twice earlier this session)
 
 - Both the original migration audit and Track D's writeup flagged this: a `CREDIT` sale increments

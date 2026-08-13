@@ -101,6 +101,7 @@ const normalizeSale = (sale: any) => ({
   // TRACE.md 2026-08-12.
   createdAtISO: sale.createdAt ? new Date(sale.createdAt).toISOString() : new Date().toISOString(),
   lines: sale.items?.map((item: any) => ({
+    id: item.id,
     productId: item.productId,
     variationId: item.variationId || undefined,
     name: item.variation?.name ? `${item.product?.name || 'Produit'} (${item.variation.name})` : item.product?.name || 'Produit',
@@ -111,6 +112,9 @@ const normalizeSale = (sale: any) => ({
     discount: asNumber(item.discount),
     tvaRate: asNumber(item.tvaRate),
     lineTotal: asNumber(item.lineTotal),
+    // Track A return flow: how much of this line was already returned, so the
+    // frontend can compute a returnable remainder for a partial-return picker.
+    returnedQty: item.returnedQty != null ? asNumber(item.returnedQty) : 0,
     note: item.notes || undefined,
   })) || [],
 });

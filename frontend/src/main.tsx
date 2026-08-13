@@ -23,6 +23,7 @@ import {
   Monitor,
   Edit2,
   Package,
+  PackageCheck,
   Pause,
   Percent,
   Plus,
@@ -53,7 +54,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   AreaChart, Area, ComposedChart, LineChart, Line, PieChart, Pie, Cell
 } from 'recharts';
-import { CreatePurchaseModal } from './purchase-modals';
+import { CreatePurchaseModal, PurchaseDetailModal, purchaseStatusLabel, purchaseStatusBadgeClass } from './purchase-modals';
+import { SaleReturnModal } from './sale-modals';
 import { PageHeader } from './components/PageHeader';
 import { productImage } from './components/productImage';
 import { PosContext, type PosContextValue } from './context/PosContext';
@@ -179,7 +181,7 @@ type ProductForm = {
 };
 
 type CartLine = { product: Product; variation?: ProductVariation; quantity: number; discount: number; customPrice?: number; note?: string; uniqueId: string; };
-type SaleLine = { productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; note?: string; };
+type SaleLine = { id?: number; productId: number; variationId?: number; name: string; sku: string; quantity: number; unitPrice: number; discount: number; tvaRate: number; lineTotal: number; returnedQty?: number; note?: string; };
 export type SaleRecord = {
   invoiceId?: number;
   userId?: number;
@@ -276,7 +278,10 @@ type PurchaseRecord = {
   reference: string;
   supplier: string;
   total: number;
-  status: 'Recu' | 'Partiel' | 'Brouillon' | 'Retour';
+  // Real backend PurchaseStatus enum values (PENDING/PARTIALLY_RECEIVED/
+  // RECEIVED/RETURNED) - was previously a fake French union the API never
+  // actually sent. See purchaseStatusLabel/purchaseStatusBadgeClass.
+  status: string;
   createdAt: string;
   lines?: SaleLine[]; // Reuse SaleLine for simplicity
   locationId?: number;
@@ -640,6 +645,8 @@ const App = () => {
   const [actualCash, setActualCash] = useState('');
   const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [purchaseDetailId, setPurchaseDetailId] = useState<number | null>(null);
+  const [saleReturnTarget, setSaleReturnTarget] = useState<SaleRecord | null>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [cashMovementModalOpen, setCashMovementModalOpen] = useState(false);
   const [cashMovementForm, setCashMovementForm] = useState<{type: 'IN' | 'OUT', amount: string, note: string}>({type: 'IN', amount: '', note: ''});
@@ -1464,50 +1471,6 @@ const App = () => {
     setPage('POS');
   };
 
-  const handleReturnSale = (saleId: number) => {
-    const sale = sales.find(s => s.id === saleId);
-    if (!sale || sale.status !== 'Payee') return;
-
-    // 1. Update sale status
-    setSales(current => current.map(s => s.id === saleId ? { ...s, status: 'Retour' } : s));
-
-    // 2. Restore product stock
-    if (sale.lines) {
-      setProducts(current => current.map(p => {
-        const line = sale.lines?.find(l => l.productId === p.id);
-        if (line && p.trackStock) {
-          return { ...p, stock: p.stock + line.quantity };
-        }
-        return p;
-      }));
-    }
-
-    // 3. Revert customer balance / loyalty points
-    if (sale.customer !== 'Client comptoir') {
-      setContacts(current => current.map(c => {
-        if (c.name === sale.customer) {
-          return {
-            ...c,
-            rewardPoints: Math.max(0, (c.rewardPoints || 0) - (sale.pointsEarned || 0) + (sale.pointsUsed || 0)),
-            // Revert balance if sale had credit
-            balance: sale.method === 'CREDIT' ? Math.max(0, c.balance - sale.total) : 
-                     (sale.splitPayments?.find(p => p.method === 'CREDIT')?.amount ? 
-                       Math.max(0, c.balance - (sale.splitPayments.find(p => p.method === 'CREDIT')?.amount || 0)) : c.balance)
-          };
-        }
-        return c;
-      }));
-    }
-
-    // 4. Revert register cash if it was CASH payment
-    if (sale.method === 'CASH') {
-      const currentCash = parseFloat(actualCash || '0');
-      setActualCash((currentCash - sale.total).toString());
-    }
-
-    setStatus(`Vente ${sale.ticket} retournée.`);
-    setReceiptSale(null);
-  };
 
   const getSalePaidAmount = (sale: SaleRecord) => {
     if (!sale.splitPayments?.length) {
@@ -1602,26 +1565,6 @@ const App = () => {
     closeSaleSettlement();
   };
 
-  const handleReturnPurchase = (purchaseId: number) => {
-    const purchase = purchases.find(p => p.id === purchaseId);
-    if (!purchase || purchase.status === 'Retour') return;
-
-    // 1. Update purchase status
-    setPurchases(current => current.map(p => p.id === purchaseId ? { ...p, status: 'Retour' } : p));
-
-    // 2. Deduct product stock
-    if (purchase.lines) {
-      setProducts(current => current.map(prod => {
-        const line = purchase.lines?.find(l => l.productId === prod.id);
-        if (line && prod.trackStock) {
-          return { ...prod, stock: prod.stock - line.quantity };
-        }
-        return prod;
-      }));
-    }
-
-    setStatus(`Achat ${purchase.reference} retourné.`);
-  };
 
   const completeSale = async (method: PaymentMethod) => {
     if (!cart.length) return;
@@ -3021,12 +2964,12 @@ const App = () => {
             <span><strong>{purchase.reference}</strong><small>Bon d'achat</small></span>
             <span>{purchase.supplier}</span>
             <span>{formatMoney(purchase.total)}</span>
-            <span className={purchase.status === 'Recu' ? 'badge ok' : purchase.status === 'Retour' ? 'badge warn' : 'badge'}>{purchase.status}</span>
+            <span className={purchaseStatusBadgeClass(purchase.status)}>{purchaseStatusLabel(purchase.status)}</span>
             <span>{purchase.createdAt}</span>
             <span className="list-actions">
-              {purchase.status === 'Recu' && currentUser?.role !== 'CASHIER' && (
-                <button className="ghost-action" onClick={() => handleReturnPurchase(purchase.id)} style={{ color: '#ef4444' }}>
-                  <RotateCcw size={14} style={{ marginRight: '4px' }} /> Retourner
+              {currentUser?.role !== 'CASHIER' && (
+                <button className="ghost-action" onClick={() => setPurchaseDetailId(purchase.id)}>
+                  <PackageCheck size={14} style={{ marginRight: '4px' }} /> Gerer
                 </button>
               )}
             </span>
@@ -4926,7 +4869,21 @@ const App = () => {
       <main className={page === 'POS' ? 'pos-main' : undefined}>
         {renderPage()}
         {renderContactModal()}
-        {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} serialPort={serialPort} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => handleReturnSale(receiptSale.id) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {receiptSale && <ReceiptPanel sale={receiptSale} settings={companySettings} serialPort={serialPort} onClose={() => setReceiptSale(null)} onReturn={currentUser?.role !== 'CASHIER' ? () => setSaleReturnTarget(receiptSale) : undefined} onLoadToCart={() => handleLoadToCart(receiptSale)} onInvoice={() => { const sale = receiptSale; setReceiptSale(null); setInvoiceSale(sale); }} />}
+        {saleReturnTarget && (
+          <SaleReturnModal
+            sale={saleReturnTarget}
+            apiFetch={apiFetch}
+            formatMoney={formatMoney}
+            onClose={() => setSaleReturnTarget(null)}
+            onReturned={(updated) => {
+              setSaleReturnTarget(null);
+              setReceiptSale(updated);
+              loadSales();
+              setStatus(`Retour enregistre sur ${updated.ticket}.`);
+            }}
+          />
+        )}
         {profileModalOpen && currentUser && (
           <div className="calc-modal" style={{ zIndex: 9999 }}>
             <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '400px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -5038,6 +4995,15 @@ const App = () => {
             setStatus('Erreur');
           }
         }} />}
+        {purchaseDetailId !== null && (
+          <PurchaseDetailModal
+            purchaseId={purchaseDetailId}
+            apiFetch={apiFetch}
+            formatMoney={formatMoney}
+            onClose={() => setPurchaseDetailId(null)}
+            onChanged={loadPurchases}
+          />
+        )}
         {invoiceSale && <InvoicePanel sale={invoiceSale} settings={companySettings} onClose={() => setInvoiceSale(null)} />}
         {selectedFacture && <FacturePanel facture={selectedFacture} settings={companySettings} onClose={() => setSelectedFacture(null)} />}
         {invoicePaymentTarget && (
@@ -5271,7 +5237,7 @@ const ReceiptPanel = ({ sale, settings, onClose, onReturn, onLoadToCart, onInvoi
             <ShoppingCart size={16} style={{ marginRight: '8px' }} /> Charger dans la caisse
           </button>
         )}
-        {onReturn && sale.status === 'Payee' && (
+        {onReturn && (sale.lines?.some(l => l.quantity - (l.returnedQty || 0) > 0) ?? (sale.status === 'Payee' || sale.status === 'Credit')) && (
           <button className="secondary-action" onClick={onReturn} style={{ color: '#ef4444', borderColor: '#ef4444' }}>
             <RotateCcw size={16} style={{ marginRight: '8px' }} /> Retourner
           </button>
