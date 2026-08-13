@@ -558,3 +558,22 @@ Each time a meaningful block is finished:
   Verified: both workspaces' `tsc` clean, `vite build` succeeds, `prisma generate` succeeds, the
   headless-browser tooling still launches, and the full 29-assertion smoke suite still passes. `npm
   audit` now reports 0 vulnerabilities. Full writeup in TRACE.md.
+
+## 2026-08-13 - Track G: device auth + sync for the real Hanout Express app
+
+- Cloned `taysrcloud/TaysrHanout` (the small-store POS app the user needs API connectivity for) and read
+  its actual Retrofit interfaces rather than guessing from the legacy UltimatePOS Connector module -
+  found the real contract is a small custom sync protocol (6 endpoints, device-bound auth, thin DTOs),
+  not what either `connector.routes.ts` or the legacy module implement. Built it: `Device` model
+  (additive schema), `device/activate`+`device/refresh`+`device/logs`, `sync/batch`+`sync/pull`,
+  `receipt/send`, plus admin activation-code issuance in Settings.
+- Caught two real correctness bugs before they shipped: a balance sign-convention mismatch (v0's
+  `Contact.balance` and Hanout's own documented convention are opposite signs - fixed with a negation on
+  the pull side) and a data-loss gap in Hanout Express itself (customer credit payments never sync
+  up-stream, only sales do - flagged back, not fixable from this side).
+- Verified live end-to-end: activation, sync/pull isolation, a mixed batch (2 real sales + 1 deliberately
+  invalid), idempotent retry (no duplicate sale, no double-posted ledger entry), refresh-token rotation,
+  and immediate rejection of a revoked device. Locked into `tenant-isolation-smoke.ts` (31 assertions
+  now, up from 29). Also fixed an unrelated regression hit along the way: yesterday's Prisma version bump
+  broke this environment's `db push` workaround in a way that needed a one-line env-var fix. Full
+  writeup in TRACE.md.

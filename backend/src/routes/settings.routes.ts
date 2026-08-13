@@ -1,10 +1,69 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth, requireRole, AuthRequest, hasModuleAccess } from '../middleware/auth.js';
 
 const router = Router();
 const settingsSchema = z.record(z.string(), z.any());
+
+// Track G: device activation-code issuance for the Hanout Express app. Codes
+// are short and human-typeable (excludes 0/O/1/I/L to avoid transcription
+// errors when an admin reads one aloud or writes it on a slip of paper).
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const generateActivationCode = () =>
+  Array.from({ length: 8 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join('');
+
+router.post('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const locationId = Number(req.body?.locationId);
+    if (!Number.isInteger(locationId)) return res.status(400).json({ message: 'locationId requis' });
+    const location = await prisma.location.findFirst({ where: { id: locationId, companyId: req.user!.companyId } });
+    if (!location) return res.status(404).json({ message: 'Emplacement introuvable' });
+
+    let activationCode = generateActivationCode();
+    // Astronomically unlikely to collide (32^8 space) but retry once for safety.
+    if (await prisma.device.findUnique({ where: { activationCode } })) {
+      activationCode = generateActivationCode();
+    }
+
+    const device = await prisma.device.create({
+      data: { companyId: req.user!.companyId, locationId, activationCode },
+    });
+    res.status(201).json({ id: device.id, activationCode: device.activationCode, locationId: device.locationId });
+  } catch (error) { next(error); }
+});
+
+router.get('/devices', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const devices = await prisma.device.findMany({
+      where: { companyId: req.user!.companyId },
+      orderBy: { createdAt: 'desc' },
+      include: { location: { select: { name: true } } },
+    });
+    res.json(devices.map(d => ({
+      id: d.id,
+      locationId: d.locationId,
+      locationName: d.location.name,
+      activationCode: d.activationCode,
+      deviceModel: d.deviceModel,
+      appVersion: d.appVersion,
+      activatedAt: d.activatedAt,
+      lastSeenAt: d.lastSeenAt,
+      revokedAt: d.revokedAt,
+    })));
+  } catch (error) { next(error); }
+});
+
+router.delete('/devices/:id', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const device = await prisma.device.findFirst({ where: { id, companyId: req.user!.companyId } });
+    if (!device) return res.status(404).json({ message: 'Appareil introuvable' });
+    await prisma.device.update({ where: { id }, data: { revokedAt: new Date() } });
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
 
 router.get('/', requireAuth, async (req: AuthRequest, res, next) => {
   try {

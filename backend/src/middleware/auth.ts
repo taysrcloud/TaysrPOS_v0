@@ -109,6 +109,50 @@ export const requireRole = (allowedRoles: UserRole[]) => {
     next();
   };
 };
+export interface DeviceRequest extends Request {
+  device?: {
+    id: number;
+    companyId: number;
+    locationId: number;
+    deviceId: string;
+  };
+}
+
+// Track G: separate auth path for the Hanout Express Android app, which
+// authenticates as a device bound to one Location, not a logged-in User.
+// Token shape is issued/rotated by device.routes.ts (activate/refresh).
+export const requireDevice = async (req: DeviceRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'invalid_token', error_description: 'Missing or invalid Authorization header' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    if (decoded.type !== 'device') {
+      return res.status(401).json({ error: 'invalid_token', error_description: 'Not a device token' });
+    }
+
+    const device = await prisma.device.findUnique({ where: { id: decoded.deviceRecordId } });
+    if (!device || device.revokedAt || device.deviceId !== decoded.deviceId) {
+      return res.status(401).json({ error: 'invalid_token', error_description: 'Device revoked or not found' });
+    }
+
+    prisma.device.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } }).catch(() => {});
+
+    req.device = {
+      id: device.id,
+      companyId: device.companyId,
+      locationId: device.locationId,
+      deviceId: device.deviceId!,
+    };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'invalid_token', error_description: 'Token expired or invalid' });
+  }
+};
+
 export const requireModule = (module: string) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' });

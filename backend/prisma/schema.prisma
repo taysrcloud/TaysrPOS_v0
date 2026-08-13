@@ -145,6 +145,7 @@ model Company {
   notificationTemplates NotificationTemplate[]
   documentsAndNotes     DocumentAndNote[]
   dashboardConfigurations DashboardConfiguration[]
+  devices               Device[]
 }
 
 model User {
@@ -189,6 +190,7 @@ model Location {
   // Track D auto-posting (2026-08-12): per-location cash account, lazily
   // get-or-created the same way "Magasin principal" warehouses are.
   accounts      Account[]
+  devices       Device[]
 
   @@unique([companyId, name])
 }
@@ -495,6 +497,11 @@ model Sale {
   invoice       Invoice?      @relation(fields: [invoiceId], references: [id])
   originalSaleId Int?
   commissionAgentId Int?
+  // Idempotency key for sales pushed by an external device (Track G: Hanout
+  // Express sync/batch). The client generates a UUID client-side and retries
+  // whole batches on failure, so this is what dedupes a retried push into a
+  // single Sale row instead of creating duplicates. Null for POS-created sales.
+  externalId    String?       @unique
 
   company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   location        Location?             @relation(fields: [locationId], references: [id])
@@ -851,6 +858,40 @@ model DashboardConfiguration {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, userId])
+}
+
+// Track G (2026-08-13): external device auth for the Hanout Express Android
+// app. A separate auth path from User/oauth.routes.ts - Hanout authenticates
+// as a *device* bound to one Location, not a logged-in user. An admin
+// generates an activationCode from Settings (device row created with
+// deviceId/deviceToken null); the device redeems it once via
+// POST /device/activate, which fills in the device identity fields and
+// issues a token pair. refreshTokenHash is a bcrypt hash, never the raw
+// token - same reasoning as User.passwordHash.
+model Device {
+  id               Int       @id @default(autoincrement())
+  companyId        Int
+  locationId       Int
+  activationCode   String    @unique
+  phone            String?
+  deviceId         String?   @unique
+  deviceModel      String?
+  appVersion       String?
+  // SHA-256 digest of the refresh token, not bcrypt: the token itself is a
+  // random 256-bit value, not a low-entropy secret like a password, so a
+  // deterministic hash gives an indexed O(1) lookup on /device/refresh
+  // (the client sends only the token, no device_id) with no meaningful
+  // security loss versus bcrypt's slow, non-lookupable salted hash.
+  refreshTokenHash String?   @unique
+  activatedAt      DateTime?
+  lastSeenAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 

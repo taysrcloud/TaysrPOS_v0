@@ -751,6 +751,81 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Track G: real device auth + sync for Hanout Express (not the legacy Connector module)
+
+- **Corrects a stale assumption from the 2026-08-12 plan/baseline.** That doc treated
+  `backend/src/routes/connector.routes.ts` as "unrelated to parity - Platform sync bridge" and treated
+  Track G (external Connector API) as an unstarted, need-to-confirm-demand item modeled on the legacy
+  `TaysrPOS-old/Modules/Connector` (30+ REST endpoints, Laravel Passport OAuth2). Neither is right.
+  `connector.routes.ts` already has a comment - `status: 'FINAL', // Hanout-express syncs finalized
+  sales` - proving a prior pass built it *for* Hanout Express, and the user confirmed a real client
+  (`taysrcloud/TaysrHanout`, an Android/web POS for small Moroccan corner stores) needs this. But cloning
+  that repo and reading its actual Retrofit interfaces (`DeviceApiService`, `SyncApiService` under
+  `app/.../data/remote/`) showed the real contract is neither what `connector.routes.ts` implements nor
+  the legacy UltimatePOS Connector module - it's a small, custom, purpose-built sync protocol: 6
+  endpoints total (`device/activate`, `device/refresh`, `device/logs`, `sync/batch`, `sync/pull`,
+  `receipt/send`), device-bound auth (not user login), and deliberately thin DTOs (`{id, name, price,
+  barcode}` for products, `{id, name, phone, balance}` for customers - no stock/tax/category data
+  requested at all). `connector.routes.ts` is untouched by this work; nothing calls it today, but it
+  might still serve some other consumer, so it was left alone rather than assumed dead.
+- **Real bug found in Hanout Express itself, not fixed here (can't - it's a separate repo), just
+  flagged:** `CustomerRepository.kt` never enqueues a sync event - only `SaleRepository` does, and only
+  `entityType: "sale"`. Customers flow server-to-app only (`SyncRepository.pullUpdates()`'s own comment:
+  "Server is authoritative for name + balance"). A cashier collecting a credit-debt payment on the
+  Hanout tablet updates the local Room balance only; the next periodic pull-sync (every 15 min, or
+  immediately after any sale) would silently overwrite it back to the stale server value. This is a real
+  data-loss risk in that app, worth relaying to whoever maintains `taysrcloud/TaysrHanout`.
+- **Sign-convention mismatch caught before it shipped:** Hanout's own README documents a
+  negative-balance convention ("balance = -120 -> customer owes 120"). v0's `Contact.balance` is the
+  opposite - positive means the customer owes the store (a receivable; it's incremented on a CREDIT
+  sale). Pulling the raw value across would have shown every debtor as having store credit and vice
+  versa. Fixed by negating in `GET /sync/pull`'s customer mapping only - the CREDIT-sale balance
+  increment on the ingest side stays in v0's own convention, since that's server-side authoritative
+  math, never transmitted from the client.
+- **Schema (additive only):** `Device` model (`companyId`, `locationId`, `activationCode`, `phone`,
+  `deviceId`, `deviceModel`, `appVersion`, `refreshTokenHash`, `activatedAt`/`lastSeenAt`/`revokedAt`) -
+  a second auth path parallel to the existing user-JWT one (`oauth.routes.ts`), since a device
+  authenticates as itself, bound to one `Location`, not as a logged-in `User`. `Sale.externalId String?
+  @unique` - idempotency key for sales pushed from a device, since `SyncWorker` retries whole batches on
+  failure and the client generates its own UUID client-side.
+- **Refresh-token storage: SHA-256 digest, not bcrypt.** Initially reached for bcrypt (matching
+  `User.passwordHash`) before realizing that's the wrong tool here - a refresh token is already a random
+  256-bit value, not a low-entropy secret like a password, and Hanout's `/device/refresh` call sends
+  only the token itself (no `device_id`), so the lookup has to be indexed. Bcrypt is deliberately slow
+  and non-deterministic (correct for passwords, wrong for this); a deterministic SHA-256 digest gives an
+  O(1) unique-indexed lookup with no meaningful security loss given the token's own entropy - the same
+  pattern GitHub/OAuth providers use for PATs and refresh tokens.
+- **Prisma's own AI-safety guard fired** on the `db push --accept-data-loss` needed to apply this
+  (purely additive - new table + two new nullable/unique columns, unlike the `Purchase.status`
+  conversion earlier this session, which the same flag proved genuinely destructive on). Stopped and got
+  explicit user consent before proceeding, per the guard's own required protocol - target was confirmed
+  as the local dev database only, and the resulting diff was exactly what was expected: one new
+  unique-constraint check, no drops.
+- **Unrelated regression found and fixed along the way:** `db push` failed with an opaque `Error: Schema
+  engine error:` and no other detail. Root cause: yesterday's Dependabot fix bumped `prisma`
+  7.8.0 -> 7.9.1, and this Termux/aarch64 environment requires manually invoking `db push` with
+  `PRISMA_SCHEMA_ENGINE_BINARY` pointed at a separately-downloaded ARM64 engine binary (see the
+  `setup-local-postgres.sh` comment header) - that env var just wasn't set in this shell invocation. Not
+  a version-hash mismatch (checked: the cached engine's hash matched `prisma -v`'s reported hash
+  exactly) - purely a missed env var. Documented here since the opaque error message gives no hint what
+  actually went wrong.
+- **Verified live end-to-end**, not just typed: generated an activation code via the new
+  `POST /api/settings/devices`, activated a real device, confirmed `sync/pull` returns only that
+  tenant's products/customers with the balance sign correctly flipped, pushed a mixed batch (CASH sale,
+  CREDIT sale, and one deliberately-bad product id) and confirmed exact stock/balance/ledger math plus
+  correct partial failure (the bad-product event failed cleanly, the other two succeeded, no partial
+  writes leaked from the failed one), retried the same batch and confirmed no duplicate `Sale` row or
+  double-posted ledger entry, rotated a refresh token and confirmed the old one is immediately rejected,
+  and confirmed a revoked device is rejected on its very next request even though its JWT is still
+  cryptographically unexpired. All of this is now locked into `tenant-isolation-smoke.ts` (31 assertions
+  total, up from 29) including two cross-tenant checks (device-list/revoke ownership, and a
+  re-redeem-with-different-device-id rejection). Full suite passes twice in a row with zero orphaned
+  rows left behind; both workspaces' `tsc` clean.
+- **Not built:** `device/logs` accepts and drops (no retention) - low priority per this pass's scoping.
+  Product/customer *push* from Hanout (only pull exists, matching what the app actually needs today).
+  Admin UI in Settings for the new activation-code endpoints (API-only, matching this session's
+  established pattern of shipping backend-first, UI later once browser-available sessions pick it up).
+
 ## 2026-07-16 - Restaurant module access contract
 
 - Previous risk: the frontend expected planLimits.modules as a string array, while Platform may store modules as an object. The settings API also accepted restaurantEnabled without checking entitlement.
