@@ -733,7 +733,7 @@ const App = () => {
   const [calcPrev, setCalcPrev] = useState<number | null>(null);
   const [calcOp, setCalcOp] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations' | 'devises'>('general');
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(defaultRolePermissions);
   const saveRolePermissions = async (perms: RolePermissions) => {
     setRolePermissions(perms);
@@ -789,6 +789,78 @@ const App = () => {
   };
 
   useEffect(() => { if (isAuthenticated && currentUser) void loadCompanySettings(); }, [isAuthenticated, currentUser?.id]);
+
+  // Track H (currency management) + Track E (per-user permission overrides).
+  // Both are small, additive Settings sub-sections - loaded eagerly alongside
+  // company settings since neither list is ever large enough to justify a
+  // lazy-on-tab-visit load.
+  const [currencies, setCurrencies] = useState<{ id: number; code: string; name: string; symbol: string | null; rate: number; isActive: boolean }[]>([]);
+  const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '', rate: '' });
+  const loadCurrencies = async () => {
+    try {
+      const response = await apiFetch('/api/currencies');
+      if (!response.ok) return;
+      const data = await response.json();
+      if (Array.isArray(data.currencies)) setCurrencies(data.currencies);
+    } catch { /* Settings sub-section - fail quietly, matches loadCompanySettings' siblings. */ }
+  };
+  const createCurrency = async () => {
+    if (!newCurrency.code.trim() || !newCurrency.name.trim() || !newCurrency.rate) return;
+    try {
+      const response = await apiFetch('/api/currencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: newCurrency.code, name: newCurrency.name, symbol: newCurrency.symbol || undefined, rate: Number(newCurrency.rate) }),
+      });
+      if (!response.ok) { const error = await response.json().catch(() => null); throw new Error(error?.message || 'Echec de creation'); }
+      setNewCurrency({ code: '', name: '', symbol: '', rate: '' });
+      await loadCurrencies();
+      setStatus('Devise ajoutee');
+    } catch (error) { setStatus(error instanceof Error ? error.message : 'Echec de creation de la devise'); }
+  };
+  const updateCurrencyRate = async (id: number, rate: number) => {
+    try {
+      const response = await apiFetch(`/api/currencies/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rate }) });
+      if (!response.ok) throw new Error('Echec de mise a jour');
+      await loadCurrencies();
+    } catch { setStatus('Echec de mise a jour du taux'); }
+  };
+
+  const [settingsUsers, setSettingsUsers] = useState<{ id: number; fullName: string; role: UserRole; username: string }[]>([]);
+  const [userPermissionOverrides, setUserPermissionOverrides] = useState<Record<number, { action: string; granted: boolean }[]>>({});
+  const [permissionActions, setPermissionActions] = useState<{ action: string; defaultRoles: UserRole[] }[]>([]);
+  const loadSettingsUsers = async () => {
+    try {
+      const [usersRes, actionsRes] = await Promise.all([apiFetch('/api/auth/users'), apiFetch('/api/settings/permissions/actions')]);
+      if (usersRes.ok) {
+        const users = await usersRes.json();
+        setSettingsUsers(users);
+        const entries = await Promise.all(users.map(async (u: { id: number }) => {
+          const res = await apiFetch(`/api/settings/permissions/${u.id}`);
+          return [u.id, res.ok ? await res.json() : []] as const;
+        }));
+        setUserPermissionOverrides(Object.fromEntries(entries));
+      }
+      if (actionsRes.ok) {
+        const data = await actionsRes.json();
+        if (Array.isArray(data.actions)) setPermissionActions(data.actions);
+      }
+    } catch { /* Settings sub-section - fail quietly. */ }
+  };
+  const toggleUserPermission = async (userId: number, action: string, roleDefault: boolean) => {
+    const current = userPermissionOverrides[userId]?.find(p => p.action === action);
+    const effective = current ? current.granted : roleDefault;
+    const next = !effective;
+    try {
+      const response = next === roleDefault
+        ? await apiFetch(`/api/settings/permissions/${userId}/${action}`, { method: 'DELETE' })
+        : await apiFetch(`/api/settings/permissions/${userId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, granted: next }) });
+      if (!response.ok) throw new Error('Echec de mise a jour');
+      await loadSettingsUsers();
+    } catch { setStatus('Echec de mise a jour des permissions'); }
+  };
+
+  useEffect(() => { if (isAuthenticated && currentUser) { void loadCurrencies(); void loadSettingsUsers(); } }, [isAuthenticated, currentUser?.id]);
 
   const restaurantEntitled = !currentUser?.accountId || Boolean(currentUser.planLimits?.modules?.includes('RESTAURANT'));
   const restaurantEnabled = restaurantEntitled && Boolean(companySettings?.restaurantEnabled);
@@ -4324,7 +4396,8 @@ const App = () => {
           { id: 'locations', label: 'Boutiques & Emplacements', icon: MapPin },
           { id: 'hardware', label: 'Matériel & Périphériques', icon: Monitor },
           { id: 'users', label: 'Utilisateurs', icon: Users },
-          { id: 'permissions', label: 'Rôles & Permissions', icon: Shield }
+          { id: 'permissions', label: 'Rôles & Permissions', icon: Shield },
+          { id: 'devises', label: 'Devises', icon: Wallet }
         ].map(t => (
           <button key={t.id} onClick={() => setSettingsTab(t.id as any)} className={`settings-nav-item ${settingsTab === t.id ? 'active' : ''}`}>
             <t.icon size={18} /> <span>{t.label}</span>
@@ -4618,20 +4691,38 @@ const App = () => {
         {settingsTab === 'users' && (
           <div className="product-form-panel" style={{ padding: '2rem' }}>
             <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
-              <div><p>Accès</p><h2>Utilisateurs et Rôles</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Gérez les accès à l'application.</span></div>
+              <div><p>Accès</p><h2>Utilisateurs et Rôles</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Gérez les accès à l'application. Les permissions individuelles ci-dessous s'ajoutent au rôle - elles ne le remplacent pas.</span></div>
             </div>
             <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', padding: '12px 16px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>
-                <span>Utilisateur</span><span>Rôle</span><span>Statut</span>
+              <div style={{ display: 'grid', gridTemplateColumns: `1.5fr 1fr ${permissionActions.map(() => '1fr').join(' ') || '0fr'}`, padding: '12px 16px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>
+                <span>Utilisateur</span><span>Rôle</span>
+                {permissionActions.map(pa => <span key={pa.action} style={{ textAlign: 'center' }}>{pa.action}</span>)}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', padding: '16px', borderTop: '1px solid var(--line)', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), #9333ea)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>A</div>
-                  <div><strong>admin@taysr.com</strong><br/><span style={{ fontSize: '0.8rem', color: '#64748b' }}>Administrateur principal</span></div>
+              {settingsUsers.length === 0 && (
+                <div style={{ padding: '16px', color: '#94a3b8', fontSize: '0.9rem' }}>Chargement...</div>
+              )}
+              {settingsUsers.map(u => (
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: `1.5fr 1fr ${permissionActions.map(() => '1fr').join(' ') || '0fr'}`, padding: '16px', borderTop: '1px solid var(--line)', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), #9333ea)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{u.fullName.charAt(0).toUpperCase()}</div>
+                    <div><strong>{u.fullName}</strong><br/><span style={{ fontSize: '0.8rem', color: '#64748b' }}>{u.username}</span></div>
+                  </div>
+                  <div><span style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>{u.role}</span></div>
+                  {permissionActions.map(pa => {
+                    const roleDefault = pa.defaultRoles.includes(u.role);
+                    const override = userPermissionOverrides[u.id]?.find(p => p.action === pa.action);
+                    const effective = override ? override.granted : roleDefault;
+                    return (
+                      <div key={pa.action} style={{ textAlign: 'center' }}>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '8px', cursor: 'pointer', background: effective ? '#f0fdf4' : '#f8fafc', border: `2px solid ${effective ? '#86efac' : '#e2e8f0'}` }}>
+                          <input type="checkbox" checked={effective} onChange={() => toggleUserPermission(u.id, pa.action, roleDefault)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#16a34a' }} />
+                        </label>
+                        {override && <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px' }}>override</div>}
+                      </div>
+                    );
+                  })}
                 </div>
-                <div><span style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>SUPER ADMIN</span></div>
-                <div><span style={{ padding: '4px 10px', background: '#f0fdf4', color: '#16a34a', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>Actif</span></div>
-              </div>
+              ))}
             </div>
             <div style={{ marginTop: '1rem', textAlign: 'right' }}>
               <button className="primary-action" disabled style={{ opacity: 0.5 }}>+ Ajouter un utilisateur</button>
@@ -4686,6 +4777,42 @@ const App = () => {
             <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe', fontSize: '0.85rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Shield size={18} />
               <span>Les permissions <strong>Admin</strong> sont verrouillées pour la sécurité. Modifiez les accès <strong>Manager</strong> et <strong>Caissier</strong> selon vos besoins.</span>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === 'devises' && (
+          <div className="product-form-panel" style={{ padding: '2rem' }}>
+            <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
+              <div><p>Finance</p><h2>Devises</h2><span style={{ color: '#64748b', fontSize: '0.85rem' }}>Taux de change maintenus manuellement - le total en MAD reste toujours la reference officielle des ventes et achats.</span></div>
+            </div>
+            <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr', padding: '12px 16px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>
+                <span>Code</span><span>Nom</span><span>Taux (MAD)</span><span>Statut</span>
+              </div>
+              {currencies.length === 0 && (
+                <div style={{ padding: '16px', color: '#94a3b8', fontSize: '0.9rem' }}>Aucune devise configuree.</div>
+              )}
+              {currencies.map(c => (
+                <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr', padding: '16px', borderTop: '1px solid var(--line)', alignItems: 'center' }}>
+                  <strong>{c.symbol ? `${c.code} (${c.symbol})` : c.code}</strong>
+                  <span>{c.name}</span>
+                  <input type="number" min="0" step="any" defaultValue={c.rate}
+                    onBlur={e => { const v = Number(e.target.value); if (v > 0 && v !== c.rate) updateCurrencyRate(c.id, v); }}
+                    style={{ width: '100px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                  <span style={{ padding: '4px 10px', background: c.isActive ? '#f0fdf4' : '#f1f5f9', color: c.isActive ? '#16a34a' : '#64748b', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700, width: 'fit-content' }}>{c.isActive ? 'Active' : 'Inactive'}</span>
+                </div>
+              ))}
+            </div>
+            <div className="panel-title" style={{ marginBottom: '1rem' }}>
+              <div><h2 style={{ fontSize: '1rem' }}>Ajouter une devise</h2></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr auto', gap: '10px', alignItems: 'end' }}>
+              <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Code (ISO)</span><input value={newCurrency.code} onChange={e => setNewCurrency(c => ({ ...c, code: e.target.value.toUpperCase() }))} maxLength={3} placeholder="EUR" style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} /></label>
+              <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Nom</span><input value={newCurrency.name} onChange={e => setNewCurrency(c => ({ ...c, name: e.target.value }))} placeholder="Euro" style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} /></label>
+              <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Symbole</span><input value={newCurrency.symbol} onChange={e => setNewCurrency(c => ({ ...c, symbol: e.target.value }))} placeholder="€" style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} /></label>
+              <label><span style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Taux (MAD)</span><input type="number" min="0" step="any" value={newCurrency.rate} onChange={e => setNewCurrency(c => ({ ...c, rate: e.target.value }))} placeholder="10.85" style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} /></label>
+              <button type="button" className="primary-action" onClick={createCurrency}><Plus size={16} style={{ marginRight: '6px' }} />Ajouter</button>
             </div>
           </div>
         )}

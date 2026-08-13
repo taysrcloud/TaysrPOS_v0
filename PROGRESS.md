@@ -629,3 +629,14 @@ Each time a meaningful block is finished:
   partial purchase receive and a partial sale return, both confirmed correct in the UI and the database.
   Full suite still 34/34, both workspaces typecheck clean, fresh build succeeds. Full writeup in
   TRACE.md.
+
+## 2026-08-13 - Currency management and per-user permissions UI
+
+- New "Devises" Settings tab (list, inline rate edit, add form) and a full rewrite of the "Utilisateurs"
+  tab, which turned out to be a static hardcoded mock with zero real functionality - now shows real
+  users with a permission-toggle column per known action (dynamically fetched, not hardcoded, so it
+  extends cleanly when more permission actions exist later).
+- Verified live: real currencies rendering and creating correctly, real users with correct default
+  checkbox states, and - via an accidental but useful test-script mistake - confirmed an explicit deny
+  override correctly beats a role default through the actual UI, not just the API. Full suite still
+  34/34, both workspaces typecheck clean. Full writeup in TRACE.md.

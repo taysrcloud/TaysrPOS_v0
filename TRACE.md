@@ -751,6 +751,35 @@ intentionally for future manual exploration.
   <path-to-bin>` directly instead of relying on shebang/PATH resolution. Flagging this here in case a
   future session hits the same "tsc not found" red herring after a clean `npm install`.)
 
+## 2026-08-13 - Frontend: currency management and per-user permissions in Settings
+
+- Two new Settings tabs, backed entirely by endpoints built earlier today (`currency.routes.ts` for
+  Track H, the `/api/settings/permissions/*` endpoints for Track E) that had no UI yet.
+- **Devises tab**: lists configured currencies (code/name/symbol/rate/status), an inline rate editor
+  (`onBlur` triggers `PUT /api/currencies/:id`, no separate save step), and an add-currency form. Matches
+  the existing product-form-panel visual style rather than introducing a new pattern.
+- **Utilisateurs tab rewritten entirely** - it was a static, hardcoded single-admin-row mock with a
+  disabled "+ Ajouter" button and zero API call, confirmed while reading it for this work (a fourth
+  confirmed case of this project's docs/UI overstating what's actually wired, after `contact.routes.ts`,
+  the Settings/Restaurant/Tables/Expenses "extraction" claim, and now this). Rewrote it to load real users
+  (`GET /api/auth/users`) and render one checkbox column per known permission action (currently just
+  `devices.manage`, fetched from `GET /api/settings/permissions/actions` rather than hardcoded, so a
+  future second action needs no frontend change). Each checkbox reflects the *effective* permission
+  (override if one exists, else the role default) and toggling computes the minimal correct API call:
+  create/update an override when diverging from the role default, delete it when converging back - never
+  leaves a redundant override sitting around that merely restates what the role already grants.
+- **Verified live through the actual rendered UI**: EUR (pre-existing from Track H's manual testing) and
+  a newly-created USD both render correctly in the Devises tab; the Utilisateurs tab correctly showed all
+  three real demo users with their real roles and the exact default checkbox states role-default logic
+  predicts (ADMIN/MANAGER checked, CASHIER unchecked). One verification-script bug (not an app bug) is
+  worth recording: a bad DOM selector in the test script toggled the wrong row's checkbox - it hit ADMIN
+  instead of CASHIER - which incidentally exercised the sharper case anyway (an explicit deny override
+  correctly beating a role that would otherwise grant access), confirmed via direct DB query
+  (`UserPermission` row with `granted: false`), then cleaned up via the API so the demo admin account
+  wasn't left without device-management access.
+- Full suite still 34/34 (unaffected - no backend changes this pass, pure frontend), both workspaces
+  typecheck clean, fresh build succeeds.
+
 ## 2026-08-13 - Frontend: partial purchase receive/return and sale return, both real bugs
 
 - Confirmed a finding from an earlier exploration pass this session, in the actual code, not just from
