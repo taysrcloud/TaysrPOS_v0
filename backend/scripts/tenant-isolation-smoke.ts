@@ -1064,12 +1064,37 @@ try {
   const notesCheck = await request(`/notifications/notes?entityType=DOCUMENT&entityId=${a.product.id}`, a.token);
   assert(notesCheck.status === 200, `Notifications check failed: ${notesCheck.status}`);
 
+  // ── Task 3: Bulk Data Import Tools ─────────
+  const importProductsA = await request('/imports/products', a.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      products: [{ name: 'Imported Prod', sku: `IMP-${marker}`, price: 15, cost: 10, categoryName: 'Import Cat', brandName: 'Import Brand' }]
+    })
+  });
+  assert(importProductsA.status === 200 && importProductsA.body.createdCount === 1, `Product import failed: ${importProductsA.status}`);
+  
+  const importStockA = await request('/imports/stock', a.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      stockItems: [{ sku: `IMP-${marker}`, quantity: 50, locationId: a.location.id }]
+    })
+  });
+  assert(importStockA.status === 200 && importStockA.body.updatedCount === 1, `Stock import failed: ${importStockA.status}`);
+
+  const crossImportStock = await request('/imports/stock', b.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      stockItems: [{ sku: `IMP-${marker}`, quantity: 99, locationId: a.location.id }]
+    })
+  });
+  assert(crossImportStock.status === 200 && crossImportStock.body.notFoundCount === 1, `Cross-tenant stock import should not find product: ${crossImportStock.body.notFoundCount}`);
+
   console.log(JSON.stringify({
     ok: true,
     marker,
     verified: [
       'contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)', 'sale line variationId + note persisted and priced from the variation, not the base product', 'group pricing resolution in the cart (customer group override applies, a selected variation still wins over the group price, /pricing/resolve matches the sale-time resolver, ownership on both the resolve endpoint and contact customerGroupId assignment)',
-      'warranty CRUD + ownership', 'variation template CRUD + ownership', 'discount CRUD + ownership', 'barcode printable sticker generator', 'consolidated invoice CRUD + isolation', 'accounting trial balance report', 'commission sales report', 'active discount cart resolution + notification triggers'
+      'warranty CRUD + ownership', 'variation template CRUD + ownership', 'discount CRUD + ownership', 'barcode printable sticker generator', 'consolidated invoice CRUD + isolation', 'accounting trial balance report', 'commission sales report', 'active discount cart resolution + notification triggers', 'bulk data import products/stock + isolation'
     ],
   }, null, 2));
 } finally {

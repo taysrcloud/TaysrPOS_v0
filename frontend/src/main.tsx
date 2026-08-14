@@ -66,7 +66,6 @@ import { PaymentsPage } from './pages/PaymentsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { KitchenPage } from './pages/KitchenPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { CsvImportModal } from './components/CsvImportModal';
 import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
@@ -2044,7 +2043,7 @@ const App = () => {
   const renderProducts = () => (
     <>
       {barcodeModalOpen && <BarcodePrintModal products={products} onClose={() => setBarcodeModalOpen(false)} />}
-      {csvImportModalOpen && <CsvImportModal mode={csvImportMode} onClose={() => setCsvImportModalOpen(false)} onSuccess={() => { fetchProducts(); }} />}
+      {csvImportModalOpen && <CsvImportModal mode={csvImportMode} onClose={() => setCsvImportModalOpen(false)} onSuccess={() => { loadProducts(); }} />}
       <PageHeader 
         title="Produits & Services" 
         subtitle="Catalogue, codes-barres et stock" 
