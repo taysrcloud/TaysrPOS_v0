@@ -26,8 +26,8 @@ export interface PosContextValue {
   visibleProducts: Product[];
   lowStockProducts: Product[];
   locations: Location[];
-  reportsTab: 'synthese' | 'ventes' | 'produits' | 'paiements';
-  setReportsTab: (tab: 'synthese' | 'ventes' | 'produits' | 'paiements') => void;
+  reportsTab: 'synthese' | 'ventes' | 'produits' | 'paiements' | 'comptabilite' | 'commissions';
+  setReportsTab: (tab: 'synthese' | 'ventes' | 'produits' | 'paiements' | 'comptabilite' | 'commissions') => void;
   reportPeriod: 'today' | 'week' | 'month' | 'year' | 'all';
   setReportPeriod: (period: 'today' | 'week' | 'month' | 'year' | 'all') => void;
   dashboardLocationFilter: number | 'ALL';

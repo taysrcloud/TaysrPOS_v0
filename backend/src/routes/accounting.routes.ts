@@ -23,6 +23,53 @@ router.get('/types', requireAuth, async (req: AuthRequest, res, next) => {
   }
 });
 
+router.get('/trial-balance', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const accounts = await prisma.account.findMany({
+      where: { companyId },
+      include: { accountType: true, transactions: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const report = accounts.map(account => {
+      const opening = asNumber(account.openingBalance);
+      let totalDebit = 0;
+      let totalCredit = 0;
+
+      for (const t of account.transactions) {
+        const amt = asNumber(t.amount);
+        if (t.type === 'DEBIT') totalDebit += amt;
+        else if (t.type === 'CREDIT') totalCredit += amt;
+      }
+
+      const netBalance = opening + totalDebit - totalCredit;
+      return {
+        id: account.id,
+        name: account.name,
+        accountNumber: account.accountNumber,
+        accountType: account.accountType?.name || 'Général',
+        openingBalance: opening,
+        totalDebit,
+        totalCredit,
+        netBalance,
+      };
+    });
+
+    const summary = report.reduce(
+      (acc, r) => {
+        acc.totalDebit += r.totalDebit;
+        acc.totalCredit += r.totalCredit;
+        acc.totalBalance += r.netBalance;
+        return acc;
+      },
+      { totalDebit: 0, totalCredit: 0, totalBalance: 0 }
+    );
+
+    res.json({ trialBalance: report, summary });
+  } catch (err) { next(err); }
+});
+
 router.post('/types', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: AuthRequest, res, next) => {
   try {
     const companyId = req.user!.companyId;

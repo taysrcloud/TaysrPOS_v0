@@ -1,7 +1,8 @@
+import { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, Package, Banknote, Download, CreditCard, ClipboardList, ReceiptText } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line } from 'recharts';
 import { PageHeader } from '../components/PageHeader';
-import { formatMoney, methodLabel, matchesPeriod, type SaleRecord, type PaymentMethod } from '../main';
+import { formatMoney, methodLabel, matchesPeriod, apiFetch, type SaleRecord, type PaymentMethod } from '../main';
 import { usePos } from '../context/PosContext';
 
 export const ReportsPage = () => {
@@ -10,6 +11,33 @@ export const ReportsPage = () => {
     reportsTab, setReportsTab, reportPeriod, setReportPeriod,
     dashboardLocationFilter, setDashboardLocationFilter, getSaleDueAmount,
   } = usePos();
+
+  const [trialBalanceData, setTrialBalanceData] = useState<any[]>([]);
+  const [trialBalanceSummary, setTrialBalanceSummary] = useState<any>(null);
+  const [commissionReportData, setCommissionReportData] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (reportsTab === 'comptabilite') {
+      apiFetch('/api/accounting/trial-balance')
+        .then(res => res.json())
+        .then(data => {
+          if (data.trialBalance) {
+            setTrialBalanceData(data.trialBalance);
+            setTrialBalanceSummary(data.summary);
+          }
+        })
+        .catch(console.error);
+    } else if (reportsTab === 'commissions') {
+      apiFetch('/api/commission-agents/report')
+        .then(res => res.json())
+        .then(data => {
+          if (data.report) {
+            setCommissionReportData(data.report);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [reportsTab]);
 
   const filterByPeriod = (list: SaleRecord[]) => list.filter(s => matchesPeriod(s.createdAtISO ?? s.createdAt, reportPeriod));
 
@@ -123,6 +151,16 @@ export const ReportsPage = () => {
         onClick={() => setReportsTab('paiements')}
         style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'paiements' ? '#0f172a' : 'transparent', color: reportsTab === 'paiements' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
         <Banknote size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Paiements
+      </button>
+      <button
+        onClick={() => setReportsTab('comptabilite')}
+        style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'comptabilite' ? '#0f172a' : 'transparent', color: reportsTab === 'comptabilite' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+        <ReceiptText size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Comptabilité
+      </button>
+      <button
+        onClick={() => setReportsTab('commissions')}
+        style={{ padding: '0.75rem 1.5rem', borderRadius: '8px', border: 'none', background: reportsTab === 'commissions' ? '#0f172a' : 'transparent', color: reportsTab === 'commissions' ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+        <ClipboardList size={18} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.5rem' }} /> Commissions
       </button>
     </div>
   );
@@ -342,6 +380,66 @@ export const ReportsPage = () => {
               </div>
             ))}
             {Object.keys(salesByMethod).length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun encaissement</span>}
+          </div>
+        </div>
+      )}
+
+      {reportsTab === 'comptabilite' && (
+        <div className="panel" style={{ maxWidth: '1000px' }}>
+          <div className="panel-title compact">
+            <div><p>Balance Général</p><h2>Balance de Vérification (Comptabilité)</h2></div>
+          </div>
+          <div className="cart-table" style={{ marginTop: '1rem' }}>
+            <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+              <span>Compte</span>
+              <span>Débit</span>
+              <span>Crédit</span>
+              <span>Solde Net</span>
+              <span>Type</span>
+            </div>
+            {trialBalanceData.map(acc => (
+              <div className="cart-row" key={acc.id} style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+                <span style={{ fontWeight: 600 }}>{acc.name} {acc.accountNumber ? `(${acc.accountNumber})` : ''}</span>
+                <span style={{ color: '#0284c7' }}>{formatMoney(acc.totalDebit)}</span>
+                <span style={{ color: '#e11d48' }}>{formatMoney(acc.totalCredit)}</span>
+                <strong style={{ color: acc.netBalance >= 0 ? '#16a34a' : '#dc2626' }}>{formatMoney(acc.netBalance)}</strong>
+                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>{acc.accountType}</span>
+              </div>
+            ))}
+            {trialBalanceData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun compte comptable</span>}
+          </div>
+          {trialBalanceSummary && (
+            <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', display: 'flex', gap: '2rem', fontWeight: 600 }}>
+              <div>Total Débit: <span style={{ color: '#0284c7' }}>{formatMoney(trialBalanceSummary.totalDebit)}</span></div>
+              <div>Total Crédit: <span style={{ color: '#e11d48' }}>{formatMoney(trialBalanceSummary.totalCredit)}</span></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {reportsTab === 'commissions' && (
+        <div className="panel" style={{ maxWidth: '1000px' }}>
+          <div className="panel-title compact">
+            <div><p>Commissions Vendeurs</p><h2>Rapport de Commission des Agents</h2></div>
+          </div>
+          <div className="cart-table" style={{ marginTop: '1rem' }}>
+            <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+              <span>Agent</span>
+              <span>Taux (%)</span>
+              <span>Ventes</span>
+              <span>Total Ventes</span>
+              <span>Commission Due</span>
+            </div>
+            {commissionReportData.map(agent => (
+              <div className="cart-row" key={agent.agentId} style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+                <span style={{ fontWeight: 600 }}>{agent.agentName}</span>
+                <span>{agent.commissionRate}%</span>
+                <span>{agent.salesCount} ticket(s)</span>
+                <span>{formatMoney(agent.totalSalesAmount)}</span>
+                <strong style={{ color: '#16a34a' }}>{formatMoney(agent.commissionEarned)}</strong>
+              </div>
+            ))}
+            {commissionReportData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun agent enregistre</span>}
           </div>
         </div>
       )}

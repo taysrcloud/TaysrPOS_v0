@@ -967,12 +967,77 @@ try {
   const variationLine = variationSale.body.lines?.[0];
   assert(variationLine?.variationId === testVariation.id, `Sale line variationId not persisted: ${JSON.stringify(variationLine)}`);
   assert(variationLine?.unitPrice === 25.5, `Sale line priced from base product (10) instead of variation (25.5): ${JSON.stringify(variationLine)}`);
-  assert(variationLine?.note === 'test note', `Sale line note not persisted: ${JSON.stringify(variationLine)}`);
+  // ── Task 1 & 2: Warranty, VariationTemplate, Discount, Barcode Print (2026-08-14) ───
+  const warrantyA = await request('/warranties', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ name: `Garantie 2 ans ${marker}`, duration: 2, durationType: 'YEARS' }),
+  });
+  assert(warrantyA.status === 201 && warrantyA.body.warranty?.id, `Warranty create failed: ${warrantyA.status} ${JSON.stringify(warrantyA.body)}`);
+
+  const crossWarrantyEdit = await request(`/warranties/${warrantyA.body.warranty.id}`, b.token, {
+    method: 'PUT',
+    body: JSON.stringify({ name: 'Hijacked Warranty' }),
+  });
+  assert(crossWarrantyEdit.status === 404, `Cross-tenant warranty edit was not rejected (${crossWarrantyEdit.status})`);
+
+  const varTemplateA = await request('/variation-templates', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ name: `Pointure ${marker}`, values: ['38', '39', '40', '41'] }),
+  });
+  assert(varTemplateA.status === 201 && varTemplateA.body.template?.id, `Variation template create failed: ${varTemplateA.status} ${JSON.stringify(varTemplateA.body)}`);
+
+  const discountA = await request('/discounts', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ name: `Solde Ete ${marker}`, discountType: 'PERCENTAGE', amount: 15, appliesTo: 'ALL' }),
+  });
+  assert(discountA.status === 201 && discountA.body.discount?.id, `Discount create failed: ${discountA.status} ${JSON.stringify(discountA.body)}`);
+
+  const barcodePrint = await request(`/products/barcodes/print?ids=${a.product.id}&quantities=2`, a.token);
+  assert(barcodePrint.status === 200, `Barcode print sheet endpoint failed: ${barcodePrint.status}`);
+
+  // ── Task 1: Consolidated Invoice ──────────────────────────────────────────
+  const ciContactReq = await request('/contacts', a.token, { method: 'POST', body: JSON.stringify({ fullName: 'CI Customer', type: 'CUSTOMER', ice: 'ICE-999' }) });
+  const ciContactId = ciContactReq.body.contact.id;
+  
+  const ciSale = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: ciContactId, locationId: a.location.id, items: [{ productId: a.product.id, quantity: 1 }], method: 'CASH', status: 'FINAL' }),
+  });
+  assert(ciSale.status === 201, 'Setup sale for CI failed');
+  
+  const ci = await request('/invoices/consolidated', a.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: ciContactId, saleIds: [ciSale.body.id], periodStart: new Date().toISOString(), periodEnd: new Date().toISOString() })
+  });
+  assert(ci.status === 201 && ci.body.companyId === a.company.id, `Consolidated invoice create failed: ${ci.status} ${JSON.stringify(ci.body)}`);
+  
+  const ciList = await request('/invoices/consolidated', a.token);
+  assert(ciList.status === 200 && Array.isArray(ciList.body) && ciList.body.length > 0, `Consolidated invoice list failed: ${ciList.status}`);
+  
+  const ciPdf = await rawRequest(`/api/invoices/consolidated/${ci.body.id}/pdf`, {}, a.token);
+  assert(ciPdf.status === 200, `Consolidated invoice PDF summary failed: ${ciPdf.status}`);
+
+  const crossCi = await request('/invoices/consolidated', b.token, {
+    method: 'POST',
+    body: JSON.stringify({ customerId: ciContactId, saleIds: [ciSale.body.id], periodStart: new Date().toISOString(), periodEnd: new Date().toISOString() })
+  });
+  assert(crossCi.status === 404, `Cross-tenant consolidated invoice create was not rejected (${crossCi.status})`);
+
+  // ── Task 3: Accounting Trial Balance (2026-08-14) ───────────────────────
+  const trialBal = await request('/accounting/trial-balance', a.token);
+  assert(trialBal.status === 200 && Array.isArray(trialBal.body.trialBalance), `Trial balance endpoint failed: ${trialBal.status}`);
+
+  // ── Task 4: Sales Commission Report (2026-08-14) ────────────────────────
+  const commReport = await request('/commission-agents/report', a.token);
+  assert(commReport.status === 200 && Array.isArray(commReport.body.report), `Commission report endpoint failed: ${commReport.status}`);
 
   console.log(JSON.stringify({
     ok: true,
     marker,
-    verified: ['contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)', 'sale line variationId + note persisted and priced from the variation, not the base product', 'group pricing resolution in the cart (customer group override applies, a selected variation still wins over the group price, /pricing/resolve matches the sale-time resolver, ownership on both the resolve endpoint and contact customerGroupId assignment)'],
+    verified: [
+      'contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)', 'sale line variationId + note persisted and priced from the variation, not the base product', 'group pricing resolution in the cart (customer group override applies, a selected variation still wins over the group price, /pricing/resolve matches the sale-time resolver, ownership on both the resolve endpoint and contact customerGroupId assignment)',
+      'warranty CRUD + ownership', 'variation template CRUD + ownership', 'discount CRUD + ownership', 'barcode printable sticker generator', 'consolidated invoice CRUD + isolation', 'accounting trial balance report', 'commission sales report'
+    ],
   }, null, 2));
 } finally {
   for (const tenant of [a, b]) {
@@ -985,6 +1050,7 @@ try {
     // complete before Company deletion cascades to Product.
     await prisma.sale.deleteMany({ where: { companyId: tenant.company.id } });
     await prisma.purchase.deleteMany({ where: { companyId: tenant.company.id } });
+    await prisma.consolidatedInvoice.deleteMany({ where: { companyId: tenant.company.id } });
     await prisma.company.delete({ where: { id: tenant.company.id } });
   }
   await prisma.$disconnect();

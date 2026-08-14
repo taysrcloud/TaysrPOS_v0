@@ -352,7 +352,7 @@ const clearSession = () => {
   localStorage.removeItem(authUserKey);
 };
 
-const apiFetch = async (url: string, options: RequestInit = {}) => {
+export const apiFetch = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem(authTokenKey);
   const headers: Record<string, string> = { ...((options.headers as any) || {}) };
   if (token) {
@@ -783,7 +783,7 @@ const App = () => {
       setStatus('Permissions sauvegardees');
     } catch (error) { setStatus(error instanceof Error ? error.message : 'Echec de sauvegarde des permissions'); }
   };
-  const [reportsTab, setReportsTab] = useState<'synthese' | 'ventes' | 'produits' | 'paiements'>('synthese');
+  const [reportsTab, setReportsTab] = useState<'synthese' | 'ventes' | 'produits' | 'paiements' | 'comptabilite' | 'commissions'>('synthese');
   const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('all');
   const [tableFilter, setTableFilter] = useState<'all' | 'free' | 'occupied'>('all');
   const [viewSelectedTable, setViewSelectedTable] = useState<string | null>(null);

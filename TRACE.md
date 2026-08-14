@@ -1425,3 +1425,53 @@ this change.
 Two new assertion blocks added (variationId/note + group pricing); `tenant-isolation-smoke.ts` now carries
 200 `assert()` calls across 38 named coverage areas, full suite passes twice in a row. Both workspaces
 typecheck and build clean.
+
+## 2026-08-14: Payée/Payee statusLabel fix - closed the "not independently verified" gap
+
+Commit `2cd6a76` (landed 2026-08-12, before this session) fixed `statusLabel()` in
+`sale.routes.ts` to return unaccented `'Payee'` instead of `'Payée'` (U+00E9), matching ~20
+frontend comparisons across Reports/Payments/Dashboard/register-shift-totals/invoiceable-sales
+detection that had never matched the accented value. That commit's own message flagged the one
+thing it couldn't check: "Not independently verified: the browser-visible effect... No display in
+this environment." This session had real headless-Chromium tooling available, so that gap is now
+closable.
+
+Restarted Postgres, backend, and Vite (all three found silently killed again - same
+"Termux OS kills background processes" pattern already logged multiple times in this file) and
+confirmed real `FINAL`/`PAID` sales exist for the demo tenant (companyId 45, 5+ rows) before
+running the check, so a zero-totals result couldn't be misread as "still broken" versus "no data
+to show."
+
+Wrote a temporary Puppeteer script (`frontend/scripts/verify-payee-status-browser.mjs`, deleted
+after use per convention), logged in as the demo `admin` user, and drove Dashboard/Rapports/
+Paiements live. First run exited 137 (SIGKILL pattern) very early with no script output past one
+console error - consistent with this environment's general OOM-kill risk, not investigated further
+since a second run completed cleanly with no changes.
+
+**Confirmed live:** Rapports shows real non-zero aggregates derived from `'Payee'`-status sales
+(Chiffre d'Affaire 246,00 MAD, 7 Tickets Encaissés, Panier Moyen 35,14 MAD). Paiements lists 11 real
+transactions with correctly distinguished status badges - `Payee` (8 rows, green), `Credit` (2,
+orange), `Retour` (1, teal), `Suspendue` (1, blue) - and correct aggregate figures (Total 381,00 MAD,
+2 Credits Ouverts, 135,00 MAD Reste a Encaisser). Screenshots captured for all three pages. This is
+the first real confirmation that the fix is visually correct, not just byte-level-verified in code -
+the previously-flagged gap is closed. No code change needed; the fix itself was already correct.
+
+## 2026-08-14 - Full ERP Feature Parity Migration Completed
+
+- **Schema expansion**: Added `Warranty`, `VariationTemplate`, and `Discount` Prisma models to `backend/prisma/schema.prisma`. Updated `Company`, `Product`, `Brand`, `Category`, `Location` models with clean bidirectional relations. Applied changes via Termux ARM64 schema-engine wrapper and generated Prisma client.
+- **Backend API Routes**:
+  - `warranty.routes.ts`: CRUD endpoints (`GET/POST/PUT/DELETE /api/warranties`) with tenant-scoped isolation.
+  - `variation-template.routes.ts`: CRUD endpoints (`GET/POST/PUT/DELETE /api/variation-templates`) for reusable variation attribute presets.
+  - `discount.routes.ts`: CRUD endpoints (`GET/POST/PUT/DELETE /api/discounts`) for percentage & fixed promotional discounts.
+  - `product.routes.ts`: Added `GET /api/products/barcodes/print` returning pure Code128 SVG printable sticker sheet HTML.
+  - `accounting.routes.ts`: Added `GET /api/accounting/trial-balance` endpoint computing debit, credit, and net balance totals per account.
+  - `commission.routes.ts`: Added `GET /api/commission-agents/report` endpoint computing sales count, revenue, and earned commission per agent. Fixed `ticketNumber` field selection.
+  - `notifications.ts`: Added `triggerNotificationEvent()` helper logging events for `LOW_STOCK`, `PAYMENT_RECEIVED`, `NEW_SALE`.
+- **Frontend UI**:
+  - `ReportsPage.tsx`: Added `comptabilite` (Trial Balance) and `commissions` (Sales Commission) tabs with live backend data fetching and responsive tables.
+  - `BarcodePrintModal.tsx`: Created reusable modal component for selecting product quantities and opening printable barcode sheets.
+- **Verification**:
+  - `tenant-isolation-smoke.ts`: Extended with 6 new assertion blocks (44 total verified areas). Test suite executed against local PostgreSQL server and passed 100% clean with zero errors.
+  - `tsc`: Typecheck clean across backend and frontend workspaces.
+  - `vite build`: Production build succeeded in 1.79s.
+

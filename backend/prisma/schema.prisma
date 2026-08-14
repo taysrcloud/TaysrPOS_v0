@@ -147,6 +147,10 @@ model Company {
   dashboardConfigurations DashboardConfiguration[]
   devices               Device[]
   currencies            Currency[]
+  warranties            Warranty[]
+  variationTemplates    VariationTemplate[]
+  discounts             Discount[]
+  consolidatedInvoices  ConsolidatedInvoice[]
 }
 
 model User {
@@ -212,6 +216,8 @@ model Location {
   // get-or-created the same way "Magasin principal" warehouses are.
   accounts      Account[]
   devices       Device[]
+  discounts     Discount[]
+  consolidatedInvoices ConsolidatedInvoice[]
 
   @@unique([companyId, name])
 }
@@ -238,6 +244,7 @@ model Contact {
   sales         Sale[]
   purchases     Purchase[]
   invoices      Invoice[]
+  consolidatedInvoices ConsolidatedInvoice[]
 
   @@index([companyId, type])
 }
@@ -296,8 +303,9 @@ model Category {
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products Product[]
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products  Product[]
+  discounts Discount[]
 
   @@unique([companyId, name])
 }
@@ -307,8 +315,9 @@ model Brand {
   companyId Int
   name      String
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products Product[]
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products  Product[]
+  discounts Discount[]
 
   @@unique([companyId, name])
 }
@@ -357,6 +366,7 @@ model Product {
   brandId       Int?
   unitId        Int?
   taxRateId     Int?
+  warrantyId    Int?
   sku           String
   barcode       String?
   name          String
@@ -382,6 +392,7 @@ model Product {
   brand           Brand?           @relation(fields: [brandId], references: [id])
   unit            Unit?            @relation(fields: [unitId], references: [id])
   taxRate         TaxRate?         @relation(fields: [taxRateId], references: [id])
+  warranty        Warranty?        @relation(fields: [warrantyId], references: [id])
   stocks          ProductStock[]
   stockMovements  StockMovement[]
   saleItems       SaleItem[]
@@ -516,6 +527,8 @@ model Sale {
   finalizedAt   DateTime?
   invoiceId     Int?
   invoice       Invoice?      @relation(fields: [invoiceId], references: [id])
+  consolidatedInvoiceId Int?
+  consolidatedInvoice   ConsolidatedInvoice? @relation("ConsolidatedInvoiceSales", fields: [consolidatedInvoiceId], references: [id])
   originalSaleId Int?
   commissionAgentId Int?
   // Idempotency key for sales pushed by an external device (Track G: Hanout
@@ -961,4 +974,80 @@ model Currency {
   @@unique([companyId, code])
 }
 
+model Warranty {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  name        String
+  description String?
+  duration    Int
+  durationType String   @default("MONTHS")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([companyId, name])
+}
+
+model VariationTemplate {
+  id        Int      @id @default(autoincrement())
+  companyId Int
+  name      String
+  values    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+}
+
+model Discount {
+  id           Int      @id @default(autoincrement())
+  companyId    Int
+  name         String
+  discountType String   @default("PERCENTAGE")
+  amount       Decimal  @db.Decimal(12, 2)
+  startDate    DateTime?
+  endDate      DateTime?
+  appliesTo    String   @default("ALL")
+  brandId      Int?
+  categoryId   Int?
+  productIds   Json?
+  locationId   Int?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  brand    Brand?    @relation(fields: [brandId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+
+  @@index([companyId])
+}
+
+model ConsolidatedInvoice {
+  id           Int      @id @default(autoincrement())
+  companyId    Int
+  locationId   Int?
+  customerId   Int
+  reference    String
+  periodStart  DateTime
+  periodEnd    DateTime
+  total        Decimal  @db.Decimal(12, 2)
+  taxTotal     Decimal  @db.Decimal(12, 2)
+  status       String   @default("ISSUED")
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  location     Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  customer     Contact  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  sales        Sale[]   @relation("ConsolidatedInvoiceSales")
+
+  @@index([companyId])
+  @@index([customerId])
+}

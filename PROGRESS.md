@@ -1,5 +1,14 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-14 - Full ERP Feature Parity Migration Completed
+
+- [x] **Track C (Catalog & Pricing)**: Added `Warranty` model + CRUD (`/api/warranties`), `VariationTemplate` model + CRUD (`/api/variation-templates`), `Discount` standalone promotions model + CRUD (`/api/discounts`), and Code128 printable sticker sheet generator (`GET /api/products/barcodes/print`). Integrated `BarcodePrintModal` in frontend.
+- [x] **Track D (Accounting & Financials)**: Added `GET /api/accounting/trial-balance` calculation and account ledger report API + integrated Comptabilité balance sheet tab in `ReportsPage.tsx`.
+- [x] **Track E (People & Commissions)**: Added `GET /api/commission-agents/report` calculation endpoint (grouping sales by sales commission agent with percentage calculations) + integrated Commissions tab in `ReportsPage.tsx`.
+- [x] **Track F (Communications & Triggers)**: Created `triggerNotificationEvent()` helper in `utils/notifications.ts` for automated event logging (`LOW_STOCK`, `PAYMENT_RECEIVED`, `NEW_SALE`).
+- [x] **Tenant Isolation & Smoke Verification**: Extended `tenant-isolation-smoke.ts` with assertions for all new routes (Warranty, VariationTemplate, Discount, Barcode sheet generator, Trial Balance, Commission Report). Full suite (44 verified areas) passes clean with 0 errors against PostgreSQL.
+- [x] **Build Verification**: `tsc --noEmit` clean across backend and frontend workspaces; `vite build` clean in 1.79s.
+
 ## 2026-08-12 - Local Postgres unblocked - this session's DB caveats are resolved
 
 - [x] Installed and running a local Postgres server (Termux `postgresql` package, aarch64-native).

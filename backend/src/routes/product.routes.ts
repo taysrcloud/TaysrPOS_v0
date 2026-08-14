@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ProductType } from '../generated/client/index.js';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { generateCode128SVG } from '../utils/barcode.js';
 
 const router = Router();
 
@@ -90,6 +91,86 @@ const slugSku = (name: string) => name
   .slice(0, 18)
   .toUpperCase() || 'PRD';
 
+
+router.get('/barcodes/print', requireAuth, async (req: any, res: any) => {
+  try {
+    const companyId = req.user.companyId;
+    const ids = String(req.query.ids || '').split(',').map(n => Number(n.trim())).filter(Boolean);
+    const qtyMap: Record<number, number> = {};
+    if (req.query.quantities) {
+      String(req.query.quantities).split(',').forEach((q, idx) => {
+        const pId = ids[idx];
+        if (pId) qtyMap[pId] = Math.max(1, Number(q.trim()) || 1);
+      });
+    }
+
+    const products = await prisma.product.findMany({
+      where: { companyId, ...(ids.length ? { id: { in: ids } } : {}) },
+      select: { id: true, name: true, barcode: true, sku: true, salePrice: true },
+    });
+
+    let stickersHtml = '';
+    for (const p of products) {
+      const barcodeText = p.barcode || p.sku;
+      const count = qtyMap[p.id] || 1;
+      const svg = generateCode128SVG(barcodeText);
+      const priceFormatted = Number(p.salePrice).toFixed(2) + ' MAD';
+
+      for (let i = 0; i < count; i++) {
+        stickersHtml += `
+          <div class="sticker">
+            <div class="p-name">${p.name}</div>
+            <div class="barcode-svg">${svg}</div>
+            <div class="p-price">${priceFormatted}</div>
+          </div>
+        `;
+      }
+    }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Étiquettes Codes-barres</title>
+  <style>
+    @page { size: auto; margin: 5mm; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 10px; background: #fff; }
+    .grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .sticker {
+      width: 48mm;
+      height: 28mm;
+      border: 1px dashed #ccc;
+      box-sizing: border-box;
+      padding: 3px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      page-break-inside: avoid;
+    }
+    .p-name { font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .barcode-svg { width: 100%; max-height: 16mm; display: flex; justify-content: center; }
+    .p-price { font-size: 11px; font-weight: 800; color: #111; }
+    @media print {
+      .sticker { border: none; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom: 15px;">
+    <button onclick="window.print()" style="padding: 8px 16px; font-size: 14px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer;">Imprimer les étiquettes</button>
+  </div>
+  <div class="grid">
+    ${stickersHtml || '<p>Aucun produit sélectionné</p>'}
+  </div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (err) { res.status(500).send('Erreur lors de la génération des étiquettes'); }
+});
 
 router.get('/', requireAuth, async (req: any, res: any) => {
   try {
