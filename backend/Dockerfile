@@ -12,7 +12,7 @@ COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
 
 # Install dependencies
-RUN npm ci --workspace backend
+RUN npm ci --workspace backend --include=dev
 
 # Copy backend source code and prisma schema
 COPY backend backend
