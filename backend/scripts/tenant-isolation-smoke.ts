@@ -480,7 +480,10 @@ try {
   const commissionAgent = await request('/commission-agents', a.token, { method: 'POST', body: JSON.stringify({ name: `Agent ${marker}`, commissionRate: 5 }) });
   assert(commissionAgent.status === 201, `Commission agent create failed: ${commissionAgent.status} ${JSON.stringify(commissionAgent.body)}`);
 
-  const saleWithAgent = await request('/sales', a.token, {
+  const createdCurrencyA = await request('/currencies', a.token, { method: 'POST', body: JSON.stringify({ code: 'CAD', name: 'Canadian Dollar', symbol: '$', rate: 10.5 }) });
+  assert(createdCurrencyA.status === 201, `Currency create failed: ${createdCurrencyA.status} ${JSON.stringify(createdCurrencyA.body)}`);
+
+  const saleWithAgentAndCurrency = await request('/sales', a.token, {
     method: 'POST',
     body: JSON.stringify({
       customerId: a.contact.id,
@@ -489,9 +492,11 @@ try {
       method: 'CASH',
       status: 'FINAL',
       commissionAgentId: commissionAgent.body.id,
+      currencyId: createdCurrencyA.body.id,
+      exchangeRate: 10.5,
     }),
   });
-  assert(saleWithAgent.status === 201 && saleWithAgent.body.commissionAgentId === commissionAgent.body.id, `Sale with commissionAgentId failed: ${saleWithAgent.status} ${JSON.stringify(saleWithAgent.body)}`);
+  assert(saleWithAgentAndCurrency.status === 201 && saleWithAgentAndCurrency.body.commissionAgentId === commissionAgent.body.id, `Sale with commissionAgentId and currency failed: ${saleWithAgentAndCurrency.status} ${JSON.stringify(saleWithAgentAndCurrency.body)}`);
 
   const notifTemplate = await request('/notifications/templates', a.token, { method: 'POST', body: JSON.stringify({ event: 'LOW_STOCK', channel: 'EMAIL', body: 'Stock bas' }) });
   assert(notifTemplate.status === 201, `Notification template create failed: ${notifTemplate.status} ${JSON.stringify(notifTemplate.body)}`);

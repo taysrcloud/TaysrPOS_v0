@@ -59,12 +59,14 @@ import { SaleReturnModal } from './sale-modals';
 import { PageHeader } from './components/PageHeader';
 import { productImage } from './components/productImage';
 import { BarcodePrintModal } from './components/BarcodePrintModal';
+import { CsvImportModal } from './components/CsvImportModal';
 import { PosContext, type PosContextValue } from './context/PosContext';
 import { RegistersPage } from './pages/RegistersPage';
 import { PaymentsPage } from './pages/PaymentsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { KitchenPage } from './pages/KitchenPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { CsvImportModal } from './components/CsvImportModal';
 import './styles.css';
 
 type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
@@ -748,6 +750,8 @@ const App = () => {
   const [invoiceSale, setInvoiceSale] = useState<SaleRecord | null>(null);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [csvImportModalOpen, setCsvImportModalOpen] = useState(false);
+  const [csvImportMode, setCsvImportMode] = useState<'products' | 'stock'>('products');
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [contactTab, setContactTab] = useState<'Client' | 'Fournisseur'>('Client');
   const [contactModalType, setContactModalType] = useState<'CUSTOMER' | 'SUPPLIER'>('CUSTOMER');
@@ -2040,11 +2044,18 @@ const App = () => {
   const renderProducts = () => (
     <>
       {barcodeModalOpen && <BarcodePrintModal products={products} onClose={() => setBarcodeModalOpen(false)} />}
+      {csvImportModalOpen && <CsvImportModal mode={csvImportMode} onClose={() => setCsvImportModalOpen(false)} onSuccess={() => { fetchProducts(); }} />}
       <PageHeader 
         title="Produits & Services" 
         subtitle="Catalogue, codes-barres et stock" 
         action={
           <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button type="button" className="ghost-action" onClick={() => { setCsvImportMode('stock'); setCsvImportModalOpen(true); }}>
+              Importer Stock (CSV)
+            </button>
+            <button type="button" className="ghost-action" onClick={() => { setCsvImportMode('products'); setCsvImportModalOpen(true); }}>
+              Importer Produits (CSV)
+            </button>
             <button type="button" className="ghost-action" onClick={() => setBarcodeModalOpen(true)}>
               Imprimer étiquettes
             </button>

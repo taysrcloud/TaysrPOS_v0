@@ -50,6 +50,7 @@ import warrantyRoutes from './routes/warranty.routes.js';
 import variationTemplateRoutes from './routes/variation-template.routes.js';
 import discountRoutes from './routes/discount.routes.js';
 import consolidatedInvoiceRoutes from './routes/consolidated-invoice.routes.js';
+import importRoutes from './routes/import.routes.js';
 import { requireAuth, requireModule, requireDevice } from './middleware/auth.js';
 
 app.use('/api/products', requireAuth, productRoutes);
@@ -75,6 +76,7 @@ app.use('/api/currencies', requireAuth, currencyRoutes);
 app.use('/api/warranties', requireAuth, warrantyRoutes);
 app.use('/api/variation-templates', requireAuth, variationTemplateRoutes);
 app.use('/api/discounts', requireAuth, discountRoutes);
+app.use('/api/imports', requireAuth, importRoutes);
 app.use('/api/platform', platformRoutes);
 app.use('/oauth', oauthRoutes);
 app.use('/connector/api', requireAuth, connectorRoutes);

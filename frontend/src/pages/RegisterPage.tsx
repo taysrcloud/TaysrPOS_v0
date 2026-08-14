@@ -25,7 +25,7 @@ export const RegisterPage = () => {
     messageContact, setMessageContact, messageContent, setMessageContent,
     selectedVariableProduct, setSelectedVariableProduct, visibleProducts, getSaleDueAmount,
     setInvoiceSale, openSaleSettlement, groupPrices,
-    commissionAgents, currencies, commissionAgentId, setCommissionAgentId, currencyId, setCurrencyId,
+    commissionAgents, currencies, commissionAgentId, setCommissionAgentId, currencyId, setCurrencyId, exchangeRate, setExchangeRate
   } = usePos();
 
   // Register-exclusive state relocated from App - confirmed via a full-file
