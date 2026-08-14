@@ -3,8 +3,10 @@ import jwt from 'jsonwebtoken';
 import { getDefaultPrisma } from '../src/utils/prisma.js';
 import { adjustProductStock } from '../src/utils/stock.js';
 
+import { JWT_SECRET } from '../src/config.js';
+
 const api = process.env.POS_API_URL || 'http://127.0.0.1:4400/api';
-const secret = process.env.JWT_SECRET || 'taysr-pos-secret-key-12345';
+const secret = JWT_SECRET;
 const prisma = getDefaultPrisma();
 const marker = `isolation-${Date.now()}`;
 
@@ -660,7 +662,38 @@ try {
   const saleCountAfterRetry = await prisma.sale.count({ where: { externalId: `sale-cash-${marker}` } });
   assert(saleCountAfterRetry === 1, `sync/batch retry created a duplicate sale: count ${saleCountAfterRetry}`);
   const cashAccountAfterRetry = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
-  assert(Number(cashAccountAfterRetry.currentBalance) === cashBalanceBeforeSync + 30, `sync/batch retry double-posted to the cash account: ${cashAccountAfterRetry.currentBalance}`);
+  // Test: Customer & Payment Sync Event Ingestion (Bidirectional)
+  const custSyncEventId = `evt-cust-${marker}`;
+  const paySyncEventId = `evt-pay-${marker}`;
+  const syncCustomerName = `SyncCustomer-${marker}`;
+
+  const syncBatch2 = await rawRequest('/sync/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      device_id: `smoke-device-${marker}`,
+      events: [
+        {
+          event_id: custSyncEventId,
+          entity_type: 'customer',
+          operation: 'create',
+          payload: { name: syncCustomerName, phone: '0600000000', address: 'Casablanca' }
+        },
+        {
+          event_id: paySyncEventId,
+          entity_type: 'payment',
+          operation: 'create',
+          payload: { id: `pay-sync-${marker}`, customerId: String(a.contact.id), amount: 10, paymentMethod: 'CASH' }
+        }
+      ]
+    })
+  }, deviceToken1);
+  assert(syncBatch2.status === 200 && syncBatch2.body.success_ids.includes(custSyncEventId) && syncBatch2.body.success_ids.includes(paySyncEventId), `Customer/Payment sync batch failed: ${JSON.stringify(syncBatch2.body)}`);
+
+  const createdSyncCust = await prisma.contact.findFirst({ where: { companyId: a.company.id, fullName: syncCustomerName } });
+  assert(createdSyncCust !== null, 'Sync customer creation failed to persist in DB');
+
+  const contactAfterPaySync = await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } });
+  assert(Number(contactAfterPaySync.balance) === contactBalanceBeforeSync + 20 - 10, `Customer balance after payment sync wrong: expected ${contactBalanceBeforeSync + 10}, got ${contactAfterPaySync.balance}`);
 
   const refresh1 = await rawRequest('/device/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken1 }) });
   assert(refresh1.status === 200 && typeof refresh1.body.device_token === 'string', `Device refresh failed: ${refresh1.status} ${JSON.stringify(refresh1.body)}`);

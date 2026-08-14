@@ -44,6 +44,24 @@ export const getOrCreateCashAccount = async (
   }
 };
 
+export const getOrCreateSystemAccount = async (
+  tx: Prisma.TransactionClient,
+  companyId: number,
+  name: string
+) => {
+  const existing = await tx.account.findFirst({ where: { companyId, name } });
+  if (existing) return existing;
+  try {
+    return await tx.account.create({ data: { companyId, name } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const byName = await tx.account.findFirst({ where: { companyId, name } });
+      if (byName) return byName;
+    }
+    throw err;
+  }
+};
+
 // Simplified convention shared with accounting.routes.ts: debit increases
 // currentBalance, credit decreases it - correct for asset-style accounts
 // (cash/bank), which is all auto-posting targets in this pass.
@@ -61,4 +79,28 @@ export const postCashTransaction = async (
     data: { accountId: account.id, type, amount, reference, note },
   });
   await tx.account.update({ where: { id: account.id }, data: { currentBalance: { increment: delta } } });
+};
+
+// Balanced double-entry posting helper (P1-4)
+export const postBalancedJournalEntry = async (
+  tx: Prisma.TransactionClient,
+  debitAccount: { id: number },
+  creditAccount: { id: number },
+  amount: number,
+  reference: string,
+  note?: string
+) => {
+  if (amount <= 0) return;
+
+  // Post DEBIT side
+  await tx.accountTransaction.create({
+    data: { accountId: debitAccount.id, type: 'DEBIT', amount, reference, note: note ? `${note} (DEBIT)` : undefined },
+  });
+  await tx.account.update({ where: { id: debitAccount.id }, data: { currentBalance: { increment: amount } } });
+
+  // Post CREDIT side
+  await tx.accountTransaction.create({
+    data: { accountId: creditAccount.id, type: 'CREDIT', amount, reference, note: note ? `${note} (CREDIT)` : undefined },
+  });
+  await tx.account.update({ where: { id: creditAccount.id }, data: { currentBalance: { decrement: amount } } });
 };
