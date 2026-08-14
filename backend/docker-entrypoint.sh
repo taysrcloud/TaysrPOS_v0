@@ -20,5 +20,8 @@ npx prisma db push --schema prisma/schema.prisma --accept-data-loss
 
 echo "==> [API Entrypoint] Database schema up to date."
 
+echo "==> [API Entrypoint] Seeding default database accounts if needed..."
+npx tsx src/scripts/seed.ts || true
+
 echo "==> [API Entrypoint] Starting API server..."
 exec npx tsx src/index.ts
