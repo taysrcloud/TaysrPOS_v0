@@ -16,17 +16,43 @@ export const ReportsPage = () => {
   const [trialBalanceSummary, setTrialBalanceSummary] = useState<any>(null);
   const [commissionReportData, setCommissionReportData] = useState<any[]>([]);
 
+  const [accountingSubTab, setAccountingSubTab] = useState<'trial' | 'ledger' | 'pnl' | 'tax'>('trial');
+  const [ledgerData, setLedgerData] = useState<any>(null);
+  const [pnlData, setPnlData] = useState<any>(null);
+  const [taxData, setTaxData] = useState<any>(null);
+  const [accStartDate, setAccStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
+  const [accEndDate, setAccEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedAccountId, setSelectedAccountId] = useState<number | ''>('');
+
+
   useEffect(() => {
     if (reportsTab === 'comptabilite') {
-      apiFetch('/api/accounting/trial-balance')
-        .then(res => res.json())
-        .then(data => {
-          if (data.trialBalance) {
-            setTrialBalanceData(data.trialBalance);
-            setTrialBalanceSummary(data.summary);
-          }
-        })
-        .catch(console.error);
+      if (accountingSubTab === 'trial') {
+        apiFetch('/api/accounting/trial-balance')
+          .then(res => res.json())
+          .then(data => {
+            if (data.trialBalance) {
+              setTrialBalanceData(data.trialBalance);
+              setTrialBalanceSummary(data.summary);
+            }
+          })
+          .catch(console.error);
+      } else if (accountingSubTab === 'ledger' && selectedAccountId) {
+        apiFetch(`/api/accounting/ledger/${selectedAccountId}?startDate=${accStartDate}&endDate=${accEndDate}`)
+          .then(res => res.json())
+          .then(data => setLedgerData(data))
+          .catch(console.error);
+      } else if (accountingSubTab === 'pnl') {
+        apiFetch(`/api/accounting/pnl?startDate=${accStartDate}&endDate=${accEndDate}${dashboardLocationFilter !== 'ALL' ? `&locationId=${dashboardLocationFilter}` : ''}`)
+          .then(res => res.json())
+          .then(data => setPnlData(data))
+          .catch(console.error);
+      } else if (accountingSubTab === 'tax') {
+        apiFetch(`/api/accounting/tax-report?startDate=${accStartDate}&endDate=${accEndDate}`)
+          .then(res => res.json())
+          .then(data => setTaxData(data))
+          .catch(console.error);
+      }
     } else if (reportsTab === 'commissions') {
       apiFetch('/api/commission-agents/report')
         .then(res => res.json())
@@ -37,7 +63,7 @@ export const ReportsPage = () => {
         })
         .catch(console.error);
     }
-  }, [reportsTab]);
+  }, [reportsTab, accountingSubTab, accStartDate, accEndDate, selectedAccountId, dashboardLocationFilter]);
 
   const filterByPeriod = (list: SaleRecord[]) => list.filter(s => matchesPeriod(s.createdAtISO ?? s.createdAt, reportPeriod));
 
@@ -385,33 +411,148 @@ export const ReportsPage = () => {
       )}
 
       {reportsTab === 'comptabilite' && (
-        <div className="panel" style={{ maxWidth: '1000px' }}>
-          <div className="panel-title compact">
-            <div><p>Balance Général</p><h2>Balance de Vérification (Comptabilité)</h2></div>
-          </div>
-          <div className="cart-table" style={{ marginTop: '1rem' }}>
-            <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
-              <span>Compte</span>
-              <span>Débit</span>
-              <span>Crédit</span>
-              <span>Solde Net</span>
-              <span>Type</span>
-            </div>
-            {trialBalanceData.map(acc => (
-              <div className="cart-row" key={acc.id} style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
-                <span style={{ fontWeight: 600 }}>{acc.name} {acc.accountNumber ? `(${acc.accountNumber})` : ''}</span>
-                <span style={{ color: '#0284c7' }}>{formatMoney(acc.totalDebit)}</span>
-                <span style={{ color: '#e11d48' }}>{formatMoney(acc.totalCredit)}</span>
-                <strong style={{ color: acc.netBalance >= 0 ? '#16a34a' : '#dc2626' }}>{formatMoney(acc.netBalance)}</strong>
-                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>{acc.accountType}</span>
-              </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
+            {['trial', 'ledger', 'pnl', 'tax'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setAccountingSubTab(tab as any)}
+                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: 'none', background: accountingSubTab === tab ? '#0f172a' : 'transparent', color: accountingSubTab === tab ? '#fff' : '#64748b', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+                {tab === 'trial' ? 'Balance de Vérification' : tab === 'ledger' ? 'Grand Livre' : tab === 'pnl' ? 'Compte de Résultat (P&L)' : 'Rapport TVA'}
+              </button>
             ))}
-            {trialBalanceData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun compte comptable</span>}
           </div>
-          {trialBalanceSummary && (
-            <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', display: 'flex', gap: '2rem', fontWeight: 600 }}>
-              <div>Total Débit: <span style={{ color: '#0284c7' }}>{formatMoney(trialBalanceSummary.totalDebit)}</span></div>
-              <div>Total Crédit: <span style={{ color: '#e11d48' }}>{formatMoney(trialBalanceSummary.totalCredit)}</span></div>
+
+          {accountingSubTab !== 'trial' && (
+            <div style={{ display: 'flex', gap: '1rem', background: '#fff', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', alignItems: 'center' }}>
+              <div style={{ fontWeight: 600, color: '#334155' }}>Période :</div>
+              <input type="date" value={accStartDate} onChange={e => setAccStartDate(e.target.value)} style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }} />
+              <span style={{ color: '#64748b' }}>au</span>
+              <input type="date" value={accEndDate} onChange={e => setAccEndDate(e.target.value)} style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }} />
+              
+              {accountingSubTab === 'ledger' && (
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <div style={{ fontWeight: 600, color: '#334155' }}>Compte :</div>
+                  <select value={selectedAccountId} onChange={e => setSelectedAccountId(Number(e.target.value) || '')} style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <option value="">Sélectionnez un compte...</option>
+                    {trialBalanceData.map(acc => <option key={acc.id} value={acc.id}>{acc.name} {acc.accountNumber ? `(${acc.accountNumber})` : ''}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {accountingSubTab === 'trial' && (
+            <div className="panel" style={{ maxWidth: '1000px' }}>
+              <div className="panel-title compact">
+                <div><p>Balance Général</p><h2>Balance de Vérification (Comptabilité)</h2></div>
+              </div>
+              <div className="cart-table" style={{ marginTop: '1rem' }}>
+                <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+                  <span>Compte</span>
+                  <span>Débit</span>
+                  <span>Crédit</span>
+                  <span>Solde Net</span>
+                  <span>Type</span>
+                </div>
+                {trialBalanceData.map(acc => (
+                  <div className="cart-row" key={acc.id} style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr' }}>
+                    <span style={{ fontWeight: 600 }}>{acc.name} {acc.accountNumber ? `(${acc.accountNumber})` : ''}</span>
+                    <span style={{ color: '#0284c7' }}>{formatMoney(acc.totalDebit)}</span>
+                    <span style={{ color: '#e11d48' }}>{formatMoney(acc.totalCredit)}</span>
+                    <strong style={{ color: acc.netBalance >= 0 ? '#16a34a' : '#dc2626' }}>{formatMoney(acc.netBalance)}</strong>
+                    <span style={{ fontSize: '0.85rem', color: '#64748b' }}>{acc.accountType}</span>
+                  </div>
+                ))}
+                {trialBalanceData.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucun compte comptable</span>}
+              </div>
+              {trialBalanceSummary && (
+                <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', display: 'flex', gap: '2rem', fontWeight: 600 }}>
+                  <div>Total Débit: <span style={{ color: '#0284c7' }}>{formatMoney(trialBalanceSummary.totalDebit)}</span></div>
+                  <div>Total Crédit: <span style={{ color: '#e11d48' }}>{formatMoney(trialBalanceSummary.totalCredit)}</span></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {accountingSubTab === 'ledger' && ledgerData && (
+            <div className="panel" style={{ maxWidth: '1000px' }}>
+              <div className="panel-title compact">
+                <div><p>Grand Livre</p><h2>Compte: {ledgerData.account.name}</h2></div>
+              </div>
+              <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', display: 'flex', gap: '2rem', fontWeight: 600 }}>
+                <div>Solde d'ouverture: <span style={{ color: ledgerData.openingBalance >= 0 ? '#16a34a' : '#dc2626' }}>{formatMoney(ledgerData.openingBalance)}</span></div>
+                <div>Solde de clôture (Période): <span style={{ color: ledgerData.currentBalance >= 0 ? '#16a34a' : '#dc2626' }}>{formatMoney(ledgerData.currentBalance)}</span></div>
+              </div>
+              <div className="cart-table" style={{ marginTop: '1rem' }}>
+                <div className="cart-head" style={{ gridTemplateColumns: '1fr 2fr 1fr 1fr' }}>
+                  <span>Date</span>
+                  <span>Référence / Note</span>
+                  <span>Débit</span>
+                  <span>Crédit</span>
+                </div>
+                {ledgerData.transactions.map((tx: any) => (
+                  <div className="cart-row" key={tx.id} style={{ gridTemplateColumns: '1fr 2fr 1fr 1fr' }}>
+                    <span>{new Date(tx.createdAt).toLocaleDateString()}</span>
+                    <span>{tx.reference || '-'} {tx.note ? `(${tx.note})` : ''}</span>
+                    <span style={{ color: '#0284c7' }}>{tx.type === 'DEBIT' ? formatMoney(tx.amount) : '-'}</span>
+                    <span style={{ color: '#e11d48' }}>{tx.type === 'CREDIT' ? formatMoney(tx.amount) : '-'}</span>
+                  </div>
+                ))}
+                {ledgerData.transactions.length === 0 && <span style={{ color: '#94a3b8', padding: '1rem' }}>Aucune transaction sur cette période</span>}
+              </div>
+            </div>
+          )}
+
+          {accountingSubTab === 'pnl' && pnlData && (
+            <div className="panel" style={{ maxWidth: '1000px' }}>
+              <div className="panel-title compact">
+                <div><p>Compte de Résultat</p><h2>P&L (Profits & Pertes)</h2></div>
+              </div>
+              <div className="cart-table" style={{ marginTop: '1rem' }}>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr', fontWeight: 600 }}>
+                  <span>Chiffre d'Affaires Net</span>
+                  <span style={{ color: '#0f172a', textAlign: 'right' }}>{formatMoney(pnlData.totalSales)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <span>Coût des Marchandises Vendues (COGS)</span>
+                  <span style={{ color: '#e11d48', textAlign: 'right' }}>- {formatMoney(pnlData.costOfGoodsSold)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr', fontWeight: 700, background: '#f8fafc' }}>
+                  <span>Marge Brute</span>
+                  <span style={{ color: pnlData.grossProfit >= 0 ? '#16a34a' : '#dc2626', textAlign: 'right' }}>{formatMoney(pnlData.grossProfit)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <span>Total des Dépenses (Charges)</span>
+                  <span style={{ color: '#e11d48', textAlign: 'right' }}>- {formatMoney(pnlData.totalExpenses)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr', fontWeight: 800, background: '#f1f5f9', fontSize: '1.1rem' }}>
+                  <span>Bénéfice Net</span>
+                  <span style={{ color: pnlData.netProfit >= 0 ? '#16a34a' : '#dc2626', textAlign: 'right' }}>{formatMoney(pnlData.netProfit)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {accountingSubTab === 'tax' && taxData && (
+            <div className="panel" style={{ maxWidth: '1000px' }}>
+              <div className="panel-title compact">
+                <div><p>Déclaration de TVA</p><h2>Rapport TVA</h2></div>
+              </div>
+              <div className="cart-table" style={{ marginTop: '1rem' }}>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <span>TVA Collectée (Sur Ventes)</span>
+                  <span style={{ color: '#0284c7', textAlign: 'right', fontWeight: 600 }}>{formatMoney(taxData.tvaCollected)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <span>TVA Déductible (Sur Achats/Dépenses)</span>
+                  <span style={{ color: '#16a34a', textAlign: 'right', fontWeight: 600 }}>- {formatMoney(taxData.tvaDeductible)}</span>
+                </div>
+                <div className="cart-row" style={{ gridTemplateColumns: '1fr 1fr', fontWeight: 800, background: '#f8fafc', fontSize: '1.1rem' }}>
+                  <span>TVA Nette à Payer</span>
+                  <span style={{ color: taxData.netTvaPayable >= 0 ? '#dc2626' : '#16a34a', textAlign: 'right' }}>{formatMoney(taxData.netTvaPayable)}</span>
+                </div>
+              </div>
             </div>
           )}
         </div>

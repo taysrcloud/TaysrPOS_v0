@@ -429,6 +429,17 @@ try {
   const crossAccountRead = await request(`/accounting/accounts/${account.body.account.id}/transactions`, b.token);
   assert(crossAccountRead.status === 404, `Cross-tenant account read was not rejected (${crossAccountRead.status})`);
 
+  const ledgerReportA = await request(`/accounting/ledger/${account.body.account.id}`, a.token);
+  assert(ledgerReportA.status === 200 && ledgerReportA.body.account?.id === account.body.account.id, `Ledger API failed: ${ledgerReportA.status}`);
+  const crossLedgerReport = await request(`/accounting/ledger/${account.body.account.id}`, b.token);
+  assert(crossLedgerReport.status === 404, `Cross-tenant ledger API was not rejected (${crossLedgerReport.status})`);
+
+  const pnlA = await request('/accounting/pnl', a.token);
+  assert(pnlA.status === 200 && typeof pnlA.body.netProfit === 'number', `P&L API failed: ${pnlA.status}`);
+  
+  const taxA = await request('/accounting/tax-report', a.token);
+  assert(taxA.status === 200 && typeof taxA.body.netTvaPayable === 'number', `Tax Report API failed: ${taxA.status}`);
+
   // Track D auto-posting (2026-08-12), CashMovement first - the unambiguous
   // case, no payment-method conditionality to get wrong. Verifies the
   // get-or-create-per-location Account helper and the DEBIT/CREDIT direction.

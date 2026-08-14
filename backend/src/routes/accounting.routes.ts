@@ -187,4 +187,135 @@ router.post('/accounts/:id/transactions', requireAuth, requireRole(['ADMIN', 'MA
   }
 });
 
+router.get('/ledger/:accountId', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const accountId = Number(req.params.accountId);
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(0);
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+
+    const account = await prisma.account.findFirst({ where: { id: accountId, companyId }, include: { accountType: true } });
+    if (!account) return res.status(404).json({ message: 'Compte introuvable' });
+
+    const allTx = await prisma.accountTransaction.findMany({
+      where: { accountId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let openingBalance = asNumber(account.openingBalance);
+    let currentBalance = openingBalance;
+    const transactions = [];
+
+    for (const t of allTx) {
+      const amt = asNumber(t.amount);
+      const isBefore = t.createdAt < startDate;
+      const isInRange = t.createdAt >= startDate && t.createdAt <= endDate;
+
+      if (t.type === 'DEBIT') {
+        if (isBefore) openingBalance += amt;
+        currentBalance += amt;
+      } else {
+        if (isBefore) openingBalance -= amt;
+        currentBalance -= amt;
+      }
+
+      if (isInRange) {
+        transactions.push({ ...t, amount: amt });
+      }
+    }
+
+    res.json({
+      account: { ...account, openingBalance: asNumber(account.openingBalance), currentBalance: asNumber(account.currentBalance) },
+      openingBalance,
+      currentBalance,
+      transactions,
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/pnl', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const locationId = req.query.locationId ? Number(req.query.locationId) : undefined;
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(0);
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+
+    const saleWhere: any = { companyId, createdAt: { gte: startDate, lte: endDate } };
+    if (locationId) saleWhere.locationId = locationId;
+
+    const sales = await prisma.sale.findMany({
+      where: saleWhere,
+      include: { lines: { include: { product: true } } }
+    });
+
+    let totalSales = 0;
+    let costOfGoodsSold = 0;
+
+    for (const s of sales) {
+      if (s.status === 'RETURNED' || s.status === 'DRAFT') continue;
+
+      for (const line of s.lines) {
+        const activeQty = asNumber(line.quantity) - asNumber(line.returnedQty || 0);
+        if (activeQty <= 0) continue;
+        const lineVal = asNumber(line.unitPrice) * activeQty - asNumber(line.discount);
+        const lineNet = lineVal / (1 + asNumber(line.tvaRate)/100);
+        totalSales += lineNet; // PNL uses net sales usually, but totalSales could be gross. Let's use net to be accurate for PNL, or gross? Actually, standard P&L totalSales is Revenue (Net of Tax). Let's use net.
+        costOfGoodsSold += asNumber(line.product?.purchasePrice || 0) * activeQty;
+      }
+    }
+
+    const expenseWhere: any = { companyId, date: { gte: startDate, lte: endDate }, isActive: true };
+    if (locationId) expenseWhere.locationId = locationId;
+
+    const expensesList = await prisma.expense.findMany({ where: expenseWhere });
+    let totalExpenses = expensesList.reduce((sum, e) => sum + asNumber(e.amount), 0);
+
+    const grossProfit = totalSales - costOfGoodsSold;
+    const netProfit = grossProfit - totalExpenses;
+
+    res.json({
+      totalSales,
+      costOfGoodsSold,
+      grossProfit,
+      totalExpenses,
+      netProfit,
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/tax-report', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const companyId = req.user!.companyId;
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(0);
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+
+    const sales = await prisma.sale.findMany({
+      where: { companyId, createdAt: { gte: startDate, lte: endDate }, status: { notIn: ['DRAFT', 'RETURNED'] } },
+      include: { lines: true }
+    });
+
+    let tvaCollected = 0;
+    for (const s of sales) {
+      for (const line of s.lines) {
+        const activeQty = asNumber(line.quantity) - asNumber(line.returnedQty || 0);
+        if (activeQty <= 0) continue;
+        const lineVal = asNumber(line.unitPrice) * activeQty - asNumber(line.discount);
+        const lineNet = lineVal / (1 + asNumber(line.tvaRate)/100);
+        tvaCollected += (lineVal - lineNet);
+      }
+    }
+
+    const purchases = await prisma.purchase.findMany({
+      where: { companyId, createdAt: { gte: startDate, lte: endDate }, status: { notIn: ['RETURNED'] } },
+    });
+    const tvaDeductible = purchases.reduce((sum, p) => sum + asNumber(p.taxTotal), 0);
+
+    res.json({
+      tvaCollected,
+      tvaDeductible,
+      netTvaPayable: tvaCollected - tvaDeductible,
+    });
+  } catch(err) { next(err); }
+});
+
 export default router;
