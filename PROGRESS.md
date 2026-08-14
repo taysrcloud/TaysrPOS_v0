@@ -1,5 +1,16 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-14 - P0 Pre-Production & P1 Platform Maturity Completion
+
+- [x] **P0-1: JWT Secret Hardening**: Created `backend/src/config.ts` enforcing strict `JWT_SECRET` length (min 32 chars in production). Replaced all hardcoded fallbacks across `auth.ts`, `auth.routes.ts`, `oauth.routes.ts`, and `device.routes.ts`.
+- [x] **P0-2: CORS Lockdown**: Wired whitelist configuration `CORS_ORIGINS` in `config.ts` and `index.ts`.
+- [x] **P0-3 & P0-4: Debug Clean & Log Removal**: Removed leftover `console.log` statements, deleted `server.log`, added `*.log` to `.gitignore`.
+- [x] **P0-5: GitHub Actions CI**: Added `.github/workflows/ci.yml` running `tsc --noEmit`, `vite build`, PostgreSQL container schema push, and full smoke test suite on push/PR.
+- [x] **P0-6 & P0-8: Stock Concurrency & Return Reconciliation**: Created `adjustProductStock` helper for atomic stock updates, added stock concurrency and return accounting reconciliation assertions to `tenant-isolation-smoke.ts` (50 passing assertion suites).
+- [x] **P1-1: Hanout Bidirectional Sync**: Extended `/sync/batch` for `customer` (create/update) and `payment` (debt collection) event ingestion. Enriched `/sync/pull` with stock quantities, tax rates, category IDs, variations, credit limits, and `deleted_ids`.
+- [x] **P1-4: Accounting Double-Entry**: Added `postBalancedJournalEntry` and `getOrCreateSystemAccount` helpers in `accounting.ts`.
+- [x] **P1-5: Restaurant Table Occupancy**: Extended `restaurant.routes.ts` with `/tables/:id/occupy`, `/tables/:id/vacate`, and live order state calculation per table.
+
 ## 2026-08-14 - Final Full ERP Migration Completion (All Tracks A through J)
 
 - [x] **Track D (Financial Reports & Ledger)**: Implemented `GET /api/accounting/ledger/:accountId`, `GET /api/accounting/pnl`, and `GET /api/accounting/tax-report` endpoints + UI tabs in `ReportsPage.tsx` for Grand Livre, Compte de Résultat (P&L), and Rapport TVA.
