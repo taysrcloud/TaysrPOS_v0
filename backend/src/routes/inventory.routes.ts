@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { triggerNotificationEvent } from '../utils/notifications.js';
 
 const router = Router();
 
@@ -64,6 +65,17 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
               reference: adj.reason || 'AJUSTEMENT',
             }
           });
+        }
+        
+        if (diff < 0) {
+          const product = await tx.product.findUnique({ where: { id: adj.productId } });
+          if (product && Number(product.lowStockAlert) > 0 && adj.quantity <= Number(product.lowStockAlert)) {
+            triggerNotificationEvent(companyId, 'LOW_STOCK', {
+              entityId: product.id,
+              title: `Stock faible: ${product.name}`,
+              note: `La quantite est passee a ${adj.quantity} (alerte: ${product.lowStockAlert})`
+            }).catch(console.error);
+          }
         }
       }
     });
@@ -155,13 +167,21 @@ router.post('/transfer', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (
       if (!sourceStock || Number(sourceStock.quantity) < parsed.quantity) {
         throw new Error('Insufficient stock in source warehouse');
       }
-      await tx.productStock.update({
+      const updatedSourceStock = await tx.productStock.update({
         where: { id: sourceStock.id },
         data: { quantity: { decrement: parsed.quantity } }
       });
       await tx.stockMovement.create({
         data: { productId: parsed.productId, warehouseId: parsed.sourceWarehouseId, type: 'TRANSFER', quantity: -parsed.quantity, reference: parsed.notes || 'Transfer Out' }
       });
+      
+      if (product && Number(product.lowStockAlert) > 0 && Number(updatedSourceStock.quantity) <= Number(product.lowStockAlert)) {
+        triggerNotificationEvent(companyId, 'LOW_STOCK', {
+          entityId: product.id,
+          title: `Stock faible: ${product.name}`,
+          note: `La quantite dans le depot source est passee a ${updatedSourceStock.quantity} (alerte: ${product.lowStockAlert})`
+        }).catch(console.error);
+      }
 
       // Add to destination
       const destStock = await tx.productStock.findFirst({

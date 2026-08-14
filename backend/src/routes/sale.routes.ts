@@ -6,6 +6,7 @@ import { prisma } from '../utils/prisma.js';
 import { generateInvoicePDF, generateReceiptPDF, type PdfCompany } from '../utils/pdf.js';
 import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
 import { resolveCustomerGroupPrices } from '../utils/pricing.js';
+import { triggerNotificationEvent } from '../utils/notifications.js';
 
 const router = Router();
 
@@ -455,6 +456,25 @@ router.post('/', async (req, res) => {
       });
     });
 
+    if (shouldFinalize && sale) {
+      triggerNotificationEvent(companyId, 'NEW_SALE', {
+        entityId: sale.id,
+        title: `Nouvelle vente ${sale.ticketNumber}`,
+        note: `Vente finalisée d'un montant de ${total}`
+      }).catch(console.error);
+
+      if (data.method !== 'CREDIT') {
+        const received = sale.payments?.reduce((acc, p) => acc + Number(p.amount), 0) || 0;
+        if (received > 0) {
+          triggerNotificationEvent(companyId, 'PAYMENT_RECEIVED', {
+            entityId: sale.id,
+            title: `Paiement reçu (${sale.ticketNumber})`,
+            note: `Montant encaissé: ${received}`
+          }).catch(console.error);
+        }
+      }
+    }
+
     res.status(201).json(normalizeSale(sale));
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ message: 'Ticket invalide', errors: error.issues });
@@ -558,6 +578,22 @@ router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
         include: { customer: true, payments: true, items: { include: { product: true, variation: true } } },
       });
     });
+
+    if (updated) {
+      triggerNotificationEvent(companyId, 'NEW_SALE', {
+        entityId: updated.id,
+        title: `Nouvelle vente ${updated.ticketNumber}`,
+        note: `Vente finalisée d'un montant de ${total}`
+      }).catch(console.error);
+
+      if (!isCredit) {
+        triggerNotificationEvent(companyId, 'PAYMENT_RECEIVED', {
+          entityId: updated.id,
+          title: `Paiement reçu (${updated.ticketNumber})`,
+          note: `Montant encaissé: ${total}`
+        }).catch(console.error);
+      }
+    }
 
     res.json({ success: true, sale: normalizeSale(updated) });
   } catch (error) {
