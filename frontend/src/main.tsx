@@ -3239,14 +3239,15 @@ const SettingsWarrantiesTab = () => {
       const res = await apiFetch('/api/warranties');
       if (res.ok) {
         const data = await res.json();
-        setWarranties(Array.isArray(data) ? data : []);
+        const items = data.warranties || data;
+        setWarranties(Array.isArray(items) ? items : []);
       }
     } catch { setWarranties([]); }
   };
   useEffect(() => { void load(); }, []);
   
   return (
-    <div className="product-form-panel" style={{ padding: '2rem' }}>
+    <div className="panel" style={{ padding: '2rem' }}>
       <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>Garanties</h2>
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <input placeholder="Nom (ex: Garantie 1 an)" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
@@ -3259,7 +3260,7 @@ const SettingsWarrantiesTab = () => {
           await apiFetch('/api/warranties', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
           setForm({ name: '', duration: 12, durationType: 'MONTHS' });
           await load();
-        }} style={{ padding: '0.5rem 1.25rem', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>Ajouter</button>
+        }}>Ajouter</button>
       </div>
       <div className="cart-table">
         <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr' }}>
@@ -3270,7 +3271,7 @@ const SettingsWarrantiesTab = () => {
             <span style={{ fontWeight: 600 }}>{w.name}</span>
             <span>{w.duration} {w.durationType === 'MONTHS' ? 'Mois' : w.durationType === 'YEARS' ? 'Ans' : 'Jours'}</span>
             <span>
-              <button onClick={async () => { await apiFetch(`/api/warranties/${w.id}`, { method: 'DELETE' }); await load(); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>Supprimer</button>
+              <button className="ghost-action" onClick={async () => { await apiFetch(`/api/warranties/${w.id}`, { method: 'DELETE' }); await load(); }} style={{ color: '#ef4444' }}>Supprimer</button>
             </span>
           </div>
         ))}
@@ -3289,14 +3290,15 @@ const SettingsVariationTemplatesTab = () => {
       const res = await apiFetch('/api/variation-templates');
       if (res.ok) {
         const data = await res.json();
-        setTemplates(Array.isArray(data) ? data : []);
+        const items = data.templates || data;
+        setTemplates(Array.isArray(items) ? items : []);
       }
     } catch { setTemplates([]); }
   };
   useEffect(() => { void load(); }, []);
   
   return (
-    <div className="product-form-panel" style={{ padding: '2rem' }}>
+    <div className="panel" style={{ padding: '2rem' }}>
       <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>Modèles de Variation</h2>
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <input placeholder="Nom (ex: Taille)" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
@@ -3310,7 +3312,7 @@ const SettingsVariationTemplatesTab = () => {
           }); 
           setForm({ name: '', values: '' });
           await load(); 
-        }} style={{ padding: '0.5rem 1.25rem', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>Ajouter</button>
+        }}>Ajouter</button>
       </div>
       <div className="cart-table">
         <div className="cart-head" style={{ gridTemplateColumns: '1fr 2fr 1fr' }}>
@@ -3321,7 +3323,7 @@ const SettingsVariationTemplatesTab = () => {
             <span style={{ fontWeight: 600 }}>{t.name}</span>
             <span>{Array.isArray(t.values) ? t.values.join(', ') : ''}</span>
             <span>
-              <button onClick={async () => { await apiFetch(`/api/variation-templates/${t.id}`, { method: 'DELETE' }); await load(); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>Supprimer</button>
+              <button className="ghost-action" onClick={async () => { await apiFetch(`/api/variation-templates/${t.id}`, { method: 'DELETE' }); await load(); }} style={{ color: '#ef4444' }}>Supprimer</button>
             </span>
           </div>
         ))}
@@ -3340,14 +3342,15 @@ const SettingsDiscountsTab = () => {
       const res = await apiFetch('/api/discounts');
       if (res.ok) {
         const data = await res.json();
-        setDiscounts(Array.isArray(data) ? data : []);
+        const items = data.discounts || data;
+        setDiscounts(Array.isArray(items) ? items : []);
       }
     } catch { setDiscounts([]); }
   };
   useEffect(() => { void load(); }, []);
   
   return (
-    <div className="product-form-panel" style={{ padding: '2rem' }}>
+    <div className="panel" style={{ padding: '2rem' }}>
       <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>Promotions & Remises</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem', maxWidth: '600px' }}>
         <input placeholder="Nom de la promotion" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{ padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
@@ -3371,7 +3374,7 @@ const SettingsDiscountsTab = () => {
           }); 
           setForm({ name: '', discountType: 'PERCENTAGE', amount: 0, startDate: '', endDate: '', appliesTo: 'ALL' });
           await load(); 
-        }} style={{ padding: '0.6rem 1.25rem', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}>Créer la promotion</button>
+        }} style={{ alignSelf: 'flex-start' }}>Créer la promotion</button>
       </div>
       <div className="cart-table">
         <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}>
@@ -3383,7 +3386,7 @@ const SettingsDiscountsTab = () => {
             <span>{d.discountType === 'PERCENTAGE' ? 'Pourcentage' : 'Montant Fixe'}</span>
             <span>{d.amount} {d.discountType === 'PERCENTAGE' ? '%' : 'MAD'}</span>
             <span>
-              <button onClick={async () => { await apiFetch(`/api/discounts/${d.id}`, { method: 'DELETE' }); await load(); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>Supprimer</button>
+              <button className="ghost-action" onClick={async () => { await apiFetch(`/api/discounts/${d.id}`, { method: 'DELETE' }); await load(); }} style={{ color: '#ef4444' }}>Supprimer</button>
             </span>
           </div>
         ))}
@@ -3401,14 +3404,15 @@ const SettingsDevicesTab = () => {
       const res = await apiFetch('/api/settings/devices');
       if (res.ok) {
         const data = await res.json();
-        setDevices(Array.isArray(data) ? data : (data.devices || []));
+        const items = data.devices || data;
+        setDevices(Array.isArray(items) ? items : []);
       }
     } catch { setDevices([]); }
   };
   useEffect(() => { void load(); }, []);
   
   return (
-    <div className="product-form-panel" style={{ padding: '2rem' }}>
+    <div className="panel" style={{ padding: '2rem' }}>
       <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>Appareils Sync</h2>
       <button className="primary-action" onClick={async () => { 
         await apiFetch('/api/settings/devices', { 
@@ -3417,7 +3421,7 @@ const SettingsDevicesTab = () => {
           body: JSON.stringify({ name: 'Appareil Hanout Mobile' }) 
         }); 
         await load(); 
-      }} style={{ padding: '0.6rem 1.25rem', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer', marginBottom: '1.5rem' }}>Générer Code d'Activation</button>
+      }} style={{ marginBottom: '1.5rem' }}>Générer Code d'Activation</button>
       <div className="cart-table">
         <div className="cart-head" style={{ gridTemplateColumns: '2fr 1fr 1fr' }}>
           <span>Nom</span><span>Statut / Code</span><span>Action</span>
@@ -3427,7 +3431,7 @@ const SettingsDevicesTab = () => {
             <span style={{ fontWeight: 600 }}>{d.name || `Appareil #${d.id}`}</span>
             <span>{d.activationCode ? `Code: ${d.activationCode}` : (d.status || 'Actif')}</span>
             <span>
-              <button onClick={async () => { await apiFetch(`/api/settings/devices/${d.id}`, { method: 'DELETE' }); await load(); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>Révoker</button>
+              <button className="ghost-action" onClick={async () => { await apiFetch(`/api/settings/devices/${d.id}`, { method: 'DELETE' }); await load(); }} style={{ color: '#ef4444' }}>Révoker</button>
             </span>
           </div>
         ))}

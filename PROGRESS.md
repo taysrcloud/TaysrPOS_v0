@@ -1,5 +1,13 @@
 # TaysrPOS Refactoring & Integration Progress
 
+## 2026-08-14 - Final ERP Parity & Compliance Completed
+
+- [x] **Facturation Groupée (Consolidated Invoices)**: Implemented `ConsolidatedInvoice` model and `/api/invoices/consolidated` endpoints (`POST`, `GET`, `GET /:id/pdf`) with mandatory customer ICE verification for Moroccan fiscal compliance.
+- [x] **Notification Triggers & Discount Cart Resolver**: Wired `triggerNotificationEvent` calls in `sale.routes.ts` (`NEW_SALE`, `PAYMENT_RECEIVED`) and `inventory.routes.ts` (`LOW_STOCK`). Integrated standalone `Discount` resolver into `pricing.ts` for POS cart item pricing.
+- [x] **Frontend Settings UI & Barcode Printing**: Added Garanties, Modèles de Variation, Promotions & Remises, and Appareils Sync tabs in Settings UI. Integrated `BarcodePrintModal` in `ProductsPage.tsx` with authenticated PDF/HTML sticker printing.
+- [x] **Legacy Data Migration (Track J)**: Built `backend/scripts/migrate-legacy-mysql.ts` script for importing legacy MySQL data into PostgreSQL Prisma tenant schema with dry-run mode and financial total reconciliation assertions (`SUM(old_sales) === SUM(new_sales)`).
+- [x] **Smoke & Build Verification**: Extended `tenant-isolation-smoke.ts` to 46 verified areas; full suite passes 100% clean against PostgreSQL. `tsc --noEmit` and `vite build` pass with 0 errors.
+
 ## 2026-08-14 - Full ERP Feature Parity Migration Completed
 
 - [x] **Track C (Catalog & Pricing)**: Added `Warranty` model + CRUD (`/api/warranties`), `VariationTemplate` model + CRUD (`/api/variation-templates`), `Discount` standalone promotions model + CRUD (`/api/discounts`), and Code128 printable sticker sheet generator (`GET /api/products/barcodes/print`). Integrated `BarcodePrintModal` in frontend.
