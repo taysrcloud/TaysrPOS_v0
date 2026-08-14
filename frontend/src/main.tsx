@@ -334,7 +334,7 @@ export type Location = {
 
 
 
-const apiBase = window.location.port === '4400' ? window.location.origin : 'http://127.0.0.1:4400';
+const apiBase = (import.meta as any).env?.VITE_API_URL || (window.location.port === '5173' || window.location.port === '5400' ? 'http://127.0.0.1:4400' : '');
 const authTokenKey = 'taysrPOS_token';
 const authUserKey = 'taysrPOS_user';
 
