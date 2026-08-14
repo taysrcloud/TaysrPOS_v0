@@ -4,6 +4,20 @@ This file tracks the new POS rebuild under `C:\xampp\htdocs\TaysrSuite\apps\Tays
 
 Check this file before editing POS v0 code.
 
+## Recent Milestone (2026-08-14): Full ERP Migration Complete
+
+All 10 tracks (A through J) of the master migration plan have been implemented and verified:
+- **Track A (Core Sales & POS)**: Warranties, Variations, Discounts, Commission Agents, Multi-Currency.
+- **Track B (Procurement)**: Requisitions, Stock Transfers, Supplier Ledger history.
+- **Track C (Catalog & Pricing)**: Group Pricing, Barcode Printable Sticker Sheets, Bulk CSV Product & Opening Stock Import.
+- **Track D (Accounting & Financials)**: Trial Balance, Grand Livre, P&L, Tax Reports.
+- **Track E (People & Commissions)**: Sales Commission Agent selector & Commission Sales Reports.
+- **Track F (Communications & Triggers)**: Automated Notification Event Triggers (`LOW_STOCK`, `PAYMENT_RECEIVED`, `NEW_SALE`).
+- **Track G (Fiscal & Regulatory)**: Consolidated Invoices with ICE Validation for Moroccan compliance.
+- **Track H (Multi-Currency)**: Foreign Total math, exchange rate overrides, and historical rate immutability.
+- **Track I (Dashboard)**: User-configurable widget layout system with backend persistence (`GET/PUT /api/dashboard-config`).
+- **Track J (Data Migration)**: MySQL to PostgreSQL automated migration tool (`migrate-legacy-mysql.ts`).
+
 ## Purpose
 
 TaysrPOS v0 is the active modern POS direction for the suite.
