@@ -14,13 +14,24 @@ export const BarcodePrintModal: React.FC<BarcodePrintModalProps> = ({ products, 
     return init;
   });
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const ids = products.map(p => p.id).join(',');
     const q = products.map(p => quantities[p.id] || 1).join(',');
     const url = `/api/products/barcodes/print?ids=${ids}&quantities=${q}`;
 
-    // Open print preview in browser
-    window.open(url, '_blank');
+    try {
+      const res = await apiFetch(url);
+      if (!res.ok) {
+        alert("Erreur lors de la génération des étiquettes");
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch {
+      alert("Erreur lors de la génération des étiquettes");
+    }
   };
 
   return (
