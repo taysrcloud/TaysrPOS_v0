@@ -23,6 +23,7 @@ const saleSchema = z.object({
   // resolves and snapshots what that MAD total equals in another currency.
   currencyId: z.coerce.number().int().positive().optional(),
   exchangeRate: z.coerce.number().positive().optional(),
+  commissionAgentId: z.coerce.number().int().positive().optional(),
   // Split-payment breakdown for method: 'MULTI'. Was previously accepted by
   // the frontend's payload but silently stripped here (a plain z.object()
   // drops unrecognized keys) - the register recorded one lump Payment row
@@ -358,6 +359,7 @@ router.post('/', async (req, res) => {
           companyId,
           locationId: location.id,
           customerId: customer?.id,
+          commissionAgentId: data.commissionAgentId,
           channel: SaleChannel.RETAIL,
           status: saleStatus,
           paymentStatus,

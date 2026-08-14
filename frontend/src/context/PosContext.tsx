@@ -110,6 +110,14 @@ export interface PosContextValue {
   selectedVariableProduct: Product | null;
   setSelectedVariableProduct: (product: Product | null) => void;
   groupPrices: Record<number, number>;
+  commissionAgents: any[];
+  currencies: any[];
+  commissionAgentId: number | '';
+  setCommissionAgentId: (id: number | '') => void;
+  currencyId: number | '';
+  setCurrencyId: (id: number | '') => void;
+  exchangeRate: string;
+  setExchangeRate: (val: string) => void;
 }
 
 export const PosContext = createContext<PosContextValue | null>(null);

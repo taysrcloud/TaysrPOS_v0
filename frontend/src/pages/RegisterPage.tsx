@@ -25,6 +25,7 @@ export const RegisterPage = () => {
     messageContact, setMessageContact, messageContent, setMessageContent,
     selectedVariableProduct, setSelectedVariableProduct, visibleProducts, getSaleDueAmount,
     setInvoiceSale, openSaleSettlement, groupPrices,
+    commissionAgents, currencies, commissionAgentId, setCommissionAgentId, currencyId, setCurrencyId,
   } = usePos();
 
   // Register-exclusive state relocated from App - confirmed via a full-file
@@ -260,6 +261,28 @@ export const RegisterPage = () => {
             </select>
             <button className="cart-add-customer" onClick={() => openContactModal('CUSTOMER')}><Plus size={14} /></button>
           </div>
+          <div className="cart-customer-bar" style={{ marginTop: '-8px', borderTop: 'none', background: '#f8fafc' }}>
+            <select value={commissionAgentId} onChange={e => setCommissionAgentId(e.target.value ? Number(e.target.value) : '')} style={{ flex: 1 }}>
+              <option value="">-- Commission Agent --</option>
+              {commissionAgents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <select value={currencyId} onChange={e => {
+              const id = e.target.value ? Number(e.target.value) : '';
+              setCurrencyId(id);
+              if (id) {
+                const cur = currencies.find(c => c.id === id);
+                if (cur) setExchangeRate(String(cur.rate));
+              } else {
+                setExchangeRate('');
+              }
+            }} style={{ flex: 1, marginLeft: '8px' }}>
+              <option value="">-- Devise (MAD par defaut) --</option>
+              {currencies.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.code} ({c.name})</option>)}
+            </select>
+            {currencyId !== '' && (
+              <input type="number" step="0.0001" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} placeholder="Taux" style={{ width: '80px', marginLeft: '8px', padding: '0.4rem', borderRadius: '4px', border: '1px solid #cbd5e1' }} />
+            )}
+          </div>
           <div className="cart-table">
             <div className="cart-head"><span>Produit</span><span>Qte</span><span>Prix</span><span>Remise</span><span>Total</span><span /></div>
             {cart.length === 0 ? <div className="pos-empty"><ShoppingCart size={34} /><strong>Votre panier est vide</strong><span>Scannez un code-barres ou cliquez sur un produit.</span></div> : cart.map(line => {
@@ -400,6 +423,22 @@ export const RegisterPage = () => {
                     <label>
                       <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#334155', marginBottom: '0.5rem', display: 'block' }}>Crédit Client</span>
                       <input value={paymentForm.credit} onChange={e => setPaymentForm({...paymentForm, credit: e.target.value})} inputMode="decimal" style={{ fontSize: '1.2rem', padding: '0.75rem', height: 'auto' }} />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <label>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.4rem', display: 'block' }}>Agent Commercial</span>
+                      <select value={commissionAgentId} onChange={e => setCommissionAgentId(Number(e.target.value) || '')} style={{ padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', width: '100%' }}>
+                        <option value="">Aucun agent</option>
+                        {commissionAgents.map(a => <option key={a.id} value={a.id}>{a.name} ({a.commissionRate}%)</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.4rem', display: 'block' }}>Devise</span>
+                      <select value={currencyId} onChange={e => setCurrencyId(Number(e.target.value) || '')} style={{ padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', width: '100%' }}>
+                        <option value="">MAD (Par défaut)</option>
+                        {currencies.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name} ({c.symbol})</option>)}
+                      </select>
                     </label>
                   </div>
                 </div>

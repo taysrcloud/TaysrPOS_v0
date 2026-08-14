@@ -480,6 +480,19 @@ try {
   const commissionAgent = await request('/commission-agents', a.token, { method: 'POST', body: JSON.stringify({ name: `Agent ${marker}`, commissionRate: 5 }) });
   assert(commissionAgent.status === 201, `Commission agent create failed: ${commissionAgent.status} ${JSON.stringify(commissionAgent.body)}`);
 
+  const saleWithAgent = await request('/sales', a.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      customerId: a.contact.id,
+      locationId: a.location.id,
+      items: [{ productId: a.product.id, quantity: 1 }],
+      method: 'CASH',
+      status: 'FINAL',
+      commissionAgentId: commissionAgent.body.id,
+    }),
+  });
+  assert(saleWithAgent.status === 201 && saleWithAgent.body.commissionAgentId === commissionAgent.body.id, `Sale with commissionAgentId failed: ${saleWithAgent.status} ${JSON.stringify(saleWithAgent.body)}`);
+
   const notifTemplate = await request('/notifications/templates', a.token, { method: 'POST', body: JSON.stringify({ event: 'LOW_STOCK', channel: 'EMAIL', body: 'Stock bas' }) });
   assert(notifTemplate.status === 201, `Notification template create failed: ${notifTemplate.status} ${JSON.stringify(notifTemplate.body)}`);
 

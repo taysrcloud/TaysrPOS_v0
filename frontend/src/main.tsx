@@ -837,14 +837,24 @@ const App = () => {
   // company settings since neither list is ever large enough to justify a
   // lazy-on-tab-visit load.
   const [currencies, setCurrencies] = useState<{ id: number; code: string; name: string; symbol: string | null; rate: number; isActive: boolean }[]>([]);
+  const [commissionAgents, setCommissionAgents] = useState<{ id: number; name: string }[]>([]);
+  const [commissionAgentId, setCommissionAgentId] = useState<number | ''>('');
+  const [currencyId, setCurrencyId] = useState<number | ''>('');
+  const [exchangeRate, setExchangeRate] = useState<string>('');
   const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '', rate: '' });
   const loadCurrencies = async () => {
     try {
       const response = await apiFetch('/api/currencies');
-      if (!response.ok) return;
       const data = await response.json();
       if (Array.isArray(data.currencies)) setCurrencies(data.currencies);
-    } catch { /* Settings sub-section - fail quietly, matches loadCompanySettings' siblings. */ }
+    } catch { /* Settings sub-section - fail quietly. */ }
+  };
+  const loadCommissionAgents = async () => {
+    try {
+      const response = await apiFetch('/api/commission-agents');
+      const data = await response.json();
+      if (Array.isArray(data.commissionAgents)) setCommissionAgents(data.commissionAgents);
+    } catch { /* Fail quietly */ }
   };
   const createCurrency = async () => {
     if (!newCurrency.code.trim() || !newCurrency.name.trim() || !newCurrency.rate) return;
@@ -902,7 +912,7 @@ const App = () => {
     } catch { setStatus('Echec de mise a jour des permissions'); }
   };
 
-  useEffect(() => { if (isAuthenticated && currentUser) { void loadCurrencies(); void loadSettingsUsers(); } }, [isAuthenticated, currentUser?.id]);
+  useEffect(() => { if (isAuthenticated && currentUser) { void loadCurrencies(); void loadCommissionAgents(); void loadSettingsUsers(); } }, [isAuthenticated, currentUser?.id]);
 
   const restaurantEntitled = !currentUser?.accountId || Boolean(currentUser.planLimits?.modules?.includes('RESTAURANT'));
   const restaurantEnabled = restaurantEntitled && Boolean(companySettings?.restaurantEnabled);
@@ -1223,7 +1233,8 @@ const App = () => {
         loadExpenses(),
         loadPurchases(),
         loadSessions(),
-        loadCustomerGroups()
+        loadCustomerGroups(),
+        loadCommissionAgents()
       ]);
       setDataLoading(false);
     };
@@ -1478,6 +1489,9 @@ const App = () => {
     const payload: any = {
       customerId: customer.id !== 0 ? customer.id : undefined,
       customerName: customer.name,
+      commissionAgentId: commissionAgentId !== '' ? commissionAgentId : undefined,
+      currencyId: currencyId !== '' ? currencyId : undefined,
+      exchangeRate: exchangeRate ? Number(exchangeRate) : undefined,
       method,
       status: statusName,
       discountRate,
@@ -3945,6 +3959,14 @@ const SettingsDevicesTab = () => {
     messageContact, setMessageContact, messageContent, setMessageContent,
     selectedVariableProduct, setSelectedVariableProduct,
     groupPrices,
+    commissionAgents,
+    currencies,
+    commissionAgentId,
+    setCommissionAgentId,
+    currencyId,
+    setCurrencyId,
+    exchangeRate,
+    setExchangeRate,
   };
 
   if (authChecking) {
