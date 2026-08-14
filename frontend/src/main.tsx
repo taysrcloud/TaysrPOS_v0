@@ -73,6 +73,10 @@ type EnabledModule = 'POS' | 'RESTAURANT';
 export type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
 export type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
+export type DashboardConfiguration = {
+  widgets: Array<{ id: string; enabled: boolean; order: number }>;
+};
+
 export type CashMovement = {
   id: number;
   type: 'IN' | 'OUT';
@@ -577,8 +581,32 @@ const App = () => {
   const [selectedLoginAccountId, setSelectedLoginAccountId] = useState('');
   const [page, setPage] = useState<PageKey>('Tableau de bord');
 
+  const defaultDashboardConfig: DashboardConfiguration = {
+    widgets: [
+      { id: 'kpi_row_1', enabled: true, order: 1 },
+      { id: 'kpi_row_2', enabled: true, order: 2 },
+      { id: 'sales_chart', enabled: true, order: 3 },
+      { id: 'tables_row', enabled: true, order: 4 },
+    ]
+  };
+  const [dashboardConfig, setDashboardConfig] = useState<DashboardConfiguration>(defaultDashboardConfig);
+  const [isConfiguringDashboard, setIsConfiguringDashboard] = useState(false);
+
   const [isLocked, setIsLocked] = useState(false);
   const [pinEntry, setPinEntry] = useState('');
+  
+  useEffect(() => {
+    if (isAuthenticated) {
+      apiFetch('/api/dashboard-config')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.widgets) {
+            setDashboardConfig(data);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [isAuthenticated]);
   
   useEffect(() => {
     const handleAuthError = () => {
@@ -1928,52 +1956,105 @@ const App = () => {
               {period.label}
             </button>
           ))}
+          <button className="ghost-action" style={{ background: '#1e293b', color: '#fff', border: '1px solid #334155' }} onClick={() => setIsConfiguringDashboard(!isConfiguringDashboard)}>
+            <Settings size={16} /> {isConfiguringDashboard ? 'Fermer Config' : 'Personnaliser'}
+          </button>
           <button className="primary-action" onClick={() => setPage('POS')}><ReceiptText size={16} /> Ouvrir POS</button>
         </div>
       </div>
 
-      {/* Row 1 - 4 KPI cards (like UltimatePOS top row) */}
-      <section className="metric-grid">
-        <Metric title="Total des ventes" value={formatMoney(dashRevenue)} detail={`${dashPaidSales.length} ventes payees`} tone="blue" icon={ShoppingCart} />
-        <Metric title="Revenu net" value={formatMoney(dashRevenue - totalSellReturn - totalExpenses)} detail="Ventes - retours - depenses" tone="green" icon={Banknote} />
-        <Metric title="Factures en attente" value={formatMoney(totalCreditDue)} detail={`${dashCreditSales.length} factures crédit`} tone="orange" icon={FileText} />
-        <Metric title="Retours de vente" value={formatMoney(totalSellReturn)} detail="Total retours" tone="violet" icon={RotateCcw} />
-      </section>
-
-      {/* Row 2 - 4 more KPI cards (like UltimatePOS second row) */}
-      <section className="metric-grid" style={{ marginBottom: '1rem' }}>
-        <Metric title="Total achats" value={formatMoney(totalPurchases)} detail={`${dashboardVisibleProducts.length} articles`} tone="blue" icon={TrendingUp} />
-        <Metric title="Achats en attente" value={formatMoney(0)} detail="Aucun fournisseur en retard" tone="orange" icon={AlertTriangle} />
-        <Metric title="Valeur du stock" value={formatMoney(stockValue)} detail={`${dashboardLowStockProducts.length} alertes`} tone="green" icon={Warehouse} />
-        <Metric title="Dépenses" value={formatMoney(totalExpenses)} detail="Pas encore de données" tone="violet" icon={Banknote} />
-      </section>
-
-      {/* Full-width chart - Sells last 30 days (like UltimatePOS) */}
-      <section style={{ marginBottom: '1rem' }}>
-        <div className="panel wide-panel" style={{ width: '100%', padding: '1.5rem' }}>
-          <div className="panel-title compact" style={{ marginBottom: '1.5rem' }}><div><p>Ventes</p><h2>Ventes de la periode</h2></div><span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>{formatMoney(dashPaidSales.reduce((s, sale) => s + sale.total, 0))} Total</span></div>
-          <div style={{ height: '280px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorVentes" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                <Area type="monotone" dataKey="ventes" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorVentes)" />
-              </AreaChart>
-            </ResponsiveContainer>
+      {isConfiguringDashboard && (
+        <div className="panel" style={{ marginBottom: '1.5rem', padding: '1.5rem', background: '#f8fafc', border: '1px solid #cbd5e1' }}>
+          <div className="panel-title compact" style={{ marginBottom: '1rem' }}>
+            <div><p>Configuration</p><h2>Widgets du Tableau de Bord</h2></div>
+            <button className="primary-action" onClick={() => {
+              apiFetch('/api/dashboard-config', {
+                method: 'PUT',
+                body: JSON.stringify(dashboardConfig),
+              }).then(res => res.json()).then(data => {
+                if (data.widgets) setDashboardConfig(data);
+                setIsConfiguringDashboard(false);
+              }).catch(console.error);
+            }}>Enregistrer Config</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem' }}>
+            {[
+              { id: 'kpi_row_1', label: 'KPIs Ventes & Revenus' },
+              { id: 'kpi_row_2', label: 'KPIs Stock & Achats' },
+              { id: 'sales_chart', label: 'Graphique des Ventes' },
+              { id: 'tables_row', label: 'Factures Client & Actions' },
+            ].map(w => {
+              const currentW = dashboardConfig.widgets?.find(x => x.id === w.id);
+              const isEnabled = currentW ? currentW.enabled : true;
+              return (
+                <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={isEnabled} onChange={e => {
+                    const newWidgets = [...(dashboardConfig.widgets || [])];
+                    const idx = newWidgets.findIndex(x => x.id === w.id);
+                    if (idx >= 0) {
+                      newWidgets[idx] = { ...newWidgets[idx], enabled: e.target.checked };
+                    } else {
+                      newWidgets.push({ id: w.id, enabled: e.target.checked, order: newWidgets.length + 1 });
+                    }
+                    setDashboardConfig({ ...dashboardConfig, widgets: newWidgets });
+                  }} />
+                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{w.label}</span>
+                </label>
+              );
+            })}
           </div>
         </div>
-      </section>
+      )}
+
+      {/* Row 1 - 4 KPI cards (like UltimatePOS top row) */}
+      {(dashboardConfig.widgets?.find(x => x.id === 'kpi_row_1')?.enabled ?? true) && (
+        <section className="metric-grid">
+          <Metric title="Total des ventes" value={formatMoney(dashRevenue)} detail={`${dashPaidSales.length} ventes payees`} tone="blue" icon={ShoppingCart} />
+          <Metric title="Revenu net" value={formatMoney(dashRevenue - totalSellReturn - totalExpenses)} detail="Ventes - retours - depenses" tone="green" icon={Banknote} />
+          <Metric title="Factures en attente" value={formatMoney(totalCreditDue)} detail={`${dashCreditSales.length} factures crédit`} tone="orange" icon={FileText} />
+          <Metric title="Retours de vente" value={formatMoney(totalSellReturn)} detail="Total retours" tone="violet" icon={RotateCcw} />
+        </section>
+      )}
+
+      {/* Row 2 - 4 more KPI cards (like UltimatePOS second row) */}
+      {(dashboardConfig.widgets?.find(x => x.id === 'kpi_row_2')?.enabled ?? true) && (
+        <section className="metric-grid" style={{ marginBottom: '1rem' }}>
+          <Metric title="Total achats" value={formatMoney(totalPurchases)} detail={`${dashboardVisibleProducts.length} articles`} tone="blue" icon={TrendingUp} />
+          <Metric title="Achats en attente" value={formatMoney(0)} detail="Aucun fournisseur en retard" tone="orange" icon={AlertTriangle} />
+          <Metric title="Valeur du stock" value={formatMoney(stockValue)} detail={`${dashboardLowStockProducts.length} alertes`} tone="green" icon={Warehouse} />
+          <Metric title="Dépenses" value={formatMoney(totalExpenses)} detail="Pas encore de données" tone="violet" icon={Banknote} />
+        </section>
+      )}
+
+      {/* Full-width chart - Sells last 30 days (like UltimatePOS) */}
+      {(dashboardConfig.widgets?.find(x => x.id === 'sales_chart')?.enabled ?? true) && (
+        <section style={{ marginBottom: '1rem' }}>
+          <div className="panel wide-panel" style={{ width: '100%', padding: '1.5rem' }}>
+            <div className="panel-title compact" style={{ marginBottom: '1.5rem' }}><div><p>Ventes</p><h2>Ventes de la periode</h2></div><span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>{formatMoney(dashPaidSales.reduce((s, sale) => s + sale.total, 0))} Total</span></div>
+            <div style={{ height: '280px', width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorVentes" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                  <Area type="monotone" dataKey="ventes" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorVentes)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Sales & Purchase payment dues tables (like UltimatePOS side-by-side) */}
-      <section className="workspace-grid" style={{ marginBottom: '1rem' }}>
+      {(dashboardConfig.widgets?.find(x => x.id === 'tables_row')?.enabled ?? true) && (
+        <section className="workspace-grid" style={{ marginBottom: '1rem' }}>
         <div className="panel wide-panel">
           <div className="panel-title compact"><div><p>Paiements</p><h2>Factures client en attente</h2></div><button onClick={() => setPage('Paiements')}>Tout voir</button></div>
           {dashCreditSales.length > 0 ? (
@@ -2000,6 +2081,7 @@ const App = () => {
           </div>
         </div>
       </section>
+      )}
 
       {/* Stock Alerts table (like UltimatePOS) */}
       <section style={{ marginBottom: '1rem' }}>
