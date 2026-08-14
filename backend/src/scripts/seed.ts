@@ -3,7 +3,7 @@ import pg from 'pg';
 import { PrismaClient } from '../generated/client/index.js';
 import bcrypt from 'bcrypt';
 
-const connectionString = process.env.TAYSRPOS_DATABASE_URL
+const connectionString = process.env.DATABASE_URL || process.env.TAYSRPOS_DATABASE_URL
   || 'postgresql://admin:adminpassword@localhost:5432/taysrpos_dev';
 
 const pool = new pg.Pool({ connectionString });

@@ -11,7 +11,7 @@ type TenantStore = {
 const tenantContext = new AsyncLocalStorage<TenantStore>();
 const tenantClients = new Map<string, PrismaClient>();
 
-const defaultConnectionString = process.env.TAYSRPOS_DATABASE_URL || 'postgresql://admin:adminpassword@localhost:5432/taysrpos_dev';
+const defaultConnectionString = process.env.DATABASE_URL || process.env.TAYSRPOS_DATABASE_URL || 'postgresql://admin:adminpassword@localhost:5432/taysrpos_dev';
 const defaultPool = new pg.Pool({ connectionString: defaultConnectionString });
 const defaultAdapter = new PrismaPg(defaultPool);
 const defaultPrisma = new PrismaClient({ adapter: defaultAdapter });
