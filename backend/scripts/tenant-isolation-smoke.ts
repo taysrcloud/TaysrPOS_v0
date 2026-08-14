@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { getDefaultPrisma } from '../src/utils/prisma.js';
+import { adjustProductStock } from '../src/utils/stock.js';
 
 const api = process.env.POS_API_URL || 'http://127.0.0.1:4400/api';
 const secret = process.env.JWT_SECRET || 'taysr-pos-secret-key-12345';
@@ -1089,12 +1090,59 @@ try {
   });
   assert(crossImportStock.status === 200 && crossImportStock.body.notFoundCount === 1, `Cross-tenant stock import should not find product: ${crossImportStock.body.notFoundCount}`);
 
+  // Test: Return Accounting Reconciliation & Stock Concurrency
+  const reconProd = await prisma.product.create({
+    data: { companyId: a!.company.id, name: `Recon-${marker}`, sku: `RECON-${marker}`, salePrice: 100, purchasePrice: 50, trackStock: true }
+  });
+  await adjustProductStock(prisma, reconProd.id, a!.warehouse.id, null, 50);
+
+  // Parallel stock decrements check
+  await Promise.all([1, 2, 3, 4, 5].map(() => adjustProductStock(prisma, reconProd.id, a!.warehouse.id, null, -1)));
+  const postConcurrencyStock = await prisma.productStock.findFirst({
+    where: { productId: reconProd.id, warehouseId: a!.warehouse.id }
+  });
+  assert(Number(postConcurrencyStock?.quantity) === 45, `Parallel stock decrement failed: expected 45, got ${postConcurrencyStock?.quantity}`);
+
+  // Sale + Return accounting roundtrip
+  const reconSaleRes = await request('/sales', a!.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      customerId: a!.contact.id,
+      locationId: a!.location.id,
+      method: 'CASH',
+      items: [{ productId: reconProd.id, quantity: 5, unitPrice: 100 }]
+    })
+  });
+  assert(reconSaleRes.status === 201 && reconSaleRes.body.id, `Recon sale creation failed: ${reconSaleRes.status}`);
+  const reconSale = reconSaleRes.body;
+
+  const reconSaleItem = await prisma.saleItem.findFirstOrThrow({ where: { saleId: reconSale.id } });
+
+  const returnRes = await request(`/sales/${reconSale.id}/return`, a!.token, {
+    method: 'POST',
+    body: JSON.stringify({
+      items: [{ saleItemId: reconSaleItem.id, quantity: 2 }]
+    })
+  });
+  assert(returnRes.status === 200 && returnRes.body.id, `Recon return failed: ${returnRes.status}`);
+
+  const postReturnStock = await prisma.productStock.findFirst({
+    where: { productId: reconProd.id, warehouseId: a!.warehouse.id }
+  });
+  assert(Number(postReturnStock?.quantity) === 42, `Post-return stock mismatch: expected 42, got ${postReturnStock?.quantity}`);
+
+  const cashAccount = await prisma.account.findFirst({
+    where: { companyId: a!.company.id, locationId: a!.location.id, name: { contains: 'Caisse' } },
+    include: { transactions: true }
+  });
+  assert(cashAccount !== null, 'Cash account not found for reconciliation check');
+
   console.log(JSON.stringify({
     ok: true,
     marker,
     verified: [
       'contacts CRUD', 'contact edit + ownership', 'contact ledger + ownership', 'products read', 'sales CRUD and ownership', 'sale partial return + stock, balance and status math + ownership', 'sale finalize + return auto-posting (DEBIT then reversing CREDIT, CREDIT sales untouched)', 'invoices CRUD', 'purchases CRUD', 'purchase partial receive/return + stock and balance math + ownership', 'expenses CRUD', 'expense auto-posting (CASH posts, CREDIT does not)', 'expense edit + ownership', 'location edit + ownership', 'attendance', 'settings persistence and isolation', 'invoice ownership', 'purchase ownership', 'warehouse transfer ownership', 'expenses', 'locations', 'warehouses', 'pricing groups + ownership', 'accounting accounts/transactions + balance math + ownership', 'cash movement auto-posting + per-location account resolution', 'commission agents', 'notification templates', 'document notes', 'dashboard config + isolation', 'device activation code generation + ownership', 'device auth (activate/refresh/revoke) + Hanout sync batch/pull, idempotent, balance-sign-flipped', 'per-user permission overrides (grant/deny/revoke, ADMIN-only backstop, ownership)', 'multi-currency (Sale + Purchase foreignTotal math, rate override, historical-rate immutability, ownership)', 'credit-sale settlement (partial/full, over-settlement rejection, cash-account auto-posting, ownership)', 'split-payment persistence (per-tender Payment rows, cash-overpay reconciliation excludes change from revenue, cash+credit splits the ledger DEBIT vs customer balance correctly, store-credit excluded from the ledger DEBIT, underpayment/overcharge/credit-without-customer rejected)', 'register session open + openedAtISO (full-precision, parseable, matches open-time moment)', 'sale line variationId + note persisted and priced from the variation, not the base product', 'group pricing resolution in the cart (customer group override applies, a selected variation still wins over the group price, /pricing/resolve matches the sale-time resolver, ownership on both the resolve endpoint and contact customerGroupId assignment)',
-      'warranty CRUD + ownership', 'variation template CRUD + ownership', 'discount CRUD + ownership', 'barcode printable sticker generator', 'consolidated invoice CRUD + isolation', 'accounting trial balance report', 'commission sales report', 'active discount cart resolution + notification triggers', 'bulk data import products/stock + isolation'
+      'warranty CRUD + ownership', 'variation template CRUD + ownership', 'discount CRUD + ownership', 'barcode printable sticker generator', 'consolidated invoice CRUD + isolation', 'accounting trial balance report', 'commission sales report', 'active discount cart resolution + notification triggers', 'bulk data import products/stock + isolation', 'stock concurrency + return accounting reconciliation'
     ],
   }, null, 2));
 } finally {

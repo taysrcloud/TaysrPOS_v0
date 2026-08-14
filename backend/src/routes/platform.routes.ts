@@ -58,8 +58,6 @@ router.post('/provision-tenant', async (req, res) => {
   const expectedSecret = process.env.TAYSRPOS_PROVISIONING_SECRET || 'secret';
   const receivedSecret = req.header('X-Platform-Secret');
   
-  console.log(`[PROVISION] expected: ${expectedSecret}, received: ${receivedSecret}`);
-  
   if (!expectedSecret || !receivedSecret || receivedSecret !== expectedSecret) {
     return res.status(403).json({ message: 'Forbidden' });
   }

@@ -7,10 +7,15 @@ import { fileURLToPath } from 'url';
 import productRoutes from './routes/product.routes.js';
 import saleRoutes from './routes/sale.routes.js';
 
+import { CORS_ORIGINS, NODE_ENV, PORT } from './config.js';
+
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: NODE_ENV === 'production' && CORS_ORIGINS ? CORS_ORIGINS : true,
+  credentials: true,
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

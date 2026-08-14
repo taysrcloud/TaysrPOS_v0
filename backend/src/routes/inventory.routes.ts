@@ -52,7 +52,7 @@ router.post('/adjustment', requireAuth, requireRole(['ADMIN', 'MANAGER']), async
         
         await tx.productStock.update({
           where: { id: stock.id },
-          data: { quantity: adj.quantity }
+          data: { quantity: { increment: diff } }
         });
 
         if (diff !== 0) {

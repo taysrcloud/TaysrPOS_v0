@@ -7,6 +7,7 @@ import { generateInvoicePDF, generateReceiptPDF, type PdfCompany } from '../util
 import { getOrCreateCashAccount, postCashTransaction } from '../utils/accounting.js';
 import { resolveCustomerGroupPrices } from '../utils/pricing.js';
 import { triggerNotificationEvent } from '../utils/notifications.js';
+import { adjustProductStock } from '../utils/stock.js';
 
 const router = Router();
 
@@ -431,14 +432,7 @@ router.post('/', async (req, res) => {
       if (shouldFinalize) {
         for (const line of rawLines) {
           if (!line.product.trackStock || line.product.type === ProductType.SERVICE) continue;
-          const existingStock = await tx.productStock.findFirst({
-            where: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId ?? null },
-          });
-          if (existingStock) {
-            await tx.productStock.update({ where: { id: existingStock.id }, data: { quantity: { decrement: line.item.quantity } } });
-          } else {
-            await tx.productStock.create({ data: { productId: line.product.id, warehouseId: warehouse.id, variationId: line.item.variationId, quantity: -line.item.quantity } });
-          }
+          await adjustProductStock(tx, line.product.id, warehouse.id, line.item.variationId, -line.item.quantity);
           await tx.stockMovement.create({
             data: {
               productId: line.product.id,
@@ -554,14 +548,7 @@ router.patch('/:id/finalize', requireAuth, async (req: any, res: any, next) => {
       if (warehouse) {
         for (const item of sale.items) {
           if (!item.product.trackStock || item.product.type === ProductType.SERVICE) continue;
-          const existingStock = await tx.productStock.findFirst({
-            where: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId ?? null },
-          });
-          if (existingStock) {
-            await tx.productStock.update({ where: { id: existingStock.id }, data: { quantity: { decrement: Number(item.quantity) } } });
-          } else {
-            await tx.productStock.create({ data: { productId: item.productId, warehouseId: warehouse.id, variationId: item.variationId, quantity: -Number(item.quantity) } });
-          }
+          await adjustProductStock(tx, item.productId, warehouse.id, item.variationId, -Number(item.quantity));
           await tx.stockMovement.create({
             data: {
               productId: item.productId,

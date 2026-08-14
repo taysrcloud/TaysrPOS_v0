@@ -4,7 +4,7 @@ import { prisma, runWithTenantDatabase } from '../utils/prisma.js';
 import { platformDb } from '../utils/platformPrisma.js';
 import { UserRole } from '../generated/client/index.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'taysr-super-secret-key-1234';
+import { JWT_SECRET } from '../config.js';
 
 export const normalizeModules = (value: unknown): string[] => {
   if (Array.isArray(value)) return value.map(module => String(module).toUpperCase());
@@ -38,7 +38,6 @@ export interface AuthRequest extends Request {
 }
 
 export const requireAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  console.log("HELLO FROM REQUIREAUTH!", req.path);
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Missing or invalid Authorization header' });
@@ -86,12 +85,10 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
         };
         next();
       } catch (err) {
-        console.error("DEBUG REQUIREAUTH DB CATCH:", err);
         next(err);
       }
     });
   } catch (err) {
-    console.error("DEBUG REQUIREAUTH VERIFY CATCH:", err);
     return res.status(401).json({ message: 'Token expired or invalid' });
   }
 };

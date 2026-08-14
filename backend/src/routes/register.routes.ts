@@ -45,7 +45,6 @@ router.get('/sessions', requireAuth, async (req: any, res, next) => {
 });
 
 router.post('/open', requireAuth, async (req: any, res, next) => {
-  console.log("HELLO FROM OPEN ROUTE!");
   try {
     const parsed = z.object({
       initialCash: z.coerce.number().min(0),
@@ -80,7 +79,6 @@ router.post('/open', requireAuth, async (req: any, res, next) => {
 
     res.json({ success: true, session });
   } catch (err) {
-    console.error("DEBUG /open err:", err);
     next(err);
   }
 });

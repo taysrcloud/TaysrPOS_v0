@@ -6,8 +6,9 @@ import { prisma, getTenantPrisma } from '../utils/prisma.js';
 import { platformDb } from '../utils/platformPrisma.js';
 import { requireAuth, AuthRequest, normalizeModules } from '../middleware/auth.js';
 
+import { JWT_SECRET } from '../config.js';
+
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'taysr-super-secret-key-1234';
 
 // Primary Login: username + password
 router.post('/login', async (req, res) => {

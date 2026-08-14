@@ -3,8 +3,9 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma.js';
 
+import { JWT_SECRET } from '../config.js';
+
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_development';
 
 router.post('/token', async (req, res, next) => {
   try {

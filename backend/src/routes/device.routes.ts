@@ -5,8 +5,9 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma.js';
 import { requireDevice, DeviceRequest } from '../middleware/auth.js';
 
+import { JWT_SECRET } from '../config.js';
+
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_development';
 const DEVICE_TOKEN_TTL = '24h';
 
 const sha256 = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
