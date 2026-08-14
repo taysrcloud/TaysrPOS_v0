@@ -1,0 +1,26 @@
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+TaysrPOS v0 API listening on 4400
+HELLO FROM REQUIREAUTH! /
+DEBUG REQUIREAUTH VERIFY CATCH: JsonWebTokenError: invalid signature
+    at /data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:171:19
+    at getSecret (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:97:14)
+    at module.exports [as verify] (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:101:10)
+    at requireAuth (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/backend/src/middleware/auth.ts:49:25)
+    at Layer.handleRequest (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/lib/layer.js:152:17)
+    at trimPrefix (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:342:13)
+    at /data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:297:9
+    at processParams (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:582:12)
+    at next (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:291:5)
+    at read (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/body-parser/lib/read.js:53:5)
+HELLO FROM REQUIREAUTH! /
+DEBUG REQUIREAUTH VERIFY CATCH: JsonWebTokenError: invalid signature
+    at /data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:171:19
+    at getSecret (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:97:14)
+    at module.exports [as verify] (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/jsonwebtoken/verify.js:101:10)
+    at requireAuth (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/backend/src/middleware/auth.ts:49:25)
+    at Layer.handleRequest (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/lib/layer.js:152:17)
+    at trimPrefix (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:342:13)
+    at /data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:297:9
+    at processParams (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:582:12)
+    at next (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/router/index.js:291:5)
+    at read (/data/data/com.termux/files/home/TaysrPOS/TaysrPOS_v0/node_modules/body-parser/lib/read.js:53:5)
