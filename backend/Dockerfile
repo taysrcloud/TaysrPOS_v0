@@ -22,6 +22,8 @@ WORKDIR /app/backend
 # Generate Prisma Client
 RUN npx prisma generate --schema prisma/schema.prisma
 
+RUN chmod +x docker-entrypoint.sh
+
 EXPOSE 4400
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
