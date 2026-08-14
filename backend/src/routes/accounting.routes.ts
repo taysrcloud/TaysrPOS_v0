@@ -245,7 +245,7 @@ router.get('/pnl', requireAuth, async (req: AuthRequest, res, next) => {
 
     const sales = await prisma.sale.findMany({
       where: saleWhere,
-      include: { lines: { include: { product: true } } }
+      include: { items: { include: { product: true } } }
     });
 
     let totalSales = 0;
@@ -254,7 +254,7 @@ router.get('/pnl', requireAuth, async (req: AuthRequest, res, next) => {
     for (const s of sales) {
       if (s.status === 'RETURNED' || s.status === 'DRAFT') continue;
 
-      for (const line of s.lines) {
+      for (const line of s.items) {
         const activeQty = asNumber(line.quantity) - asNumber(line.returnedQty || 0);
         if (activeQty <= 0) continue;
         const lineVal = asNumber(line.unitPrice) * activeQty - asNumber(line.discount);
@@ -291,12 +291,12 @@ router.get('/tax-report', requireAuth, async (req: AuthRequest, res, next) => {
 
     const sales = await prisma.sale.findMany({
       where: { companyId, createdAt: { gte: startDate, lte: endDate }, status: { notIn: ['DRAFT', 'RETURNED'] } },
-      include: { lines: true }
+      include: { items: true }
     });
 
     let tvaCollected = 0;
     for (const s of sales) {
-      for (const line of s.lines) {
+      for (const line of s.items) {
         const activeQty = asNumber(line.quantity) - asNumber(line.returnedQty || 0);
         if (activeQty <= 0) continue;
         const lineVal = asNumber(line.unitPrice) * activeQty - asNumber(line.discount);
