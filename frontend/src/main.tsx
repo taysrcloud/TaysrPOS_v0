@@ -58,6 +58,7 @@ import { CreatePurchaseModal, PurchaseDetailModal, purchaseStatusLabel, purchase
 import { SaleReturnModal } from './sale-modals';
 import { PageHeader } from './components/PageHeader';
 import { productImage } from './components/productImage';
+import { BarcodePrintModal } from './components/BarcodePrintModal';
 import { PosContext, type PosContextValue } from './context/PosContext';
 import { RegistersPage } from './pages/RegistersPage';
 import { PaymentsPage } from './pages/PaymentsPage';
@@ -746,6 +747,7 @@ const App = () => {
   const [receiptSale, setReceiptSale] = useState<SaleRecord | null>(null);
   const [invoiceSale, setInvoiceSale] = useState<SaleRecord | null>(null);
   const [productModalOpen, setProductModalOpen] = useState(false);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [contactTab, setContactTab] = useState<'Client' | 'Fournisseur'>('Client');
   const [contactModalType, setContactModalType] = useState<'CUSTOMER' | 'SUPPLIER'>('CUSTOMER');
@@ -773,7 +775,7 @@ const App = () => {
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [selectedTable, setSelectedTable] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations' | 'devises'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'company' | 'legal' | 'templates' | 'users' | 'permissions' | 'hardware' | 'locations' | 'devises' | 'warranties' | 'variation-templates' | 'discounts' | 'devices'>('general');
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(defaultRolePermissions);
   const saveRolePermissions = async (perms: RolePermissions) => {
     setRolePermissions(perms);
@@ -2023,10 +2025,20 @@ const App = () => {
 
   const renderProducts = () => (
     <>
+      {barcodeModalOpen && <BarcodePrintModal products={products} onClose={() => setBarcodeModalOpen(false)} />}
       <PageHeader 
         title="Produits & Services" 
         subtitle="Catalogue, codes-barres et stock" 
-        action={<button type="button" className="primary-action" onClick={() => { resetProductForm(); setProductModalOpen(true); }}><Plus size={16} /> Nouveau Produit</button>}
+        action={
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button type="button" className="ghost-action" onClick={() => setBarcodeModalOpen(true)}>
+              Imprimer étiquettes
+            </button>
+            <button type="button" className="primary-action" onClick={() => { resetProductForm(); setProductModalOpen(true); }}>
+              <Plus size={16} /> Nouveau Produit
+            </button>
+          </div>
+        }
       />
 
       {productModalOpen && (
@@ -3217,6 +3229,137 @@ const App = () => {
     );
   };
 
+
+const SettingsWarrantiesTab = () => {
+  const [warranties, setWarranties] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: '', duration: 12, durationType: 'MONTHS' });
+  
+  const load = async () => setWarranties(await apiFetch('/api/warranties').catch(() => []) as any[]);
+  useEffect(() => { void load(); }, []);
+  
+  return (
+    <div className="product-form-panel" style={{ padding: '2rem' }}>
+      <h2>Garanties</h2>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        <input placeholder="Nom" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+        <input type="number" placeholder="Durée" value={form.duration} onChange={e => setForm({...form, duration: parseInt(e.target.value)})} />
+        <select value={form.durationType} onChange={e => setForm({...form, durationType: e.target.value})}>
+          <option value="DAYS">Jours</option><option value="MONTHS">Mois</option><option value="YEARS">Années</option>
+        </select>
+        <button onClick={async () => { await apiFetch('/api/warranties', { method: 'POST', body: JSON.stringify(form) }); await load(); }}>Ajouter</button>
+      </div>
+      <table>
+        <tbody>
+          {warranties.map(w => (
+            <tr key={w.id}>
+              <td>{w.name} ({w.duration} {w.durationType})</td>
+              <td><button onClick={async () => { await apiFetch(`/api/warranties/${w.id}`, { method: 'DELETE' }); await load(); }}>Supprimer</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const SettingsVariationTemplatesTab = () => {
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: '', values: '' });
+  
+  const load = async () => setTemplates(await apiFetch('/api/variation-templates').catch(() => []) as any[]);
+  useEffect(() => { void load(); }, []);
+  
+  return (
+    <div className="product-form-panel" style={{ padding: '2rem' }}>
+      <h2>Modèles de Variation</h2>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        <input placeholder="Nom (ex: Taille)" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+        <input placeholder="Valeurs (virgule)" value={form.values} onChange={e => setForm({...form, values: e.target.value})} />
+        <button onClick={async () => { 
+          await apiFetch('/api/variation-templates', { 
+            method: 'POST', 
+            body: JSON.stringify({ name: form.name, values: form.values.split(',').map(v => v.trim()) }) 
+          }); 
+          await load(); 
+        }}>Ajouter</button>
+      </div>
+      <table>
+        <tbody>
+          {templates.map(t => (
+            <tr key={t.id}>
+              <td>{t.name}</td>
+              <td>{t.values.join(', ')}</td>
+              <td><button onClick={async () => { await apiFetch(`/api/variation-templates/${t.id}`, { method: 'DELETE' }); await load(); }}>Supprimer</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const SettingsDiscountsTab = () => {
+  const [discounts, setDiscounts] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: '', discountType: 'PERCENTAGE', amount: 0, startDate: '', endDate: '', appliesTo: 'ALL' });
+  
+  const load = async () => setDiscounts(await apiFetch('/api/discounts').catch(() => []) as any[]);
+  useEffect(() => { void load(); }, []);
+  
+  return (
+    <div className="product-form-panel" style={{ padding: '2rem' }}>
+      <h2>Promotions & Remises</h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1rem' }}>
+        <input placeholder="Nom" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <select value={form.discountType} onChange={e => setForm({...form, discountType: e.target.value})}>
+            <option value="PERCENTAGE">Pourcentage</option><option value="FIXED">Fixe</option>
+          </select>
+          <input type="number" placeholder="Montant" value={form.amount} onChange={e => setForm({...form, amount: parseFloat(e.target.value)})} />
+        </div>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <input type="date" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} />
+          <input type="date" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})} />
+        </div>
+        <button onClick={async () => { await apiFetch('/api/discounts', { method: 'POST', body: JSON.stringify(form) }); await load(); }}>Ajouter</button>
+      </div>
+      <table>
+        <tbody>
+          {discounts.map(d => (
+            <tr key={d.id}>
+              <td>{d.name} ({d.amount} {d.discountType})</td>
+              <td><button onClick={async () => { await apiFetch(`/api/discounts/${d.id}`, { method: 'DELETE' }); await load(); }}>Supprimer</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const SettingsDevicesTab = () => {
+  const [devices, setDevices] = useState<any[]>([]);
+  
+  const load = async () => setDevices(await apiFetch('/api/settings/devices').catch(() => []) as any[]);
+  useEffect(() => { void load(); }, []);
+  
+  return (
+    <div className="product-form-panel" style={{ padding: '2rem' }}>
+      <h2>Appareils Sync</h2>
+      <button onClick={async () => { await apiFetch('/api/settings/devices', { method: 'POST', body: JSON.stringify({ name: 'Nouvel Appareil' }) }); await load(); }} style={{ marginBottom: '1rem' }}>Générer Code d'Activation</button>
+      <table>
+        <tbody>
+          {devices.map(d => (
+            <tr key={d.id}>
+              <td>{d.name}</td>
+              <td><button onClick={async () => { await apiFetch(`/api/settings/devices/${d.id}`, { method: 'DELETE' }); await load(); }}>Supprimer</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
   const renderSettings = () => (
     <section className="settings-layout">
       <div className="settings-header">
@@ -3239,7 +3382,11 @@ const App = () => {
           { id: 'hardware', label: 'Matériel & Périphériques', icon: Monitor },
           { id: 'users', label: 'Utilisateurs', icon: Users },
           { id: 'permissions', label: 'Rôles & Permissions', icon: Shield },
-          { id: 'devises', label: 'Devises', icon: Wallet }
+          { id: 'devises', label: 'Devises', icon: Wallet },
+          { id: 'warranties', label: 'Garanties', icon: Shield },
+          { id: 'variation-templates', label: 'Modèles de Variation', icon: Palette },
+          { id: 'discounts', label: 'Promotions & Remises', icon: Percent },
+          { id: 'devices', label: 'Appareils Sync', icon: Monitor }
         ].map(t => (
           <button key={t.id} onClick={() => setSettingsTab(t.id as any)} className={`settings-nav-item ${settingsTab === t.id ? 'active' : ''}`}>
             <t.icon size={18} /> <span>{t.label}</span>
@@ -3248,6 +3395,12 @@ const App = () => {
       </div>
 
       <div className="settings-content-area">
+
+        {settingsTab === 'warranties' && <SettingsWarrantiesTab />}
+        {settingsTab === 'variation-templates' && <SettingsVariationTemplatesTab />}
+        {settingsTab === 'discounts' && <SettingsDiscountsTab />}
+        {settingsTab === 'devices' && <SettingsDevicesTab />}
+
         {settingsTab === 'general' && (
           <div className="product-form-panel" style={{ padding: '2rem' }}>
             <div className="panel-title" style={{ marginBottom: '2rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
