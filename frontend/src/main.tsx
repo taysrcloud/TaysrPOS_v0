@@ -64,12 +64,11 @@ import { PosContext, type PosContextValue } from './context/PosContext';
 import { RegistersPage } from './pages/RegistersPage';
 import { PaymentsPage } from './pages/PaymentsPage';
 import { ReportsPage } from './pages/ReportsPage';
-import { KitchenPage } from './pages/KitchenPage';
 import { RegisterPage } from './pages/RegisterPage';
 import './styles.css';
 
-type ProductType = 'RETAIL' | 'MENU_ITEM' | 'INGREDIENT' | 'SERVICE' | 'BUNDLE';
-type EnabledModule = 'POS' | 'RESTAURANT';
+type ProductType = 'RETAIL' | 'SERVICE' | 'BUNDLE';
+type EnabledModule = 'POS';
 export type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
 export type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
@@ -147,7 +146,6 @@ export type Product = {
   trackStock: boolean;
   lowStockAlert: number;
   stock: number;
-  isKitchenItem: boolean;
   isVariable: boolean;
   variationOptions?: string[];
   variations?: ProductVariation[];
@@ -190,7 +188,6 @@ type ProductForm = {
   tvaRate: string;
   trackStock: boolean;
   lowStockAlert: string;
-  isKitchenItem: boolean;
   isVariable: boolean;
   variationOptions?: string[];
   variations: { id?: number; name: string; sku: string; salePrice: string; purchasePrice: string; stock: string; lowStockAlert: string; barcode: string; attributes?: Record<string, string>; isActive?: boolean; }[];
@@ -241,7 +238,6 @@ export type SaleRecord = {
   // correctly instead of treating it as zero. See TRACE.md.
   payments?: { method: PaymentMethod; amount: number }[];
   referenceNote?: string;
-  kitchenStatus?: 'PENDING' | 'READY';
   locationId?: number;
   pointsEarned?: number;
   pointsUsed?: number;
@@ -252,7 +248,7 @@ type SaleSettlementForm = {
   method: 'CASH' | 'CARD';
 };
 
-export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'WAITER';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER';
 
 export type RolePermissions = Record<UserRole, string[]>;
 
@@ -262,7 +258,6 @@ const defaultRolePermissions: RolePermissions = {
   ADMIN: [...allModuleLabels],
   MANAGER: allModuleLabels.filter(m => m !== 'Parametres'),
   CASHIER: ['POS', 'Clients & Fournisseurs', 'ACTION:VOID_SALE'], // Allow cashier to void, but not discount/override by default
-  WAITER: ['Tables', 'Cuisine'],
 };
 
 export type User = {
@@ -404,8 +399,6 @@ const baseModules = [
   ['Depenses', Banknote, 'POS'],
   ['Rapports', BarChart3, 'POS'],
   ['Caisses', Lock, 'POS'],
-  ['Tables', Utensils, 'RESTAURANT'],
-  ['Cuisine', ChefHat, 'RESTAURANT'],
   ['Parametres', Settings, 'POS'],
 ] as const;
 
@@ -438,7 +431,6 @@ const emptyForm: ProductForm = {
   tvaRate: '20',
   trackStock: true,
   lowStockAlert: '0',
-  isKitchenItem: false,
   isVariable: false,
   variationOptions: [],
   variations: [],
@@ -448,7 +440,6 @@ export const formatMoney = (value: number) => `${(Number(value) || 0).toLocaleSt
 
 const typeLabel: Record<ProductType, string> = {
   RETAIL: 'Article retail',
-  MENU_ITEM: 'Menu restaurant',
   INGREDIENT: 'Ingredient cuisine',
   SERVICE: 'Service',
   BUNDLE: 'Pack',
@@ -820,11 +811,9 @@ const App = () => {
   const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('all');
   const [tableFilter, setTableFilter] = useState<'all' | 'free' | 'occupied'>('all');
   const [viewSelectedTable, setViewSelectedTable] = useState<string | null>(null);
-  const [kitchenFilter, setKitchenFilter] = useState<'all' | 'drinks' | 'food'>('all');
   const [tableGroups, setTableGroups] = useState<any[]>([]);
   const [companySettings, setCompanySettings] = useState({
     companyName: 'TaysrPOS Demo', address: 'Casablanca, Maroc', phone: '05 22 00 00 00', email: 'contact@taysr.ma', currency: 'MAD',
-    restaurantEnabled: false,
     rc: '239', ice: '001454366000046', patente: '54509281', if: '4967057', inpe: '165002114',
     defaultTva: '20', pricesIncludeTva: true,
     invoiceHeader: 'FACTURE', invoiceFooter: 'Merci de votre confiance', invoiceTicketDisplay: 'SUMMARY' as 'SUMMARY' | 'DETAILED', invoiceShowTicketReferences: true, invoiceShowTicketDates: true,
@@ -945,24 +934,19 @@ const App = () => {
 
   useEffect(() => { if (isAuthenticated && currentUser) { void loadCurrencies(); void loadCommissionAgents(); void loadSettingsUsers(); } }, [isAuthenticated, currentUser?.id]);
 
-  const restaurantEntitled = !currentUser?.accountId || Boolean(currentUser.planLimits?.modules?.includes('RESTAURANT'));
-  const restaurantEnabled = restaurantEntitled && Boolean(companySettings?.restaurantEnabled);
   const enabledModules = useMemo<EnabledModule[]>(() => {
     const modules: EnabledModule[] = ['POS'];
-    if (restaurantEnabled) modules.push('RESTAURANT');
     return modules;
-  }, [restaurantEnabled]);
-  const visibleTypes = useMemo<ProductType[]>(() => restaurantEnabled
-    ? ['RETAIL', 'MENU_ITEM', 'INGREDIENT', 'SERVICE']
-    : ['RETAIL', 'SERVICE', 'BUNDLE'], [restaurantEnabled]);
+  }, []);
+  const visibleTypes = useMemo<ProductType[]>(() => ["RETAIL", "SERVICE", "BUNDLE"], []);
   const visibleModules = useMemo(() => {
-    let modules = baseModules.filter(([, , module]) => module === 'POS' || (restaurantEnabled && module === 'RESTAURANT'));
+    let modules = baseModules.filter(([, , module]) => module === 'POS');
     if (currentUser) {
       const allowed = rolePermissions[currentUser.role] || [];
       modules = modules.filter(([label]) => allowed.includes(label as string) || (label === 'Clients & Fournisseurs' && (allowed.includes('Clients') || allowed.includes('Fournisseurs'))));
     }
     return modules;
-  }, [restaurantEnabled, currentUser, rolePermissions]);
+  }, [currentUser, rolePermissions]);
   const ActiveIcon = pageIcon(page);
 
   const [activeLocation, setActiveLocation] = useState<string | null>(null);
@@ -1080,7 +1064,6 @@ const App = () => {
 
   const loadTables = async () => {
     try {
-      const response = await apiFetch(`/api/restaurant/tables`);
       if (!response.ok) throw new Error('API unavailable');
       const data = await response.json();
       if (Array.isArray(data.areas)) setTableGroups(data.areas);
@@ -1174,28 +1157,13 @@ const App = () => {
     }
   };
 
-  const markKitchenReady = async (saleId: number) => {
-        const stockUpdate = (p: Product) => {
-          if (!p.trackStock) return p;
-          const cartItem = cart.find(c => c.product.id === p.id);
-          if (!cartItem) return p;
-
-          if (p.isVariable && cartItem.variation) {
-             return {
-                ...p,
-                variations: p.variations?.map(v => v.id === cartItem.variation!.id ? { ...v, stock: v.stock - cartItem.quantity } : v)
-             };
           }
           return { ...p, stock: p.stock - cartItem.quantity };
         };
         setProducts(current => current.map(stockUpdate));
-    setSales(current => current.map(s => s.id === saleId ? { ...s, kitchenStatus: 'READY' } : s));
-    setDraftSales(current => current.map(s => s.id === saleId ? { ...s, kitchenStatus: 'READY' } : s));
     try {
-      await apiFetch(`/api/sales/${saleId}/kitchen`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kitchenStatus: 'READY' }),
       });
     } catch {
       // Local fallback already applied
@@ -1301,7 +1269,7 @@ const App = () => {
   useEffect(() => {
     const timeout = window.setTimeout(loadProducts, 180);
     return () => window.clearTimeout(timeout);
-  }, [filter, search, restaurantEnabled, currentLocationId]);
+  }, [filter, search, currentLocationId]);
 
   // Track C: refetch the selected customer's group-price overrides whenever
   // they change, so the cart's displayed totals stay in lockstep with what
@@ -1323,7 +1291,7 @@ const App = () => {
     return () => { cancelled = true; };
   }, [customer.id]);
 
-  const visibleProducts = useMemo(() => products.filter(product => restaurantEnabled || product.type !== 'MENU_ITEM'), [products, restaurantEnabled]);
+  const visibleProducts = products;
   const lowStockProducts = useMemo(() => visibleProducts.filter(product => product.trackStock && product.stock <= product.lowStockAlert), [visibleProducts]);
   const cartSubtotal = useMemo(() => cart.reduce((sum, line) => {
     const unitPrice = linePrice(line, groupPrices);
@@ -1618,7 +1586,6 @@ const App = () => {
         sku: line.sku,
         salePrice: line.unitPrice,
         tvaRate: line.tvaRate,
-        barcode: '', type: 'RETAIL' as ProductType, category: 'General', brand: null, imageUrl: '', purchasePrice: 0, trackStock: false, lowStockAlert: 0, stock: 0, isKitchenItem: false, isActive: true, isVariable: false
       };
       let variation = undefined;
       if (line.variationId && product.isVariable) {
@@ -1806,9 +1773,8 @@ const App = () => {
     setLoading(true);
     const payload: ProductForm = {
       ...form,
-      type: restaurantEnabled ? form.type : (form.type === 'MENU_ITEM' || form.type === 'INGREDIENT' ? 'RETAIL' : form.type),
-      isKitchenItem: restaurantEnabled && form.type === 'MENU_ITEM' && form.isKitchenItem,
-    };
+      type: form.type,
+        };
     try {
       const response = await apiFetch(form.id ? `/api/products/${form.id}` : `/api/products`, {
         method: form.id ? 'PUT' : 'POST',
@@ -1850,7 +1816,6 @@ const App = () => {
       lowStockAlert: String(product.lowStockAlert),
       initialStock: String(product.stock),
       type: product.type,
-      isKitchenItem: product.isKitchenItem,
       isVariable: product.isVariable,
       variationOptions: product.variationOptions,
       variations: (product.variations || []).map(v => ({ ...v, salePrice: String(v.salePrice || ''), purchasePrice: String(v.purchasePrice || ''), stock: String(v.stock || ''), lowStockAlert: '0', barcode: v.barcode || '', sku: v.sku || '' })),
@@ -2187,7 +2152,6 @@ const App = () => {
           <div className="checks-row product-checks">
             <label><input type="checkbox" checked={form.isVariable} onChange={event => updateForm('isVariable', event.target.checked)} /> Produit avec déclinaisons</label>
             <label><input type="checkbox" checked={form.trackStock} onChange={event => updateForm('trackStock', event.target.checked)} /> Suivre le stock</label>
-            {restaurantEnabled && <label><input type="checkbox" checked={form.isKitchenItem} onChange={event => updateForm('isKitchenItem', event.target.checked)} disabled={form.type !== 'MENU_ITEM'} /> Envoyer en cuisine</label>}
           </div>
 
           {form.isVariable && (
@@ -3170,7 +3134,6 @@ const App = () => {
 
   // renderReports extracted to src/pages/ReportsPage.tsx (Phase 1 registry work).
 
-  // renderKitchen extracted to src/pages/KitchenPage.tsx (Phase 1 registry work).
           const renderTables = () => {
     let allTables: any[] = [];
     tableGroups.forEach(g => {
@@ -3191,7 +3154,6 @@ const App = () => {
         {/* Left Side: Table Grid */}
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="panel-title compact" style={{ marginBottom: '2rem' }}>
-            <div><p style={{ color: '#64748b' }}>Restaurant</p><h2 style={{ fontSize: '2rem', color: '#0f172a' }}>Plan de salle</h2></div>
           </div>
 
           {tableGroups.map((group, groupIdx) => {
@@ -3597,11 +3559,8 @@ const SettingsDevicesTab = () => {
               <label><span>Devise par défaut</span><select value={companySettings.currency} onChange={e => setCompanySettings(s => ({...s, currency: e.target.value}))} style={{ height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px' }}><option value="MAD">MAD (Dirham)</option><option value="EUR">EUR (Euro)</option><option value="USD">USD (Dollar)</option></select></label>
               <label><span>TVA par défaut (%)</span><input type="number" value={companySettings.defaultTva} onChange={e => setCompanySettings(s => ({...s, defaultTva: e.target.value}))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row', marginTop: '10px' }}><input type="checkbox" checked={companySettings.pricesIncludeTva} onChange={e => setCompanySettings(s => ({...s, pricesIncludeTva: e.target.checked}))} style={{ width: 'auto' }} /> <span>Les prix saisis incluent la TVA (TTC)</span></label>
-              {restaurantEntitled && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: '12px', flexDirection: 'row', marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={companySettings.restaurantEnabled} onChange={e => setCompanySettings(s => ({...s, restaurantEnabled: e.target.checked}))} style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }} /> 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.9rem' }}>Activer le module Restaurant</span>
                     <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Affiche les modules Tables et Cuisine dans la barre latérale.</span>
                   </div>
                 </label>
@@ -4006,7 +3965,6 @@ const SettingsDevicesTab = () => {
 
   // Page dispatch registry: new pages/tracks add one entry here instead of
   // growing an if-chain. Keyed by PageKey so a missing/typo'd key is a
-  // compile error. Restaurant-only pages fall back to the dashboard when the
   // module isn't enabled, matching the previous inline ternaries exactly.
   const pageRenderers: Record<PageKey, () => React.ReactNode> = {
     'Tableau de bord': renderDashboard,
@@ -4020,8 +3978,6 @@ const SettingsDevicesTab = () => {
     'Factures': renderFactures,
     'Paiements': () => <PaymentsPage />,
     'Rapports': () => <ReportsPage />,
-    'Tables': () => (restaurantEnabled ? renderTables() : renderDashboard()),
-    'Cuisine': () => (restaurantEnabled ? <KitchenPage /> : renderDashboard()),
     'Parametres': renderSettings,
     'Caisses': () => <RegistersPage />,
   };
@@ -4035,8 +3991,7 @@ const SettingsDevicesTab = () => {
     products, visibleProducts, lowStockProducts, locations,
     reportsTab, setReportsTab, reportPeriod, setReportPeriod,
     dashboardLocationFilter, setDashboardLocationFilter,
-    draftSales, kitchenFilter, setKitchenFilter, markKitchenReady,
-    apiFetch, setStatus, restaurantEnabled, setCurrentLocationId,
+    apiFetch, setStatus, setCurrentLocationId,
     selectedTable, setSelectedTable, clearCart, setPage, isFullscreen, setIsFullscreen,
     customer, setCustomer, openContactModal, productSearchInputRef, search, setSearch,
     cart, setCart, addToCart, updateCartQty, categories, showRecent,

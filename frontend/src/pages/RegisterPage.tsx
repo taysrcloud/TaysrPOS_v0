@@ -10,8 +10,8 @@ import { usePos } from '../context/PosContext';
 
 export const RegisterPage = () => {
   const {
-    apiFetch, setStatus, locations, restaurantEnabled, currentLocationId, setCurrentLocationId,
-    selectedTable, setSelectedTable, clearCart, setPage, isFullscreen, setIsFullscreen,
+    apiFetch, setStatus, locations, currentLocationId, setCurrentLocationId,
+    clearCart, setPage, isFullscreen, setIsFullscreen,
     customer, setCustomer, openContactModal, productSearchInputRef, search, setSearch,
     cart, setCart, addToCart, updateCartQty, categories, showRecent, sales, resumeSale,
     setReceiptSale, rolePermissions, currentUser, orderDiscountInputRef, discountRate, setDiscountRate,
@@ -157,15 +157,6 @@ export const RegisterPage = () => {
             {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
           </select>
         </div>
-        {restaurantEnabled && (
-          <div className="pos-location" style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: '8px' }}>
-            <strong>Table</strong>
-            <select value={selectedTable} onChange={e => setSelectedTable(e.target.value)}>
-              <option value="">A emporter</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>Table {n}</option>)}
-            </select>
-          </div>
-        )}
         <div className="pos-clock"><Clock size={13} /> {new Date().toLocaleDateString('fr-FR')} {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
         <div className="pos-tools" aria-label="Actions POS">
           <button title="Caisse" onClick={() => setZReportModalOpen(true)}><Lock size={15} /></button>
@@ -320,16 +311,6 @@ export const RegisterPage = () => {
         <button disabled={!cart.length} onClick={() => { setSuspendType('Brouillon'); setSuspendModalOpen(true); }}><FileText size={16} /> Brouillon</button>
         <button disabled={!cart.length} onClick={() => { setSuspendType('Devis'); setSuspendModalOpen(true); }}><FileText size={16} /> Devis</button>
         <button disabled={!cart.length} onClick={() => { setSuspendType('Suspendue'); setSuspendModalOpen(true); }}><Pause size={16} /> Suspendre</button>
-        {restaurantEnabled && <button disabled={!cart.length || !cart.some(line => line.product.isKitchenItem)} onClick={() => {
-          setSuspendType('Suspendue');
-          setSuspendNote(selectedTable ? `Table ${selectedTable} - Cuisine` : 'Commande Cuisine');
-          // Automatically save as suspended
-          setTimeout(() => {
-            const btn = document.getElementById('btn-cuisine-auto-suspend');
-            if(btn) btn.click();
-          }, 0);
-        }} style={{ background: '#f59e0b', color: '#fff', border: 'none' }}><ChefHat size={16} /> Cuisine</button>}
-        {restaurantEnabled && <button id="btn-cuisine-auto-suspend" style={{display: 'none'}} onClick={() => recordDraft('Suspendue')}></button>}
         <button disabled={!cart.length} className="pay-btn" onClick={() => {
           setPaymentForm({ cash: String(cartTotal), card: '0', credit: '0', storeCredit: '0' });
           setPaymentModalOpen(true);

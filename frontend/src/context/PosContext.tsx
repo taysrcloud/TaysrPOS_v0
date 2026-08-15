@@ -32,11 +32,6 @@ export interface PosContextValue {
   setReportPeriod: (period: 'today' | 'week' | 'month' | 'year' | 'all') => void;
   dashboardLocationFilter: number | 'ALL';
   setDashboardLocationFilter: (filter: number | 'ALL') => void;
-  // Added for KitchenPage (Phase 1, 2026-08-13)
-  draftSales: SaleRecord[];
-  kitchenFilter: 'all' | 'drinks' | 'food';
-  setKitchenFilter: (filter: 'all' | 'drinks' | 'food') => void;
-  markKitchenReady: (saleId: number) => void;
   // Added for RegisterPage (Phase 1, 2026-08-13). This list is long because
   // renderRegister genuinely touches this much App state - see TRACE.md's
   // RegisterPage extraction entry for the full dependency audit (which of
@@ -45,10 +40,7 @@ export interface PosContextValue {
   // lists can be diffed by eye.
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
   setStatus: (status: string) => void;
-  restaurantEnabled: boolean;
   setCurrentLocationId: (id: number) => void;
-  selectedTable: string;
-  setSelectedTable: (table: string) => void;
   clearCart: () => void;
   setPage: (page: PageKey) => void;
   isFullscreen: boolean;
