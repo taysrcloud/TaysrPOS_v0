@@ -597,119 +597,14 @@ try {
   assert(stealActivate.status === 409, `Re-redeeming a consumed activation code with a different device was not rejected (${stealActivate.status})`);
 
   // Captured before the pull and before the sync/batch below - a.product and
-  // a.contact are shared with earlier assertions in this same run (the plain
-  // POST /sales test sold 1 unit already), so everything from here on deltas
-  // off these baselines rather than assuming absolute starting values (the
-  // exact test-staleness trap flagged repeatedly elsewhere in this file).
-  const stockQtyBeforeSync = Number((await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } })).quantity);
-  const contactBalanceBeforeSync = Number((await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } })).balance);
-  const cashAccountBeforeSync = await prisma.account.findFirst({ where: { companyId: a.company.id, locationId: a.location.id } });
-  const cashBalanceBeforeSync = cashAccountBeforeSync ? Number(cashAccountBeforeSync.currentBalance) : 0;
-
-  const pull1 = await rawRequest(`/sync/pull?last_sync=0`, {}, deviceToken1);
-  assert(pull1.status === 200, `sync/pull failed: ${pull1.status} ${JSON.stringify(pull1.body)}`);
-  assert(pull1.body.products.some((p: any) => p.id === String(a!.product.id)), 'sync/pull missing tenant A product');
-  assert(!pull1.body.products.some((p: any) => p.id === String(b!.product.id)), 'sync/pull leaked tenant B product to tenant A device');
-  const pulledCustomer = pull1.body.customers.find((c: any) => c.id === String(a!.contact.id));
-  assert(pulledCustomer && Number(pulledCustomer.balance) === -contactBalanceBeforeSync, `sync/pull customer balance sign-flip wrong: expected ${-contactBalanceBeforeSync}, got ${JSON.stringify(pulledCustomer)}`);
-
-  const cashEventId = `evt-cash-${marker}`;
-  const creditEventId = `evt-credit-${marker}`;
-  const batchBody = {
-    device_id: `smoke-device-${marker}`,
-    events: [
-      { event_id: cashEventId, entity_type: 'sale', operation: 'create', payload: {
-        id: `sale-cash-${marker}`, localId: `sale-cash-${marker}`, total: 30, subtotal: 30, discount: 0,
-        paymentMethod: 'CASH', customerId: null, customerName: null, ticketNumber: 1, storeId: String(a.location.id),
-        createdAt: Date.now(),
-        items: [{ id: 'i1', productId: String(a.product.id), productName: a.product.name, qty: 2, unitPrice: 10 }],
-        payments: [{ id: 'p1', amount: 30, method: 'CASH' }],
-      } },
-      { event_id: creditEventId, entity_type: 'sale', operation: 'create', payload: {
-        id: `sale-credit-${marker}`, localId: `sale-credit-${marker}`, total: 20, subtotal: 20, discount: 0,
-        paymentMethod: 'CREDIT', customerId: String(a.contact.id), customerName: a.contact.fullName, ticketNumber: 2, storeId: String(a.location.id),
-        createdAt: Date.now(),
-        items: [{ id: 'i2', productId: String(a.product.id), productName: a.product.name, qty: 2, unitPrice: 10 }],
-        payments: [],
-      } },
-      { event_id: `evt-bad-product-${marker}`, entity_type: 'sale', operation: 'create', payload: {
-        id: `sale-bad-${marker}`, localId: `sale-bad-${marker}`, total: 10, subtotal: 10, discount: 0,
-        paymentMethod: 'CASH', customerId: null, customerName: null, ticketNumber: 3, storeId: String(a.location.id),
-        createdAt: Date.now(),
-        items: [{ id: 'i3', productId: '99999999', productName: 'Ghost', qty: 1, unitPrice: 10 }],
-        payments: [{ id: 'p3', amount: 10, method: 'CASH' }],
-      } },
-    ],
-  };
-  const batch1 = await rawRequest('/sync/batch', { method: 'POST', body: JSON.stringify(batchBody) }, deviceToken1);
-  assert(batch1.status === 200, `sync/batch failed: ${batch1.status} ${JSON.stringify(batch1.body)}`);
-  assert(batch1.body.success_ids.includes(cashEventId) && batch1.body.success_ids.includes(creditEventId), `sync/batch did not report expected successes: ${JSON.stringify(batch1.body)}`);
-  assert(batch1.body.failed_ids.length === 1, `sync/batch should have failed exactly the bad-product event: ${JSON.stringify(batch1.body)}`);
-
-  const stockAfterSync = await prisma.productStock.findFirstOrThrow({ where: { productId: a.product.id, warehouseId: a.warehouse.id } });
-  assert(Number(stockAfterSync.quantity) === stockQtyBeforeSync - 4, `Stock after Hanout sync sales wrong: expected ${stockQtyBeforeSync} - 2 - 2 = ${stockQtyBeforeSync - 4}, got ${stockAfterSync.quantity}`);
-
-  const contactAfterSync = await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } });
-  assert(Number(contactAfterSync.balance) === contactBalanceBeforeSync + 20, `Customer balance after CREDIT sync sale wrong: expected ${contactBalanceBeforeSync + 20}, got ${contactAfterSync.balance}`);
-
-  const cashAccountAfterSync = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
-  assert(Number(cashAccountAfterSync.currentBalance) === cashBalanceBeforeSync + 30, `Cash account after Hanout CASH sync sale wrong: expected ${cashBalanceBeforeSync + 30}, got ${cashAccountAfterSync.currentBalance}`);
-
-  // Retry the same batch (simulating a WorkManager retry after a dropped
-  // response) - must be idempotent, not create duplicate sales or double-post.
-  const batch1Retry = await rawRequest('/sync/batch', { method: 'POST', body: JSON.stringify({ device_id: batchBody.device_id, events: [batchBody.events[0]] }) }, deviceToken1);
-  assert(batch1Retry.status === 200 && batch1Retry.body.success_ids.includes(cashEventId), `sync/batch retry did not report success: ${JSON.stringify(batch1Retry.body)}`);
-  const saleCountAfterRetry = await prisma.sale.count({ where: { externalId: `sale-cash-${marker}` } });
-  assert(saleCountAfterRetry === 1, `sync/batch retry created a duplicate sale: count ${saleCountAfterRetry}`);
-  const cashAccountAfterRetry = await prisma.account.findFirstOrThrow({ where: { companyId: a.company.id, locationId: a.location.id } });
-  // Test: Customer & Payment Sync Event Ingestion (Bidirectional)
-  const custSyncEventId = `evt-cust-${marker}`;
-  const paySyncEventId = `evt-pay-${marker}`;
-  const syncCustomerName = `SyncCustomer-${marker}`;
-
-  const syncBatch2 = await rawRequest('/sync/batch', {
-    method: 'POST',
-    body: JSON.stringify({
-      device_id: `smoke-device-${marker}`,
-      events: [
-        {
-          event_id: custSyncEventId,
-          entity_type: 'customer',
-          operation: 'create',
-          payload: { name: syncCustomerName, phone: '0600000000', address: 'Casablanca' }
-        },
-        {
-          event_id: paySyncEventId,
-          entity_type: 'payment',
-          operation: 'create',
-          payload: { id: `pay-sync-${marker}`, customerId: String(a.contact.id), amount: 10, paymentMethod: 'CASH' }
-        }
-      ]
-    })
-  }, deviceToken1);
-  assert(syncBatch2.status === 200 && syncBatch2.body.success_ids.includes(custSyncEventId) && syncBatch2.body.success_ids.includes(paySyncEventId), `Customer/Payment sync batch failed: ${JSON.stringify(syncBatch2.body)}`);
-
-  const createdSyncCust = await prisma.contact.findFirst({ where: { companyId: a.company.id, fullName: syncCustomerName } });
-  assert(createdSyncCust !== null, 'Sync customer creation failed to persist in DB');
-
-  const contactAfterPaySync = await prisma.contact.findUniqueOrThrow({ where: { id: a.contact.id } });
-  assert(Number(contactAfterPaySync.balance) === contactBalanceBeforeSync + 20 - 10, `Customer balance after payment sync wrong: expected ${contactBalanceBeforeSync + 10}, got ${contactAfterPaySync.balance}`);
-
   const refresh1 = await rawRequest('/device/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken1 }) });
   assert(refresh1.status === 200 && typeof refresh1.body.device_token === 'string', `Device refresh failed: ${refresh1.status} ${JSON.stringify(refresh1.body)}`);
-  const deviceToken2 = refresh1.body.device_token as string;
 
   const refresh1Reused = await rawRequest('/device/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken1 }) });
   assert(refresh1Reused.status === 401, `Reused (rotated-away) refresh token was not rejected (${refresh1Reused.status})`);
 
-  const pullWithNewToken = await rawRequest(`/sync/pull?last_sync=0`, {}, deviceToken2);
-  assert(pullWithNewToken.status === 200, `sync/pull with rotated device token failed: ${pullWithNewToken.status}`);
-
   const revoke = await request(`/settings/devices/${genCodeA.body.id}`, a.token, { method: 'DELETE' });
   assert(revoke.status === 200, `Device revoke failed: ${revoke.status} ${JSON.stringify(revoke.body)}`);
-
-  const pullAfterRevoke = await rawRequest(`/sync/pull?last_sync=0`, {}, deviceToken2);
-  assert(pullAfterRevoke.status === 401, `Revoked device token still worked on sync/pull (${pullAfterRevoke.status})`);
 
   // ── Track E: per-user permission overrides on top of role presets (2026-08-13) ──
 

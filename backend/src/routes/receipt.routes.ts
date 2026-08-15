@@ -11,17 +11,14 @@ const sendSchema = z.object({
   message: z.string().min(1),
 });
 
-// POST /receipt/send - audit trail only. Hanout Express sends the WhatsApp
-// message itself (opens a wa.me deep link client-side); this just logs that
-// it happened. sale_id is the client-generated UUID from sync/batch
-// (Sale.externalId) - if that sale hasn't synced yet, log without a link
-// rather than fail a transaction the client already made.
+// POST /receipt/send - audit trail only. Logs receipt sending.
 router.post('/send', async (req: DeviceRequest, res, next) => {
   try {
     const data = sendSchema.parse(req.body);
     const { companyId } = req.device!;
 
-    const sale = await prisma.sale.findFirst({ where: { externalId: data.sale_id, companyId } });
+    const saleIdNum = Number(data.sale_id);
+    const sale = !isNaN(saleIdNum) ? await prisma.sale.findFirst({ where: { id: saleIdNum, companyId } }) : null;
     if (sale) {
       await prisma.documentAndNote.create({
         data: {
