@@ -11,8 +11,6 @@ enum UserRole {
   ADMIN
   MANAGER
   CASHIER
-  WAITER
-  KITCHEN
   USER
 }
 
@@ -24,8 +22,6 @@ enum ContactType {
 
 enum ProductType {
   RETAIL
-  MENU_ITEM
-  INGREDIENT
   SERVICE
   BUNDLE
 }
@@ -45,16 +41,11 @@ enum CashMovementType {
 
 enum SaleChannel {
   RETAIL
-  DINE_IN
-  TAKEAWAY
-  DELIVERY
 }
 
 enum SaleStatus {
   DRAFT
   SUSPENDED
-  KITCHEN
-  READY
   FINAL
   CANCELLED
   PARTIALLY_RETURNED
