@@ -214,8 +214,7 @@ router.get('/:id/ledger', requireAuth, async (req: AuthRequest, res, next) => {
 // off. Operates at the customer level, not per-sale: Contact.balance is
 // already an aggregate across all of a customer's outstanding sales (that's
 // how the CREDIT-finalize increment itself works), so there is no per-sale
-// "amount still owed" to settle against - matches the existing
-// contactapi-payment precedent in connector.routes.ts, done properly here
+// "amount still owed" to settle against - done properly here
 // with Track D auto-posting and an audit trail. Payment isn't used for the
 // record (it's FK'd to one specific saleId, and this deliberately isn't
 // tied to one) - DocumentAndNote carries the audit trail instead.

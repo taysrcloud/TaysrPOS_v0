@@ -34,7 +34,6 @@ import expenseRoutes from './routes/expense.routes.js';
 import purchaseRoutes from './routes/purchase.routes.js';
 import registerRoutes from './routes/register.routes.js';
 import oauthRoutes from './routes/oauth.routes.js';
-import connectorRoutes from './routes/connector.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import invoiceRoutes from './routes/invoice.routes.js';
@@ -48,7 +47,6 @@ import notificationRoutes from './routes/notification.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import currencyRoutes from './routes/currency.routes.js';
 import deviceRoutes from './routes/device.routes.js';
-import syncRoutes from './routes/sync.routes.js';
 import receiptRoutes from './routes/receipt.routes.js';
 import warrantyRoutes from './routes/warranty.routes.js';
 import variationTemplateRoutes from './routes/variation-template.routes.js';
@@ -82,13 +80,11 @@ app.use('/api/discounts', requireAuth, discountRoutes);
 app.use('/api/imports', requireAuth, importRoutes);
 app.use('/api/platform', platformRoutes);
 app.use('/oauth', oauthRoutes);
-app.use('/connector/api', requireAuth, connectorRoutes);
 // Track G: Hanout Express device auth + sync, separate from the user-JWT
 // paths above - see TRACE.md 2026-08-13 entry for the full contract (sourced
 // from the actual taysrcloud/TaysrHanout Retrofit interfaces, not the legacy
 // UltimatePOS Connector module connector.routes.ts above was aimed at).
 app.use('/device', deviceRoutes);
-app.use('/sync', requireDevice, syncRoutes);
 app.use('/receipt', requireDevice, receiptRoutes);
 
 app.get('/api/catalog/modules', (_req, res) => {
