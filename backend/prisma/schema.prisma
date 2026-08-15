@@ -452,7 +452,6 @@ model Sale {
   consolidatedInvoice   ConsolidatedInvoice? @relation("ConsolidatedInvoiceSales", fields: [consolidatedInvoiceId], references: [id])
   originalSaleId Int?
   commissionAgentId Int?
-  externalId    String?       @unique
   currencyId    Int?
   exchangeRate  Decimal?      @db.Decimal(12, 6)
   foreignTotal  Decimal?      @db.Decimal(12, 2)
