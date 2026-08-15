@@ -1,0 +1,41 @@
+{
+  "name": "@taysr/erp-v1-backend",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:push": "PRISMA_SCHEMA_ENGINE_BINARY=$PREFIX/tmp/prisma-arm64/schema-engine-wrapper.sh prisma db push --schema prisma/schema.prisma",
+    "db:setup": "bash scripts/setup-local-postgres.sh",
+    "test:tenant-isolation": "tsx scripts/tenant-isolation-smoke.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.15.3",
+    "pdfkit": "^0.19.1",
+    "pg": "^8.22.0",
+    "prisma": "^7.8.0",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.0.0",
+    "@types/pdfkit": "^0.17.6"
+  }
+}
