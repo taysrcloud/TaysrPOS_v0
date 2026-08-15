@@ -21,10 +21,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({
-    service: 'TaysrPOS v0 API',
+    service: 'Taysr ERP v1 API',
     status: 'ok',
     version: '0.1.0',
-    modules: ['retail', 'restaurant', 'inventory', 'cash-register'],
+    modules: ['retail', 'inventory', 'cash-register'],
   });
 });
 
@@ -95,15 +95,13 @@ app.use('/receipt', requireDevice, receiptRoutes);
 
 app.get('/api/catalog/modules', (_req, res) => {
   res.json({
-    enabled: ['retail', 'restaurant'],
+    enabled: ['retail'],
     planned: [
       'products',
       'customers',
       'suppliers',
       'stock',
-      'pos-sales',
-      'restaurant-floor',
-      'kitchen-orders',
+      'pos-sales',
       'cash-register',
       'reports',
     ],
@@ -133,7 +131,7 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
 
 const port = Number(process.env.PORT || 4400);
 app.listen(port, () => {
-  console.log(`TaysrPOS v0 API listening on ${port}`);
+  console.log(`Taysr ERP v1 API listening on ${port}`);
 });
 
 

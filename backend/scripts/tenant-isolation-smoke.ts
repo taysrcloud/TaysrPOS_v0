@@ -39,7 +39,7 @@ const assert = (condition: unknown, message: string) => {
 
 const createTenant = async (suffix: string) => {
   const company = await prisma.company.create({
-    data: { accountId: `SMOKE-${marker}-${suffix}`, name: `Tenant ${suffix} ${marker}`, restaurantEnabled: true },
+    data: { accountId: `SMOKE-${marker}-${suffix}`, name: `Tenant ${suffix} ${marker}` },
   });
   const passwordHash = await bcrypt.hash('Smoke123!', 4);
   const user = await prisma.user.create({
@@ -514,7 +514,7 @@ try {
 
   const saveSettingsA = await request('/settings', a.token, {
     method: 'PUT',
-    body: JSON.stringify({ companyName: a.company.name, currency: 'MAD', defaultTva: '14', ticketFooter: `Footer A ${marker}`, restaurantEnabled: true }),
+    body: JSON.stringify({ companyName: a.company.name, currency: 'MAD', defaultTva: '14', ticketFooter: `Footer A ${marker}` }),
   });
   const settingsA = await request('/settings', a.token);
   const settingsB = await request('/settings', b.token);

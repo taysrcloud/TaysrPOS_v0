@@ -18,7 +18,6 @@ const saleSchema = z.object({
   status: z.enum(['FINAL', 'DRAFT', 'SUSPENDED', 'QUOTE']).default('FINAL'),
   discountRate: z.coerce.number().min(0).max(100).default(0),
   locationId: z.coerce.number().int().positive().optional(),
-  tableId: z.coerce.number().int().positive().optional(),
   // Track H: optional foreign-currency record. total/subtotal/taxTotal stay
   // in MAD always (computed from items exactly as before) - this just
   // resolves and snapshots what that MAD total equals in another currency.
@@ -251,11 +250,6 @@ router.post('/', async (req, res) => {
     }
     if (!warehouse) return res.status(400).json({ message: 'Warehouse not found' });
 
-    if (data.tableId) {
-      const table = await prisma.restaurantTable.findFirst({ where: { id: data.tableId, companyId } });
-      if (!table) return res.status(404).json({ message: 'Table introuvable' });
-    }
-
     const productIds = [...new Set(data.items.map(item => item.productId))];
     const products = await prisma.product.findMany({
       where: { companyId, id: { in: productIds }, isActive: true },
@@ -373,7 +367,6 @@ router.post('/', async (req, res) => {
           currencyId,
           exchangeRate,
           foreignTotal,
-          tableId: data.tableId,
           finalizedAt: shouldFinalize ? new Date() : null,
           items: {
             create: rawLines.map(line => ({
@@ -606,15 +599,6 @@ router.delete('/:id', requireAuth, async (req: any, res: any, next) => {
   }
 });
 
-router.patch('/:id/kitchen', requireAuth, async (req: any, res: any, next) => {
-  try {
-    const { id } = req.params;
-    const { kitchenStatus } = req.body;
-    
-    // We will update the status of the Sale to READY if that's what's sent, or update items.
-    // For simplicity, we just mark the sale status for now since the UI uses it.
-    if (kitchenStatus === 'READY') {
-      const ownedSale = await prisma.sale.findFirst({ where: { id: Number(id), companyId: req.user.companyId } });
       if (!ownedSale) return res.status(404).json({ message: 'Sale not found' });
       const sale = await prisma.sale.update({
         where: { id: ownedSale.id },
@@ -657,7 +641,6 @@ router.post('/:id/split', requireAuth, async (req: any, res: any, next) => {
           companyId,
           locationId: originalSale.locationId,
           customerId: originalSale.customerId,
-          tableId: originalSale.tableId,
           channel: originalSale.channel,
           status: originalSale.status,
           paymentStatus: originalSale.paymentStatus,

@@ -14,7 +14,7 @@ const productSchema = z.object({
   barcode: z.string().trim().optional().nullable(),
   sku: z.string().trim().optional().nullable(),
   initialStock: z.coerce.number().min(0).default(0),
-  type: z.enum(['RETAIL', 'MENU_ITEM', 'INGREDIENT', 'SERVICE', 'BUNDLE']).default('RETAIL'),
+  type: z.enum(['RETAIL', 'SERVICE', 'BUNDLE']).default('RETAIL'),
   purchasePrice: z.coerce.number().min(0).default(0),
   brandName: z.string().trim().optional().nullable(),
   unitName: z.string().trim().optional().nullable(),
@@ -209,7 +209,6 @@ router.get('/', requireAuth, async (req: any, res: any) => {
       stats: {
         total: normalized.length,
         lowStock: normalized.filter(product => product.trackStock && product.stock <= product.lowStockAlert).length,
-        restaurantItems: normalized.filter(product => product.type === 'MENU_ITEM').length,
         retailItems: normalized.filter(product => product.type === 'RETAIL').length,
       },
     });
@@ -275,7 +274,6 @@ router.post('/', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: any
           tvaRate: data.tvaRate,
           trackStock: data.trackStock,
           lowStockAlert: data.lowStockAlert,
-          isKitchenItem: data.type === 'MENU_ITEM' ? data.isKitchenItem : false,
           isVariable: data.isVariable,
           variationOptions: data.variationOptions ? data.variationOptions : undefined,
         },
@@ -423,7 +421,6 @@ router.put('/:id', requireAuth, requireRole(['ADMIN', 'MANAGER']), async (req: a
           tvaRate: data.tvaRate,
           trackStock: data.trackStock,
           lowStockAlert: data.lowStockAlert,
-          isKitchenItem: data.type === 'MENU_ITEM' ? data.isKitchenItem : false,
           isVariable: data.isVariable,
           variationOptions: data.variationOptions || undefined,
         },

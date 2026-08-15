@@ -22,7 +22,6 @@ async function seed() {
       name: 'TaysrPOS Demo',
       legalName: 'TaysrPOS Demo SARL',
       city: 'Casablanca',
-      restaurantEnabled: false,
     },
   });
   console.log(`  Company: ${company.name} (id=${company.id})`);
