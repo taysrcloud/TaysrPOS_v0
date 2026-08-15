@@ -127,7 +127,7 @@ router.post('/login', async (req, res) => {
         accountId: targetAccountId,
         planLimits: targetPlanLimits
       },
-      company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId, restaurantEnabled: tenantUser.company.restaurantEnabled },
+      company: { id: tenantUser.company.id, name: tenantUser.company.name, accountId: targetAccountId },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

@@ -17,8 +17,6 @@ const sanitizeUsername = (value: string) =>
 const mapPlatformRole = (role?: string): UserRole => {
   if (role === 'ADMIN') return UserRole.ADMIN;
   if (role === 'MANAGER') return UserRole.MANAGER;
-  if (role === 'WAITER') return UserRole.WAITER;
-  if (role === 'KITCHEN') return UserRole.KITCHEN;
   if (role === 'CASHIER') return UserRole.CASHIER;
   return UserRole.USER;
 };
@@ -46,7 +44,6 @@ const provisionSchema = z.object({
   morocco_cnss: z.string().optional().nullable(),
   modules: z.object({
     pos: z.boolean().optional(),
-    restaurant: z.boolean().optional(),
     invoice: z.boolean().optional(),
     optic: z.boolean().optional(),
     multiWarehouse: z.boolean().optional(),
@@ -72,7 +69,6 @@ router.post('/provision-tenant', async (req, res) => {
     const role = mapPlatformRole(data.role);
     const modules = {
       pos: data.modules?.pos ?? true,
-      restaurant: data.modules?.restaurant ?? Boolean(data.features?.restaurant),
       invoice: data.modules?.invoice ?? Boolean(data.features?.invoice),
       optic: data.modules?.optic ?? Boolean(data.features?.optic),
       multiWarehouse: data.modules?.multiWarehouse ?? Boolean(data.features?.multiBranches || data.features?.multiWarehouses),
@@ -97,7 +93,6 @@ router.post('/provision-tenant', async (req, res) => {
         cnss: data.morocco_cnss || null,
         defaultCurrency: data.currency_code || 'MAD',
         posEnabled: modules.pos,
-        restaurantEnabled: modules.restaurant,
         invoiceEnabled: modules.invoice,
         opticEnabled: modules.optic,
         multiWarehouse: modules.multiWarehouse,
@@ -118,7 +113,6 @@ router.post('/provision-tenant', async (req, res) => {
         cnss: data.morocco_cnss || null,
         defaultCurrency: data.currency_code || 'MAD',
         posEnabled: modules.pos,
-        restaurantEnabled: modules.restaurant,
         invoiceEnabled: modules.invoice,
         opticEnabled: modules.optic,
         multiWarehouse: modules.multiWarehouse,

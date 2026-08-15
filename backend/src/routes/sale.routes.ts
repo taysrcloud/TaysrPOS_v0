@@ -599,20 +599,6 @@ router.delete('/:id', requireAuth, async (req: any, res: any, next) => {
   }
 });
 
-      if (!ownedSale) return res.status(404).json({ message: 'Sale not found' });
-      const sale = await prisma.sale.update({
-        where: { id: ownedSale.id },
-        data: { status: 'READY' }
-      });
-      res.json({ success: true, sale: normalizeSale(sale) });
-    } else {
-      res.status(400).json({ message: 'Invalid kitchen status' });
-    }
-  } catch (error) {
-    next(error);
-  }
-});
-
 router.post('/:id/split', requireAuth, async (req: any, res: any, next) => {
   try {
     const { id } = req.params;

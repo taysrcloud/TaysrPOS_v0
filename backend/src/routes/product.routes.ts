@@ -22,7 +22,6 @@ const productSchema = z.object({
   tvaRate: z.coerce.number().min(0).max(100).default(20),
   trackStock: z.coerce.boolean().default(true),
   lowStockAlert: z.coerce.number().min(0).default(0),
-  isKitchenItem: z.coerce.boolean().default(false),
   isVariable: z.coerce.boolean().default(false),
   variationOptions: z.array(z.string()).optional().nullable(),
   variations: z.array(z.object({
@@ -62,7 +61,6 @@ const normalizeProduct = (product: any, locationId?: number) => ({
   brand: product.brand?.name || null,
   imageUrl: product.imageUrl || null,
   unit: product.unit?.shortName || 'pcs',
-  isKitchenItem: product.isKitchenItem,
   isVariable: product.isVariable,
   variationOptions: product.variationOptions,
   variations: product.variations?.map((v: any) => ({

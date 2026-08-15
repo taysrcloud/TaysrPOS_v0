@@ -15,7 +15,7 @@ const sendSchema = z.object({
 // message itself (opens a wa.me deep link client-side); this just logs that
 // it happened. sale_id is the client-generated UUID from sync/batch
 // (Sale.externalId) - if that sale hasn't synced yet, log without a link
-// rather than fail a delivery the client already made.
+// rather than fail a transaction the client already made.
 router.post('/send', async (req: DeviceRequest, res, next) => {
   try {
     const data = sendSchema.parse(req.body);

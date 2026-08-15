@@ -32,7 +32,7 @@ export interface AuthRequest extends Request {
       maxProducts?: number;
       maxLocations?: number;
       maxUsers?: number;
-      modules?: string[]; // e.g. ['RESTAURANT', 'E_COMMERCE']
+      modules?: string[];
     };
   };
 }
