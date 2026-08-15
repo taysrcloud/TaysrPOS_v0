@@ -1,8 +1,8 @@
-﻿# TaysrPOS v0 Blueprint
+# Taysr ERP v1 Blueprint
 
-This app is a clean rebuild of TaysrPOS, not a direct Laravel/Blade port.
+This app is a clean generic ERP and POS platform (Taysr ERP v1), built as a modern TypeScript/React/Postgres application.
 
-The old UltimatePOS/TaysrPOS app remains the reference for business workflows, but the new app should follow the same foundation as TaysrInvoice and TaysrOptic:
+The app follows the Taysr suite architecture:
 
 - TypeScript backend
 - React frontend
@@ -14,34 +14,19 @@ The old UltimatePOS/TaysrPOS app remains the reference for business workflows, b
 
 ## Why Rebuild
 
-The existing POS is useful but structurally different from the rest of the suite:
-
-- Laravel/Blade/MySQL style instead of the TypeScript/React/Postgres stack.
-- Large legacy UI surface with DataTables, old modals, installer pages, and many country/payment modules.
-- Retail, restaurant, stock, accounting, connectors, reports, and configuration are tightly coupled.
-- Moroccan business fields were added as a customization, but they are not first-class in the original architecture.
-
-The v0 goal is to keep the proven workflows and drop the legacy weight.
+This codebase is a clean generic ERP fork (TaysrPOS_v1) derived from TaysrPOS_v0. All restaurant-specific logic (tables, kitchen display, waiters, modifiers) has been removed to produce a streamlined, generic ERP & POS platform for retail, wholesale, and services.
 
 ## Market And Product Signals
 
-Research notes from Moroccan/French POS patterns:
+Research notes from Moroccan/French POS & ERP patterns:
 
-- POS systems need fast touch-friendly checkout, barcode scanner support, receipt printer support, cash drawer workflows, and split/multiple payment modes. PastÃƒÂ¨que documents these common POS expectations.
-- Restaurant POS needs tables, service flow, kitchen display/orders, loyalty or customer history, and centralized back-office reporting. Splash 360 positions kitchen display and restaurant back-office as core restaurant tooling.
-- Modern omnichannel POS products emphasize unified stock, customer loyalty/clienteling, purchase/procurement, reporting, offline mode, and API-first integrations. ADEIZ is a useful benchmark for this broader direction.
+- POS systems need fast touch-friendly checkout, barcode scanner support, receipt printer support, cash drawer workflows, and split/multiple payment modes.
+- Modern omnichannel POS and ERP products emphasize unified stock, customer loyalty/clienteling, purchase/procurement, reporting, offline mode, and API-first integrations.
 - Moroccan company identity must support ICE and related fiscal identifiers. ICE is a unique 15-digit Moroccan company identifier.
-
-Useful references:
-
-- https://fr.wikipedia.org/wiki/Past%C3%A8que_%28logiciel%29
-- https://fr.wikipedia.org/wiki/SAS_SPLASH
-- https://fr.wikipedia.org/wiki/ADEIZ_%28%C3%A9diteur_de_logiciels%29
-- https://fr.wikipedia.org/wiki/Identification_des_entreprises_au_Maroc
 
 Compliance note: fiscal and invoicing rules should be validated against official Moroccan tax sources before production launch.
 
-## Modules To Keep From UltimatePOS
+## Core ERP Modules
 
 ### Core Retail POS
 
@@ -55,26 +40,12 @@ Compliance note: fiscal and invoicing rules should be validated against official
 - Receipt/ticket print.
 - Sales list with returns and payment follow-up.
 
-### Restaurant Module
-
-Restaurant is not part of the base POS screen. It is an optional module that can be activated per tenant, next to the base POS + ERP module.
-
-- Dining areas and tables.
-- Table occupancy and current open order.
-- Dine-in, takeaway, delivery.
-- Waiter/service staff assignment.
-- Kitchen order status: received, preparing, ready, served, cancelled.
-- Item-level kitchen notes.
-- Product modifiers/options: sizes, toppings, cooking level, extras.
-- Split/merge table orders later, not first MVP.
-- Restaurant sales and waiter reports.
-
 ### Inventory
 
 - Products, categories, brands, units.
-- Base retail products, services, bundles, and stock items. Menu items and ingredients appear only when the Restaurant module is active.
+- Base retail products, services, bundles, and stock items.
 - Purchase cost, sale price, TVA rate.
-- Multi-warehouse support through plan/feature flag.
+- Multi-warehouse support.
 - Stock movements: purchase in, sale out, transfer, adjustment, return.
 - Low-stock alerts.
 - Product stock history.

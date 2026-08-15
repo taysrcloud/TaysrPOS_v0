@@ -1,4 +1,4 @@
-name: taysrpos
+name: taysr-erp-v1
 
 services:
   # ── DB Service (PostgreSQL) ───────────────────────────────────────────────
@@ -8,16 +8,16 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
-      POSTGRES_DB: ${POSTGRES_DB:-taysrpos_v0}
+      POSTGRES_DB: ${POSTGRES_DB:-taysr_erp_v1}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-taysrpos_v0}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-taysr_erp_v1}"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - taysrpos_network
+      - taysr_erp_v1_network
 
   # ── API Service (Backend Express API) ────────────────────────────────────
   api:
@@ -27,25 +27,25 @@ services:
     restart: always
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      PORT: 4400
+      PORT: 4401
       DB_HOST: db
       DB_PORT: 5432
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@db:5432/${POSTGRES_DB:-taysrpos_v0}?schema=public"
-      JWT_SECRET: ${JWT_SECRET:-taysr-pos-production-secret-key-32-characters-minimum}
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@db:5432/${POSTGRES_DB:-taysr_erp_v1}?schema=public"
+      JWT_SECRET: ${JWT_SECRET:-taysr-erp-v1-production-secret-key-32-characters-minimum}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       TAYSRPOS_PROVISIONING_SECRET: ${TAYSRPOS_PROVISIONING_SECRET:-change-this-provisioning-secret}
     expose:
-      - "4400"
+      - "4401"
     depends_on:
       - db
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4400/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4401/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
     networks:
-      - taysrpos_network
+      - taysr_erp_v1_network
       - coolify
 
   # ── WEB Service (Frontend Vite + Nginx) ──────────────────────────────────
@@ -66,14 +66,14 @@ services:
       start_period: 5s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.taysrpos-web-http.rule=Host(`pos.taysr.com`)"
-      - "traefik.http.routers.taysrpos-web-http.entrypoints=http"
-      - "traefik.http.routers.taysrpos-web-https.rule=Host(`pos.taysr.com`)"
-      - "traefik.http.routers.taysrpos-web-https.entrypoints=https"
-      - "traefik.http.routers.taysrpos-web-https.tls=true"
-      - "traefik.http.services.taysrpos-web.loadbalancer.server.port=80"
+      - "traefik.http.routers.taysr-erp-v1-web-http.rule=Host(`erp.taysr.com`)"
+      - "traefik.http.routers.taysr-erp-v1-web-http.entrypoints=http"
+      - "traefik.http.routers.taysr-erp-v1-web-https.rule=Host(`erp.taysr.com`)"
+      - "traefik.http.routers.taysr-erp-v1-web-https.entrypoints=https"
+      - "traefik.http.routers.taysr-erp-v1-web-https.tls=true"
+      - "traefik.http.services.taysr-erp-v1-web.loadbalancer.server.port=80"
     networks:
-      - taysrpos_network
+      - taysr_erp_v1_network
       - coolify
 
 volumes:
@@ -81,8 +81,9 @@ volumes:
     driver: local
 
 networks:
-  taysrpos_network:
+  taysr_erp_v1_network:
     driver: bridge
   coolify:
     name: coolify
     external: true
+

@@ -69,7 +69,7 @@ import './styles.css';
 
 type ProductType = 'RETAIL' | 'SERVICE' | 'BUNDLE';
 type EnabledModule = 'POS';
-export type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Tables' | 'Cuisine' | 'Parametres' | 'Caisses';
+export type PageKey = 'Tableau de bord' | 'POS' | 'Produits' | 'Clients & Fournisseurs' | 'Stock' | 'Achats' | 'Depenses' | 'Ventes' | 'Factures' | 'Paiements' | 'Rapports' | 'Parametres' | 'Caisses';
 export type PaymentMethod = 'CASH' | 'CARD' | 'CREDIT' | 'STORE_CREDIT' | 'MULTI';
 
 export type DashboardConfiguration = {
@@ -440,7 +440,6 @@ export const formatMoney = (value: number) => `${(Number(value) || 0).toLocaleSt
 
 const typeLabel: Record<ProductType, string> = {
   RETAIL: 'Article retail',
-  INGREDIENT: 'Ingredient cuisine',
   SERVICE: 'Service',
   BUNDLE: 'Pack',
 };
@@ -1062,15 +1061,6 @@ const App = () => {
     }
   };
 
-  const loadTables = async () => {
-    try {
-      if (!response.ok) throw new Error('API unavailable');
-      const data = await response.json();
-      if (Array.isArray(data.areas)) setTableGroups(data.areas);
-    } catch {
-      // Expected when the API/database is offline; keep the demo UI usable.
-    }
-  };
 
   const loadSessions = async () => {
     try {
@@ -1154,19 +1144,6 @@ const App = () => {
       setStatus('Groupe tarifaire mis a jour');
     } catch {
       setStatus('Erreur: Impossible de mettre a jour le groupe tarifaire');
-    }
-  };
-
-          }
-          return { ...p, stock: p.stock - cartItem.quantity };
-        };
-        setProducts(current => current.map(stockUpdate));
-    try {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch {
-      // Local fallback already applied
     }
   };
 
@@ -1580,13 +1557,17 @@ const App = () => {
 
   const resumeSale = (sale: SaleRecord) => {
     setCart((sale.lines || []).map(line => {
-      const product = products.find(p => p.id === line.productId) || {
+      const product = products.find(p => p.id === line.productId) || ({
         id: line.productId,
         name: line.name,
         sku: line.sku,
         salePrice: line.unitPrice,
         tvaRate: line.tvaRate,
-      };
+        type: 'RETAIL',
+        purchasePrice: 0,
+        trackStock: false,
+        isActive: true,
+      } as Product);
       let variation = undefined;
       if (line.variationId && product.isVariable) {
          variation = product.variations?.find(v => v.id === line.variationId);
@@ -3559,12 +3540,6 @@ const SettingsDevicesTab = () => {
               <label><span>Devise par défaut</span><select value={companySettings.currency} onChange={e => setCompanySettings(s => ({...s, currency: e.target.value}))} style={{ height: '38px', borderRadius: '8px', border: '1px solid #dbe3ee', padding: '0 12px' }}><option value="MAD">MAD (Dirham)</option><option value="EUR">EUR (Euro)</option><option value="USD">USD (Dollar)</option></select></label>
               <label><span>TVA par défaut (%)</span><input type="number" value={companySettings.defaultTva} onChange={e => setCompanySettings(s => ({...s, defaultTva: e.target.value}))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '10px', flexDirection: 'row', marginTop: '10px' }}><input type="checkbox" checked={companySettings.pricesIncludeTva} onChange={e => setCompanySettings(s => ({...s, pricesIncludeTva: e.target.checked}))} style={{ width: 'auto' }} /> <span>Les prix saisis incluent la TVA (TTC)</span></label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', flexDirection: 'row', marginTop: '16px', padding: '12px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Affiche les modules Tables et Cuisine dans la barre latérale.</span>
-                  </div>
-                </label>
-              )}
               <label style={{ marginTop: '16px' }}>
                 <span>Verrouillage automatique (minutes)</span>
                 <input type="number" min="0" value={companySettings.autoLockMinutes} onChange={e => setCompanySettings(s => ({...s, autoLockMinutes: Number(e.target.value)}))} style={{ marginTop: '4px' }} />
@@ -3992,7 +3967,7 @@ const SettingsDevicesTab = () => {
     reportsTab, setReportsTab, reportPeriod, setReportPeriod,
     dashboardLocationFilter, setDashboardLocationFilter,
     apiFetch, setStatus, setCurrentLocationId,
-    selectedTable, setSelectedTable, clearCart, setPage, isFullscreen, setIsFullscreen,
+    clearCart, setPage, isFullscreen, setIsFullscreen,
     customer, setCustomer, openContactModal, productSearchInputRef, search, setSearch,
     cart, setCart, addToCart, updateCartQty, categories, showRecent,
     rolePermissions, currentUser, orderDiscountInputRef, discountRate, setDiscountRate,

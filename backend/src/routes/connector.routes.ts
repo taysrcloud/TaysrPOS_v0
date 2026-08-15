@@ -196,7 +196,7 @@ router.post('/sell', async (req: AuthRequest, res, next) => {
     const productCount = await prisma.product.count({ where: { companyId, id: { in: productIds } } });
     if (productCount !== productIds.length) return res.status(404).json({ message: 'Product not found' });
     if (!customerId) {
-      const walkIn = await prisma.contact.findFirst({ where: { companyId, name: 'Client comptoir' } });
+      const walkIn = await prisma.contact.findFirst({ where: { companyId, fullName: 'Client comptoir' } });
       customerId = walkIn?.id || null;
     }
 
@@ -205,11 +205,11 @@ router.post('/sell', async (req: AuthRequest, res, next) => {
         companyId,
         customerId: customerId || undefined,
         locationId: body.location_id || null,
-        userId: req.user!.userId,
+        cashierId: req.user!.userId,
         status: 'FINAL', // Hanout-express syncs finalized sales
         paymentStatus: body.payment && body.payment.length > 0 ? 'PAID' : 'UNPAID',
         total: body.final_total || 0,
-        subTotal: body.final_total || 0, // Ignoring tax details for now
+        subtotal: body.final_total || 0, // Ignoring tax details for now
         ticketNumber: `MOB-${Date.now()}`,
         items: {
           create: (body.products || []).map((p: any) => ({
