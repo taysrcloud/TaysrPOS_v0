@@ -1,4 +1,4 @@
-﻿# TaysrPOS v0 Product Decisions
+# TaysrPOS v0 Product Decisions
 
 TaysrPOS v0 should use UltimatePOS as a workflow reference, not as a UX or architecture template.
 
@@ -46,7 +46,7 @@ Keep the business workflows that are proven:
 ## What To Reject Or Hide
 
 > **Superseded 2026-08-12:** this section is overridden by a full-ERP-parity migration decision -
-> accounting complexity, the connector/API module, and the other items below are now in scope. See
+> accounting complexity and the other items below are now in scope. See
 > `/data/data/com.termux/files/home/.claude/plans/jolly-percolating-robin.md` and the matching
 > 2026-08-12 entry in `TRACE.md`. Left in place, not deleted, so the original reasoning stays visible.
 
@@ -57,7 +57,6 @@ Reject or hide the parts that make UltimatePOS feel heavy:
 - Giant settings pages with dozens of unrelated toggles.
 - Global accounting complexity in the POS MVP.
 - Too many payment gateway configurations.
-- Duplicated connector/API modules.
 - Restaurant settings shown to retail-only accounts.
 - Advanced product fields on the main add-product page.
 - Any form that requires scrolling through irrelevant fields before saving.

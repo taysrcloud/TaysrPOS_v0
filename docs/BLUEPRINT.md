@@ -90,7 +90,6 @@ These are not deleted forever, but they should not enter the first clean build:
 - Old installer/update routes.
 - Old public register page.
 - AdminLTE/DataTables UI patterns.
-- Connector API compatibility module.
 - Heavy third-party payment gateway set.
 - Country-specific modules unrelated to Morocco.
 - Complex recurring/subscription invoices.

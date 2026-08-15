@@ -3467,7 +3467,7 @@ const SettingsDevicesTab = () => {
         await apiFetch('/api/settings/devices', { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'Appareil Hanout Mobile' }) 
+          body: JSON.stringify({ name: 'Terminal Mobile' }) 
         }); 
         await load(); 
       }} style={{ marginBottom: '1.5rem' }}>Générer Code d'Activation</button>
