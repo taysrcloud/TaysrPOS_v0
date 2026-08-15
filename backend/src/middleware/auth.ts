@@ -145,8 +145,8 @@ export interface DeviceRequest extends Request {
   };
 }
 
-// Track G: separate auth path for the Hanout Express Android app, which
-// authenticates as a device bound to one Location, not a logged-in User.
+// Track G: separate auth path for handheld/mobile devices, which
+// authenticate as a device bound to one Location, not a logged-in User.
 // Token shape is issued/rotated by device.routes.ts (activate/refresh).
 export const requireDevice = async (req: DeviceRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;

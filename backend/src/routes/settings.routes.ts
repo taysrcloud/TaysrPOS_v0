@@ -7,7 +7,7 @@ import { requireAuth, requireRole, requirePermission, DEFAULT_ROLE_PERMISSIONS, 
 const router = Router();
 const settingsSchema = z.record(z.string(), z.any());
 
-// Track G: device activation-code issuance for the Hanout Express app. Codes
+// Track G: device activation-code issuance for handheld/mobile terminals. Codes
 // are short and human-typeable (excludes 0/O/1/I/L to avoid transcription
 // errors when an admin reads one aloud or writes it on a slip of paper).
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';

@@ -80,10 +80,7 @@ app.use('/api/discounts', requireAuth, discountRoutes);
 app.use('/api/imports', requireAuth, importRoutes);
 app.use('/api/platform', platformRoutes);
 app.use('/oauth', oauthRoutes);
-// Track G: Hanout Express device auth + sync, separate from the user-JWT
-// paths above - see TRACE.md 2026-08-13 entry for the full contract (sourced
-// from the actual taysrcloud/TaysrHanout Retrofit interfaces, not the legacy
-// UltimatePOS Connector module connector.routes.ts above was aimed at).
+// Track G: Device auth, separate from the user-JWT paths above.
 app.use('/device', deviceRoutes);
 app.use('/receipt', requireDevice, receiptRoutes);
 
@@ -95,7 +92,7 @@ app.get('/api/catalog/modules', (_req, res) => {
       'customers',
       'suppliers',
       'stock',
-      'pos-sales',
+      'pos-sales',
       'cash-register',
       'reports',
     ],
@@ -109,7 +106,7 @@ const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
 if (existsSync(frontendIndexPath)) {
   app.use(express.static(frontendDistPath));
-  app.get(/^(?!\/api|\/oauth|\/connector\/api|\/device|\/sync|\/receipt).*/, (_req, res) => {
+  app.get(/^(?!\/api|\/oauth|\/device|\/receipt).*/, (_req, res) => {
     res.sendFile(frontendIndexPath);
   });
 }
