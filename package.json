@@ -7,7 +7,11 @@
   },
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
-    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend"
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
+    "test": "npm run test:security --workspace backend && npm run test:api --workspace backend && npm run test:flows --workspace backend",
+    "test:backend": "npm run test --workspace backend",
+    "test:frontend": "npm run test:e2e --workspace frontend",
+    "test:full": "bash scripts/run-full-verification.sh"
   },
   "workspaces": [
     "backend",

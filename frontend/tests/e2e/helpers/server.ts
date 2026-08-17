@@ -42,7 +42,7 @@ export const ensureAppServers = async (): Promise<RunningServers> => {
     backendProc = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
       cwd: '/data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/backend',
       stdio: 'ignore',
-      env: { ...process.env, PORT: String(backendPort) },
+      env: { ...process.env, NODE_ENV: 'development', PORT: String(backendPort) },
     });
   }
 

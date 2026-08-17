@@ -34,7 +34,7 @@ export async function createTestTenant(suffix: string): Promise<TestTenantContex
 
   const passwordHash = await bcrypt.hash('TestPass123!', 4);
   const roles: UserRole[] = [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.USER];
-  const users: Partial<Record<UserRole, { id: number; username: string; token: string }>> = {};
+  const users: Partial<Record<UserRole, { id: number; username: string; email: string; fullName: string; token: string }>> = {};
 
   for (const role of roles) {
     const username = `${role.toLowerCase()}-${marker}`;
