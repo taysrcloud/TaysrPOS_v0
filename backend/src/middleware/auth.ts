@@ -47,30 +47,30 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     
-    // We optionally verify the user is still active in DB
-    runWithTenantDatabase(decoded.databaseUrl, async () => {
+    let resolvedDbUrl: string | undefined = decoded.databaseUrl;
+    let planLimits = undefined;
+
+    if (decoded.accountId && decoded.platformUserId) {
+      // Verify platform account is still active
+      const memberships = await platformDb.getMemberships(decoded.platformUserId);
+      const membership = memberships.find(m => m.accountId === decoded.accountId);
+      if (!membership || !membership.isActive || membership.status === 'SUSPENDED' || membership.status === 'EXPIRED') {
+        return res.status(403).json({ message: 'Account is suspended, expired, or user access revoked' });
+      }
+      resolvedDbUrl = membership.databaseUrl;
+      planLimits = {
+        maxProducts: membership.maxProducts,
+        maxLocations: membership.maxLocations,
+        maxUsers: membership.maxUsers,
+        modules: normalizeModules(typeof membership.modules === 'string' ? JSON.parse(membership.modules || '[]') : membership.modules),
+      };
+    }
+
+    runWithTenantDatabase(resolvedDbUrl, async () => {
       try {
         const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
         if (!user || !user.isActive) {
           return res.status(401).json({ message: 'User not found or inactive' });
-        }
-
-        let planLimits = undefined;
-
-        if (decoded.accountId) {
-          // Verify platform account is still active
-          const memberships = await platformDb.getMemberships(decoded.platformUserId);
-          const membership = memberships.find(m => m.accountId === decoded.accountId);
-          if (!membership || !membership.isActive || membership.status === 'SUSPENDED' || membership.status === 'EXPIRED') {
-            return res.status(403).json({ message: 'Account is suspended, expired, or user access revoked' });
-          }
-          
-          planLimits = {
-            maxProducts: membership.maxProducts,
-            maxLocations: membership.maxLocations,
-            maxUsers: membership.maxUsers,
-            modules: normalizeModules(typeof membership.modules === 'string' ? JSON.parse(membership.modules || '[]') : membership.modules),
-          };
         }
 
         req.user = {
@@ -79,7 +79,7 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
           companyId: user.companyId,
           role: user.role,
           accountId: decoded.accountId,
-          databaseUrl: decoded.databaseUrl,
+          databaseUrl: resolvedDbUrl,
           platformUserId: decoded.platformUserId,
           planLimits
         };

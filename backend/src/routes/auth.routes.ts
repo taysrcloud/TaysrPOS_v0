@@ -111,7 +111,6 @@ router.post('/login', async (req, res) => {
         role: tenantUser.role,
         accountId: targetAccountId,
         platformUserId: platformUserId,
-        databaseUrl: targetDatabaseUrl,
       },
       JWT_SECRET,
       { expiresIn: '12h' }
@@ -157,16 +156,8 @@ router.post('/pin-unlock', requireAuth, async (req: AuthRequest, res) => {
       return res.status(401).json({ message: 'Code PIN incorrect' });
     }
 
-    // To properly support tenant context on pin-unlock, we need databaseUrl.
-    // However, pin-unlock should realistically receive the token or auth header, 
-    // or rely on the fact that if they are making a pin unlock they are using the default tenant 
-    // for now. To be robust, pin-unlock should probably be a protected route (`requireAuth`) 
-    // or the client passes the previous token to prove tenant context.
-    // For now we'll issue the token but without `databaseUrl` if we don't have it, 
-    // which relies on the fallback local database. The frontend should ideally re-auth.
-    // In the future, frontend can pass `databaseUrl` from its storage.
     const token = jwt.sign(
-      { userId: user.id, username: user.username, companyId: user.companyId, role: user.role, accountId: req.user!.accountId, platformUserId: req.user!.platformUserId, databaseUrl: req.user!.databaseUrl },
+      { userId: user.id, username: user.username, companyId: user.companyId, role: user.role, accountId: req.user!.accountId, platformUserId: req.user!.platformUserId },
       JWT_SECRET,
       { expiresIn: '12h' }
     );

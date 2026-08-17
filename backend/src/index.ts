@@ -121,8 +121,13 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
 });
 
 const port = Number(process.env.PORT || 4400);
-app.listen(port, () => {
-  console.log(`Taysr ERP v1 API listening on ${port}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, () => {
+    console.log(`Taysr ERP v1 API listening on ${port}`);
+  });
+}
+
+export { app };
+export default app;
 
 

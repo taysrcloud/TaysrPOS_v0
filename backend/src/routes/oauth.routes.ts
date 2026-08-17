@@ -30,14 +30,9 @@ router.post('/token', async (req, res, next) => {
       return res.status(401).json({ error: 'invalid_grant', error_description: 'Invalid credentials' });
     }
 
-    // Usually you'd check bcrypt.compare(password, user.passwordHash)
-    // For demo purposes, we do a basic check if hash starts with $2 (bcrypt)
     let isMatch = false;
-    if (user.passwordHash.startsWith('$2')) {
-      isMatch = await bcrypt.compare(password, user.passwordHash);
-    } else {
-      // Fallback for simple cleartext or dummy hash testing
-      isMatch = password === user.passwordHash || user.passwordHash === 'hash';
+    if (user.passwordHash && user.passwordHash.startsWith('$2')) {
+      isMatch = await bcrypt.compare(password, user.passwordHash).catch(() => false);
     }
 
     if (!isMatch) {
