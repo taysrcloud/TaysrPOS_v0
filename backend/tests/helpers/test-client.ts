@@ -23,6 +23,10 @@ export class TestApiClient {
     return this.request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined, headers }, token);
   }
 
+  async patch<T = any>(path: string, body?: any, token?: string, headers: Record<string, string> = {}): Promise<ApiResponse<T>> {
+    return this.request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined, headers }, token);
+  }
+
   async delete<T = any>(path: string, token?: string, headers: Record<string, string> = {}): Promise<ApiResponse<T>> {
     return this.request<T>(path, { method: 'DELETE', headers }, token);
   }
