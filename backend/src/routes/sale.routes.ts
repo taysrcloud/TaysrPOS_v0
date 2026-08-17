@@ -802,13 +802,14 @@ router.post('/:id/return', requireAuth, async (req: any, res: any, next) => {
     if (!sale) return res.status(404).json({ message: 'Sale not found' });
     if (sale.status === 'RETURNED') return res.status(400).json({ message: 'Sale is already returned' });
 
+    const hasSpecificItems = Boolean(parsed.items && parsed.items.length > 0);
     const requestedByItemId = new Map(parsed.items?.map(i => [i.saleItemId, i.quantity]) ?? []);
     const returnLines: { item: (typeof sale.items)[number]; quantity: number }[] = [];
     for (const item of sale.items) {
       const alreadyReturned = Number(item.returnedQty ?? 0);
       const remaining = Number(item.quantity) - alreadyReturned;
       if (remaining <= 0) continue;
-      const requested = requestedByItemId.has(item.id) ? requestedByItemId.get(item.id)! : remaining;
+      const requested = hasSpecificItems ? (requestedByItemId.get(item.id) ?? 0) : remaining;
       if (requested > remaining) return res.status(400).json({ message: `Quantite superieure au reste retournable pour l'article ${item.id}` });
       if (requested > 0) returnLines.push({ item, quantity: requested });
     }
