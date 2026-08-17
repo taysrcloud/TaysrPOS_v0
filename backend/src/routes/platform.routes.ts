@@ -70,7 +70,6 @@ router.post('/provision-tenant', async (req, res) => {
     const modules = {
       pos: data.modules?.pos ?? true,
       invoice: data.modules?.invoice ?? Boolean(data.features?.invoice),
-      optic: data.modules?.optic ?? Boolean(data.features?.optic),
       multiWarehouse: data.modules?.multiWarehouse ?? Boolean(data.features?.multiBranches || data.features?.multiWarehouses),
     };
 
@@ -94,7 +93,6 @@ router.post('/provision-tenant', async (req, res) => {
         defaultCurrency: data.currency_code || 'MAD',
         posEnabled: modules.pos,
         invoiceEnabled: modules.invoice,
-        opticEnabled: modules.optic,
         multiWarehouse: modules.multiWarehouse,
       },
       create: {
@@ -114,7 +112,6 @@ router.post('/provision-tenant', async (req, res) => {
         defaultCurrency: data.currency_code || 'MAD',
         posEnabled: modules.pos,
         invoiceEnabled: modules.invoice,
-        opticEnabled: modules.optic,
         multiWarehouse: modules.multiWarehouse,
       },
     });

@@ -1,14 +1,17 @@
-# TaysrPOS_v1 Documentation
+# Taysr Core v1 Documentation (TaysrPOS_v1)
 
-Welcome to the documentation for **TaysrPOS_v1** — modern enterprise POS and retail ERP built with TypeScript, Node.js/Express, React 19, Prisma ORM, and PostgreSQL.
+Welcome to the documentation for **Taysr Core v1** — horizontal commercial engine and enterprise ERP/POS platform built with TypeScript, Node.js/Express, React 19, Prisma ORM, and PostgreSQL.
 
 ---
 
 ## 📚 Documentation Index
 
-### 1. Architecture & Design
-- **[System Architecture & Blueprint](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/BLUEPRINT.md)**: Architectural overview, domain models, database schema, and technical stack.
-- **[Product Decisions](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/PRODUCT_DECISIONS.md)**: Core design and business logic decisions (Moroccan fiscal compliance, TVA rates, multi-currency FX snapshots, multi-tenant isolation).
+### 1. Architecture & Domain Contracts
+- **[Core Architecture Specification](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/CORE_ARCHITECTURE.md)**: Architectural principles, service boundaries, and system components.
+- **[Core Domain Boundaries](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/CORE_DOMAIN_BOUNDARIES.md)**: Formal boundary definition separating Core commercial primitives from vertical domain extensions (Taysr Optic).
+- **[Core API Contract (v1)](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/CORE_API_CONTRACT.md)**: Standardized REST API contract across all 27 Core modules.
+- **[System Blueprint](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/BLUEPRINT.md)**: Clean generic ERP & POS domain models and operational workflows.
+- **[Product Decisions](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/PRODUCT_DECISIONS.md)**: Moroccan fiscal compliance, TVA rates, multi-currency FX snapshots, and multi-tenant isolation.
 - **[Coolify & Self-Hosting Deployment](file:///data/data/com.termux/files/home/TaysrERP/TaysrPOS_v1/docs/COOLIFY.md)**: Containerization, Nixpacks, and self-hosted deployment guides.
 
 ### 2. Testing & Quality Assurance

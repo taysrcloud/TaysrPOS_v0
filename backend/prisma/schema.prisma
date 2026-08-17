@@ -95,7 +95,6 @@ model Company {
   receiptFooter     String?
   posEnabled        Boolean  @default(true)
   invoiceEnabled    Boolean  @default(false)
-  opticEnabled      Boolean  @default(false)
   multiWarehouse    Boolean  @default(false)
   settings          Json     @default("{}")
   createdAt         DateTime @default(now())
