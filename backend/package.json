@@ -12,7 +12,12 @@
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:push": "PRISMA_SCHEMA_ENGINE_BINARY=$PREFIX/tmp/prisma-arm64/schema-engine-wrapper.sh prisma db push --schema prisma/schema.prisma",
     "db:setup": "bash scripts/setup-local-postgres.sh",
-    "test:tenant-isolation": "tsx scripts/tenant-isolation-smoke.ts"
+    "test:tenant-isolation": "tsx scripts/tenant-isolation-smoke.ts",
+    "test": "node --test --loader tsx tests/**/*.test.ts",
+    "test:unit": "node --test --loader tsx tests/unit/**/*.test.ts",
+    "test:security": "node --test --loader tsx tests/security/**/*.test.ts",
+    "test:api": "node --test --loader tsx tests/integration/**/*.test.ts",
+    "test:flows": "node --test --loader tsx tests/flows/**/*.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
