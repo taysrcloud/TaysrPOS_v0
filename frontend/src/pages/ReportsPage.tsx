@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, Package, Banknote, Download, CreditCard, ClipboardList, ReceiptText } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line } from '../recharts-stub';
 import { PageHeader } from '../components/PageHeader';
 import { formatMoney, methodLabel, matchesPeriod, apiFetch, type SaleRecord, type PaymentMethod } from '../main';
 import { usePos } from '../context/PosContext';

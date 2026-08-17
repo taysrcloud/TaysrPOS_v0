@@ -53,7 +53,7 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   AreaChart, Area, ComposedChart, LineChart, Line, PieChart, Pie, Cell
-} from 'recharts';
+} from './recharts-stub';
 import { CreatePurchaseModal, PurchaseDetailModal, purchaseStatusLabel, purchaseStatusBadgeClass } from './purchase-modals';
 import { SaleReturnModal } from './sale-modals';
 import { PageHeader } from './components/PageHeader';
@@ -329,7 +329,7 @@ export type Location = {
 
 
 
-const apiBase = (import.meta as any).env?.VITE_API_URL || (window.location.port === '5173' || window.location.port === '5400' ? 'http://127.0.0.1:4400' : '');
+const apiBase = (import.meta as any).env?.VITE_API_URL || (window.location.port === '5173' || window.location.port === '5400' || window.location.port === '5401' ? 'http://127.0.0.1:4400' : '');
 const authTokenKey = 'taysrPOS_token';
 const authUserKey = 'taysrPOS_user';
 

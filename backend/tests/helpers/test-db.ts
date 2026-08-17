@@ -62,7 +62,7 @@ export async function createTestTenant(suffix: string): Promise<TestTenantContex
       { expiresIn: '1h' }
     );
 
-    users[role] = { id: user.id, username: user.username, token };
+    users[role] = { id: user.id, username: user.username, email: user.email!, fullName: user.fullName, token };
   }
 
   const location = await prisma.location.create({

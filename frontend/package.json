@@ -11,14 +11,14 @@
     "build": "tsc -b && vite build --config vite.config.ts --configLoader native",
     "typecheck": "tsc -b --pretty false",
     "browser:setup": "bash scripts/setup-headless-browser.sh",
-    "screenshot": "node scripts/screenshot.mjs"
+    "screenshot": "node scripts/screenshot.mjs",
+    "test:e2e": "node --import tsx --test tests/e2e/**/*.e2e.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^1.21.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "recharts": "^3.9.0"
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",
